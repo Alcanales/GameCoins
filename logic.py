@@ -11,6 +11,7 @@ JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
 
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
+GAMECOIN_MULTIPLIER = 0.50
 MIN_PURCHASE_USD = 1.19
 STAKE_PRICE_THRESHOLD = 10.0
 
@@ -63,6 +64,8 @@ def procesar_csv_manabox(file_content: bytes):
         df["scryfall_market_price"] = df.apply(get_current_price, axis=1)
 
     df["cash_buy_price_clp"] = (df["purchase_price"] * USD_TO_CLP * CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
+    
+    df["gamecoin_price"] = (df["purchase_price"] * USD_TO_CLP * GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
 
     def clasificar(row):
         price = row["purchase_price"]
@@ -77,7 +80,7 @@ def procesar_csv_manabox(file_content: bytes):
     df["categoria"], df["buy_decision"] = res[0], res[1]
     df["sort_rank"] = df["categoria"].map({"compra": 1, "estaca": 2, "no_compra": 3})
     
-    cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "buy_decision", "categoria"]
+    cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria"]
     return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[cols].fillna("").to_dict(orient="records")
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
