@@ -93,7 +93,6 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
         
     df["cash_buy_price_clp"] = (df["purchase_price"] * USD_TO_CLP * CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
     df["gamecoin_price"] = (df["purchase_price"] * USD_TO_CLP * GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
-
     if internal_mode:
         df = enrich_with_stock(df)
     else:
