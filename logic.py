@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
 
+# Variables de Entorno y Configuración
 JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
 JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
 JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
@@ -16,6 +17,7 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 TARGET_EMAIL = "contacto@gamequest.cl"
 
+# Constantes de Negocio
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
 GAMECOIN_MULTIPLIER = 0.50
