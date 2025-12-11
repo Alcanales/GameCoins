@@ -10,6 +10,7 @@ from models import GameCoinUser
 from logic import procesar_csv_manabox, sincronizar_clientes_jumpseller, crear_cupom_jumpseller, enviar_correo_buylist, actualizar_orden_jumpseller
 
 Base.metadata.create_all(bind=engine)
+
 app = FastAPI()
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
@@ -47,15 +48,18 @@ class BuylistSubmitRequest(BaseModel):
     total_clp: str
     total_gc: str
 
+
 @app.get("/")
-def home(): return {"status": "GameQuest API Online"}
+def home():
+    return {"status": "GameQuest API Online"}
 
 @app.post("/api/analizar")
 async def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     content = await file.read()
     is_internal = (mode == "internal")
     res = procesar_csv_manabox(content, internal_mode=is_internal)
-    if isinstance(res, dict) and "error" in res: raise HTTPException(400, res["error"])
+    if isinstance(res, dict) and "error" in res:
+        raise HTTPException(400, res["error"])
     return {"data": res}
 
 @app.post("/api/enviar_buylist")
@@ -71,9 +75,14 @@ def consultar_saldo(email: str, db: Session = Depends(get_db)):
 def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     monto = int(payload.monto)
-    if monto <= 0: raise HTTPException(400, "Monto inválido")
+    
+    if monto <= 0:
+        raise HTTPException(400, "Monto inválido")
+    
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    if not user or user.saldo < monto: raise HTTPException(400, "Saldo insuficiente")
+    
+    if not user or user.saldo < monto:
+        raise HTTPException(400, "Saldo insuficiente")
     
     suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     codigo = f"GC-{suffix}"
@@ -82,7 +91,9 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
         user.saldo -= monto
         db.commit()
         return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
-    else: raise HTTPException(500, "Error creando cupón")
+    else:
+        raise HTTPException(500, "Error creando cupón en la tienda")
+
 
 @app.get("/admin/users")
 def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
@@ -92,14 +103,19 @@ def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends
 def actualizar_saldo(payload: UpdateRequest, auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+    
     if not user:
-        if payload.accion == "restar": raise HTTPException(404, "Usuario nuevo, no se puede restar.")
+        if payload.accion == "restar":
+            raise HTTPException(404, "Usuario nuevo, no se puede restar saldo.")
         user = GameCoinUser(email=email, saldo=0)
         db.add(user)
-    if payload.accion == "sumar": user.saldo += payload.monto
-    elif payload.accion == "restar": 
+    
+    if payload.accion == "sumar":
+        user.saldo += payload.monto
+    elif payload.accion == "restar":
         user.saldo -= payload.monto
         if user.saldo < 0: user.saldo = 0
+    
     db.commit()
     return {"msg": "Actualizado", "nuevo_saldo": user.saldo}
 
@@ -113,6 +129,7 @@ def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), d
     db.commit()
     return {"msg": "Eliminado"}
 
+
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depends(get_db)):
     order = payload.get("order", {})
@@ -123,6 +140,7 @@ async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depen
     if status == "Pending" and "GameCoins" in payment_method:
         customer_email = order.get("customer", {}).get("email", "").strip().lower()
         total_order = float(order.get("total", 0))
+        
         user = db.query(GameCoinUser).filter(GameCoinUser.email == customer_email).first()
         
         if user and user.saldo >= total_order:
@@ -134,4 +152,5 @@ async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depen
             saldo_actual = user.saldo if user else 0
             msg = f"Rechazado. Saldo insuficiente (Tiene: ${saldo_actual}, Requiere: ${int(total_order)})"
             actualizar_orden_jumpseller(order_id, "canceled", msg)
+
     return {"status": "ok"}
