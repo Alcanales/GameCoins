@@ -13,8 +13,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_USER = os.environ.get("ADMIN_USER", "Tomas_1_2_3")
+ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "GameQuest2025_1")
 
 origins = ["*"]
 app.add_middleware(
