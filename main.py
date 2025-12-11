@@ -9,13 +9,16 @@ from database import engine, Base, get_db
 from models import GameCoinUser
 from logic import procesar_csv_manabox, sincronizar_clientes_jumpseller, crear_cupom_jumpseller, enviar_correo_buylist, actualizar_orden_jumpseller
 
+# Inicializar Base de Datos
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# Credenciales de Administrador
 ADMIN_USER = os.environ.get("ADMIN_USER", "Tomas_1_2_3")
 ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "GameQuest2025_1")
 
+# Configuración de CORS
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -25,11 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dependencia de Seguridad
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if x_admin_user != ADMIN_USER or x_admin_pass != ADMIN_PASS:
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     return True
 
+# Modelos de Datos
 class UpdateRequest(BaseModel):
     email: str
     monto: int
@@ -48,7 +53,7 @@ class BuylistSubmitRequest(BaseModel):
     total_clp: str
     total_gc: str
 
-
+# Rutas de la API
 @app.get("/")
 def home():
     return {"status": "GameQuest API Online"}
@@ -84,6 +89,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     if not user or user.saldo < monto:
         raise HTTPException(400, "Saldo insuficiente")
     
+    # Generar código único
     suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     codigo = f"GC-{suffix}"
     
@@ -94,7 +100,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     else:
         raise HTTPException(500, "Error creando cupón en la tienda")
 
-
+# Rutas de Administración
 @app.get("/admin/users")
 def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
@@ -129,7 +135,7 @@ def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), d
     db.commit()
     return {"msg": "Eliminado"}
 
-
+# Webhook Jumpseller
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depends(get_db)):
     order = payload.get("order", {})
