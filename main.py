@@ -1,26 +1,21 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Body
+import random
+import string
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import engine, Base, get_db
 from models import GameCoinUser
-from logic import procesar_csv_manabox, sincronizar_clientes_jumpseller
+from logic import procesar_csv_manabox, sincronizar_clientes_jumpseller, crear_cupom_jumpseller, enviar_correo_buylist, actualizar_orden_jumpseller
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "PASSWORD_TEMPORAL")
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-origins = [
-    "https://www.gamequest.cl",
-    "https://gamequest.cl",
-    "https://gamequest.jumpseller.com",
-    "https://www.pelvium.cl",
-    "http://localhost:8000",
-    "*"
-]
-
+origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -28,6 +23,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != ADMIN_USER or x_admin_pass != ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    return True
 
 class UpdateRequest(BaseModel):
     email: str
@@ -37,54 +37,101 @@ class UpdateRequest(BaseModel):
 class DeleteRequest(BaseModel):
     user_id: int
 
+class CanjeRequest(BaseModel):
+    email: str
+    monto: int
+
+class BuylistSubmitRequest(BaseModel):
+    cliente: dict
+    cartas: list
+    total_clp: str
+    total_gc: str
+
 @app.get("/")
 def home(): return {"status": "GameQuest API Online"}
 
 @app.post("/api/analizar")
-async def buylist_analisis(file: UploadFile = File(...)):
+async def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     content = await file.read()
-    res = procesar_csv_manabox(content)
-    if "error" in res: raise HTTPException(400, res["error"])
+    is_internal = (mode == "internal")
+    res = procesar_csv_manabox(content, internal_mode=is_internal)
+    if isinstance(res, dict) and "error" in res: raise HTTPException(400, res["error"])
     return {"data": res}
 
+@app.post("/api/enviar_buylist")
+def submit_buylist(payload: BuylistSubmitRequest):
+    return enviar_correo_buylist(payload.cliente, payload.cartas, payload.total_clp, payload.total_gc)
+
+@app.get("/api/saldo/{email}")
+def consultar_saldo(email: str, db: Session = Depends(get_db)):
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
+    return {"email": email, "saldo": user.saldo if user else 0}
+
+@app.post("/api/canjear")
+def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    monto = int(payload.monto)
+    if monto <= 0: raise HTTPException(400, "Monto inválido")
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+    if not user or user.saldo < monto: raise HTTPException(400, "Saldo insuficiente")
+    
+    suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    codigo = f"GC-{suffix}"
+    
+    if crear_cupom_jumpseller(codigo, monto):
+        user.saldo -= monto
+        db.commit()
+        return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
+    else: raise HTTPException(500, "Error creando cupón")
+
 @app.get("/admin/users")
-def listar_usuarios(x_admin_key: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_key != ADMIN_PASSWORD: raise HTTPException(401, "Clave incorrecta")
+def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
 
 @app.post("/admin/update")
-def actualizar_saldo(payload: UpdateRequest, x_admin_key: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_key != ADMIN_PASSWORD: raise HTTPException(401, "Clave incorrecta")
-    
+def actualizar_saldo(payload: UpdateRequest, auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    
     if not user:
         if payload.accion == "restar": raise HTTPException(404, "Usuario nuevo, no se puede restar.")
         user = GameCoinUser(email=email, saldo=0)
         db.add(user)
-    
     if payload.accion == "sumar": user.saldo += payload.monto
     elif payload.accion == "restar": 
         user.saldo -= payload.monto
         if user.saldo < 0: user.saldo = 0
-    
     db.commit()
-    return {"msg": "Saldo actualizado", "nuevo_saldo": user.saldo}
+    return {"msg": "Actualizado", "nuevo_saldo": user.saldo}
 
 @app.post("/admin/sync_clients")
-def sync_jumpseller(x_admin_key: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_key != ADMIN_PASSWORD: raise HTTPException(401, "Clave incorrecta")
+def sync_jumpseller(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     return sincronizar_clientes_jumpseller(db, GameCoinUser)
 
 @app.post("/admin/delete")
-def delete_user(payload: DeleteRequest, x_admin_key: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_key != ADMIN_PASSWORD: raise HTTPException(401, "Clave incorrecta")
+def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     db.query(GameCoinUser).filter(GameCoinUser.id == payload.user_id).delete()
     db.commit()
     return {"msg": "Eliminado"}
 
-@app.get("/api/saldo/{email}")
-def consultar_saldo_publico(email: str, db: Session = Depends(get_db)):
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
-    return {"email": email, "saldo": user.saldo if user else 0}
+@app.post("/webhook/order_created")
+async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depends(get_db)):
+    order = payload.get("order", {})
+    order_id = order.get("id")
+    payment_method = order.get("payment_method_name", "")
+    status = order.get("status")
+    
+    if status == "Pending" and "GameCoins" in payment_method:
+        customer_email = order.get("customer", {}).get("email", "").strip().lower()
+        total_order = float(order.get("total", 0))
+        user = db.query(GameCoinUser).filter(GameCoinUser.email == customer_email).first()
+        
+        if user and user.saldo >= total_order:
+            user.saldo -= int(total_order)
+            db.commit()
+            nota = f"PAGO EXITOSO GAMECOINS. Descontado: ${int(total_order)}. Restante: ${user.saldo}"
+            actualizar_orden_jumpseller(order_id, "paid", nota)
+        else:
+            saldo_actual = user.saldo if user else 0
+            msg = f"Rechazado. Saldo insuficiente (Tiene: ${saldo_actual}, Requiere: ${int(total_order)})"
+            actualizar_orden_jumpseller(order_id, "canceled", msg)
+    return {"status": "ok"}
