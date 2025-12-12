@@ -22,11 +22,12 @@ ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "GameQuest2025_1")
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],     
+    allow_credentials=False, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Dependencia de Seguridad
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
