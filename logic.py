@@ -140,15 +140,18 @@ def crear_cupom_jumpseller(codigo, monto):
             "name": f"Canje GameCoins {codigo}",
             "code": codigo,
             "enabled": True,
-            "discount_target": "order",
-            "discount_type": "fixed", 
-            "value": monto,           
+            "type": "fix",              
+            "discount_amount": monto,   
             "minimum_order_amount": 0,
+            "begins_at": datetime.datetime.now().strftime('%Y-%m-%d'),
+            "expires_at": (datetime.datetime.now() + datetime.timedelta(days=2)).strftime('%Y-%m-%d'),
+            "accumulable": False
         }
     }
     
     try:
         r = requests.post(url, json=payload, timeout=10)
+        # Jumpseller devuelve 200 OK o 201 Created
         if r.status_code in [200, 201]:
             return True
         else:
@@ -159,31 +162,54 @@ def crear_cupom_jumpseller(codigo, monto):
         return False
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
-    url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
+    page = 1
+    nuevos = 0
+    actualizados = 0
+    
+    while True:
+        url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50&page={page}"
+        
+        try:
+            resp = requests.get(url, timeout=15)
+            
+            if resp.status_code != 200:
+                print(f"Error sincronizando página {page}: {resp.status_code}")
+                break
+                
             clientes = resp.json()
-            nuevos = 0
+            
+            if not clientes:
+                break
+            
             for c in clientes:
                 cust = c.get("customer", {})
                 email = cust.get("email", "").strip().lower()
+                
                 nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
+                
                 rut = cust.get("tax_id", "")
+                if not rut and "billing_address" in cust:
+                    rut = cust.get("billing_address", {}).get("taxid", "")
                 
                 if email:
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
+                    
                     if user:
                         user.name = nombre
                         user.rut = rut
+                        actualizados += 1
                     else:
                         db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
                         nuevos += 1
+            
             db_session.commit()
-            return {"status": "ok", "nuevos": nuevos}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
-    return {"status": "ok", "nuevos": 0}
+            
+            page += 1
+            
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+            
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "paginas_recorridas": page-1}
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
     url = f"{JUMPSELLER_API_BASE}/orders/{order_id}.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
