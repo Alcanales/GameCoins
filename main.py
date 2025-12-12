@@ -143,6 +143,25 @@ def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), d
     db.commit()
     return {"msg": "Eliminado"}
 
+@app.post("/admin/hard_reset_db")
+def reset_database_completo(auth: bool = Depends(verificar_admin)):
+    """
+    BORRA TODAS LAS TABLAS Y LAS CREA DE NUEVO.
+    USAR SOLO SI LA BASE DE DATOS ESTÁ CORRUPTA O QUIERES LIMPIAR TODO.
+    """
+    try:
+        Base.metadata.drop_all(bind=engine)
+        
+        Base.metadata.create_all(bind=engine)
+        
+        return {
+            "status": "ok", 
+            "msg": "Base de datos purgada y reconstruida exitosamente.", 
+            "tables": list(Base.metadata.tables.keys())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error crítico reseteando DB: {str(e)}")
+
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
     body_bytes = await request.body()
