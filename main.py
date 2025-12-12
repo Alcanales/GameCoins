@@ -85,6 +85,8 @@ def consultar_saldo(email: str, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
     return {"email": email, "saldo": user.saldo if user else 0}
 
+# EN main.py
+
 @app.post("/api/canjear")
 def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
@@ -93,21 +95,37 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     if monto <= 0:
         raise HTTPException(400, "Monto inválido")
     
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    
-    if not user or user.saldo < monto:
-        raise HTTPException(400, "Saldo insuficiente")
-    
-    suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    codigo = f"GC-{suffix}"
-    
-    if crear_cupom_jumpseller(codigo, monto):
+    try:
+        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
+        if not user:
+            raise HTTPException(404, "Usuario no encontrado")
+ 
+        if user.saldo < monto:
+            raise HTTPException(400, "Saldo insuficiente")
+        
         user.saldo -= monto
-        db.commit()
-        return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
-    else:
-        raise HTTPException(500, "Error creando cupón en la tienda")
+        db.commit() 
+        suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        codigo = f"GC-{suffix}"
+        
+        exito_jumpseller = crear_cupom_jumpseller(codigo, monto)
+        
+        if exito_jumpseller:
+            return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
+        else:
+      
+            user_refund = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
+            user_refund.saldo += monto
+            db.commit()
+            
+            raise HTTPException(502, "Error de comunicación con la Tienda. Tus puntos han sido devueltos.")
 
+    except HTTPException as he:
+        raise he 
+    except Exception as e:
+        db.rollback() 
+        print(f"Error crítico en canje: {e}")
+        raise HTTPException(500, "Error interno del servidor")
 
 @app.get("/admin/users")
 def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
