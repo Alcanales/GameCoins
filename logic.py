@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
 
-# Variables de Entorno
+# --- VARIABLES DE ENTORNO ---
 JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
 JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
 JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
@@ -16,11 +16,14 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") 
 TARGET_EMAIL = "contacto@gamequest.cl"
 
+# Variables de Negocio
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
 GAMECOIN_MULTIPLIER = 0.50
 MIN_PURCHASE_USD = 1.19
 STAKE_PRICE_THRESHOLD = 10.0
+
+# --- LÓGICA DE BUYLIST ---
 
 def normalize_card_name(name):
     if not isinstance(name, str): return ""
@@ -84,7 +87,7 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
     df["has_price"] = df["purchase_price"].notna()
     
-    if "scryfall_id" in df.columns: df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"]) # Simplificado para mantener logica anterior si se usaba
+    if "scryfall_id" in df.columns: df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"])
         
     df["cash_buy_price_clp"] = (df["purchase_price"] * USD_TO_CLP * CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
     df["gamecoin_price"] = (df["purchase_price"] * USD_TO_CLP * GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
@@ -127,6 +130,7 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
         return {"status": "ok"}
     except Exception as e: return {"error": str(e)}
 
+# --- JUMPSELLER API HELPERS ---
 
 def crear_cupom_jumpseller(codigo, monto):
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
@@ -136,11 +140,10 @@ def crear_cupom_jumpseller(codigo, monto):
             "name": f"Canje GameCoins {codigo}",
             "code": codigo,
             "enabled": True,
-            "discount_target": "order",  
-            "discount_type": "fixed",    
-            "value": monto,             
+            "discount_target": "order",
+            "discount_type": "fixed", 
+            "value": monto,           
             "minimum_order_amount": 0,
-    
         }
     }
     
@@ -154,7 +157,7 @@ def crear_cupom_jumpseller(codigo, monto):
     except Exception as e:
         print(f"Error conexión: {str(e)}")
         return False
-        
+
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
     try:
