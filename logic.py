@@ -167,6 +167,8 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     nuevos = 0
     actualizados = 0
     
+    print("--- INICIANDO SINCRONIZACIÓN DE CLIENTES ---")
+    
     while True:
         url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50&page={page}"
         
@@ -174,40 +176,57 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             resp = requests.get(url, timeout=15)
             
             if resp.status_code != 200:
-                print(f"Error sincronizando página {page}: {resp.status_code}")
+                print(f"Error Jumpseller página {page}: {resp.status_code}")
                 break
                 
             clientes = resp.json()
-            
             if not clientes:
                 break
             
+            if page == 1 and len(clientes) > 0:
+                print(f"DEBUG - Estructura Cliente Raw: {clientes[0]}")
+
             for c in clientes:
                 cust = c.get("customer", {})
                 email = cust.get("email", "").strip().lower()
                 
                 nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
+                if not nombre: 
+                    bill = cust.get("billing_address", {})
+                    nombre = f"{bill.get('name', '')} {bill.get('surname', '')}".strip()
+                if not nombre: 
+                    ship = cust.get("shipping_address", {})
+                    nombre = f"{ship.get('name', '')} {ship.get('surname', '')}".strip()
                 
                 rut = cust.get("tax_id", "")
+                if not rut: rut = cust.get("taxid", "") 
+                
                 if not rut and "billing_address" in cust:
                     rut = cust.get("billing_address", {}).get("taxid", "")
+                    if not rut: rut = cust.get("billing_address", {}).get("tax_id", "")
+                
+                if not rut and "shipping_address" in cust:
+                    rut = cust.get("shipping_address", {}).get("taxid", "")
+
+                if nombre == " ": nombre = "" 
                 
                 if email:
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
                     
                     if user:
-                        user.name = nombre
-                        user.rut = rut
+                        if nombre: user.name = nombre
+                        if rut: user.rut = rut
                         actualizados += 1
                     else:
                         db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
                         nuevos += 1
             
             db_session.commit()
-            
+            print(f"Página {page} procesada. Nuevos: {nuevos}, Actualizados: {actualizados}")
             page += 1
             
         except Exception as e:
+            print(f"Error Crítico: {str(e)}")
             return {"status": "error", "detail": str(e)}
             
     return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "paginas_recorridas": page-1}
