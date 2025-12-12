@@ -5,6 +5,6 @@ pandas
 requests
 numpy
 sqlalchemy
-psycopg2
+psycopg2-binary
 pydantic
 email-validator
