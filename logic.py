@@ -3,13 +3,12 @@ import requests
 import io
 import numpy as np
 import os
-import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
 
-# Variables de Entorno y Configuración
+# Variables de Entorno
 JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
 JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
 JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
@@ -17,7 +16,6 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") 
 TARGET_EMAIL = "contacto@gamequest.cl"
 
-# Constantes de Negocio
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
 GAMECOIN_MULTIPLIER = 0.50
@@ -78,11 +76,7 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
         df = pd.read_csv(io.BytesIO(file_content))
     except Exception: return {"error": "No se pudo leer el CSV."}
 
-    col_map = { 
-        "Name": "name", "Set code": "set_code", "Foil": "foil", 
-        "Quantity": "quantity", "Purchase price": "purchase_price", 
-        "Scryfall ID": "scryfall_id", "ManaBox ID": "manabox_id" 
-    }
+    col_map = { "Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id", "ManaBox ID": "manabox_id" }
     df = df.rename(columns=col_map)
     if "name" not in df.columns: return {"error": "Falta columna Name."}
 
@@ -90,24 +84,19 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
     df["has_price"] = df["purchase_price"].notna()
     
-    if "scryfall_id" in df.columns:
-        scryfall_data = fetch_scryfall_prices(df["scryfall_id"])
+    if "scryfall_id" in df.columns: df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"]) # Simplificado para mantener logica anterior si se usaba
         
     df["cash_buy_price_clp"] = (df["purchase_price"] * USD_TO_CLP * CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
     df["gamecoin_price"] = (df["purchase_price"] * USD_TO_CLP * GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
 
-    if internal_mode:
-        df = enrich_with_stock(df)
-    else:
-        df["stock_tienda"] = 0
+    if internal_mode: df = enrich_with_stock(df)
+    else: df["stock_tienda"] = 0
 
     def clasificar(row):
         price = row["purchase_price"]
         is_foil = str(row.get("foil", "")).lower() == "foil"
-        if is_foil and price >= STAKE_PRICE_THRESHOLD:
-            return "estaca", "Posible Estaca (Foil Caro)"
-        if not row["has_price"] or price < MIN_PURCHASE_USD:
-            return "no_compra", "Bulk / Bajo Precio"
+        if is_foil and price >= STAKE_PRICE_THRESHOLD: return "estaca", "Posible Estaca (Foil Caro)"
+        if not row["has_price"] or price < MIN_PURCHASE_USD: return "no_compra", "Bulk / Bajo Precio"
         return "compra", "Comprar"
 
     res = df.apply(clasificar, axis=1, result_type="expand")
@@ -119,28 +108,16 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
 
 def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
     if not SMTP_EMAIL or not SMTP_PASSWORD: return {"error": "Correo no configurado"}
-
     msg = MIMEMultipart()
     msg['From'] = SMTP_EMAIL
     msg['To'] = TARGET_EMAIL
     msg['Subject'] = f"Buylist Recibida: {datos_cliente.get('nombre')}"
-
+    
     filas = ""
-    for c in lista_cartas:
-        filas += f"<tr><td style='border:1px solid #ddd;padding:5px'>{c['quantity']}</td><td style='border:1px solid #ddd;padding:5px'>{c['name']} ({c['set_code']}) {c['foil']}</td><td style='border:1px solid #ddd;padding:5px;text-align:right'>${c['price_unit']}</td><td style='border:1px solid #ddd;padding:5px;text-align:right'>${c['price_total']}</td></tr>"
+    for c in lista_cartas: filas += f"<tr><td>{c['quantity']}</td><td>{c['name']} ({c['set_code']})</td><td>${c['price_unit']}</td><td>${c['price_total']}</td></tr>"
 
-    html = f"""
-    <h2>Solicitud de Venta</h2>
-    <p><b>Cliente:</b> {datos_cliente.get('nombre')}<br><b>Email:</b> {datos_cliente.get('email')}<br><b>Fono:</b> {datos_cliente.get('telefono')}<br><b>Mensaje:</b> {datos_cliente.get('comentarios')}</p>
-    <hr>
-    <table style='width:100%;border-collapse:collapse'>
-        <tr style='background:#f0f0f0'><th>Cant</th><th>Carta</th><th>Unit</th><th>Total</th></tr>
-        {filas}
-    </table>
-    <h3>Totales Estimados:<br>Efectivo: {total_clp}<br>GameCoins: {total_gc}</h3>
-    """
+    html = f"<h2>Solicitud de Venta</h2><p>Cliente: {datos_cliente.get('nombre')}<br>Email: {datos_cliente.get('email')}</p><table>{filas}</table><h3>Total: {total_clp} / GC: {total_gc}</h3>"
     msg.attach(MIMEText(html, 'html'))
-
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587)
         s.starttls()
@@ -158,37 +135,36 @@ def crear_cupom_jumpseller(codigo, monto):
             "code": codigo,
             "discount_amount": monto,
             "type": "fix",
-            "status": "active",
-            "usage_limit": 1,
+            "enabled": True,  
             "minimum_order_amount": 0
         }
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
-        return r.status_code in [200, 201]
-    except: return False
-
-def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
-    url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
-    nuevos = 0
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            clientes = resp.json()
-            for c in clientes:
-                email = c.get("customer", {}).get("email", "").strip().lower()
-                if email:
-                    if not db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first():
-                        db_session.add(GameCoinUser_Model(email=email, saldo=0))
-                        nuevos += 1
-            db_session.commit()
-            return {"status": "ok", "nuevos": nuevos}
+        if r.status_code in [200, 201]:
+            return True, ""
+        else:
+            return False, f"Jumpseller rechazó ({r.status_code}): {r.text}"
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return False, f"Error de conexión: {str(e)}"
+
+def sincronizar_clientes_jumpseller(db, Model):
+    url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            nuevos = 0
+            for c in resp.json():
+                email = c['customer']['email'].strip().lower()
+                if not db.query(Model).filter(Model.email==email).first():
+                    db.add(Model(email=email))
+                    nuevos += 1
+            db.commit()
+            return {"status": "ok", "nuevos": nuevos}
+    except: pass
     return {"status": "ok", "nuevos": 0}
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
     url = f"{JUMPSELLER_API_BASE}/orders/{order_id}.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
-    payload = {"order": {"status": estado, "additional_information": notas}}
-    try: requests.put(url, json=payload, timeout=10)
+    try: requests.put(url, json={"order": {"status": estado, "additional_information": notas}}, timeout=10)
     except: pass
