@@ -28,8 +28,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,     
     allow_credentials=True,    
-    allow_methods=["GET", "POST", "OPTIONS"],      
-    allow_headers=["Accept", "Authorization", "Content-Type", "x-admin-user", "x-admin-pass"],       
+    allow_methods=["*"],      
+    allow_headers=["*"],       
 )
 
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
