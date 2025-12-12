@@ -148,20 +148,36 @@ def crear_cupom_jumpseller(codigo, monto):
     except Exception as e:
         return False, f"Error de conexión: {str(e)}"
 
-def sincronizar_clientes_jumpseller(db, Model):
+def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=15)
         if resp.status_code == 200:
+            clientes = resp.json()
             nuevos = 0
-            for c in resp.json():
-                email = c['customer']['email'].strip().lower()
-                if not db.query(Model).filter(Model.email==email).first():
-                    db.add(Model(email=email))
-                    nuevos += 1
-            db.commit()
-            return {"status": "ok", "nuevos": nuevos}
-    except: pass
+            actualizados = 0
+            
+            for c in clientes:
+                cust_data = c.get("customer", {})
+                email = cust_data.get("email", "").strip().lower()
+                
+                nombre = f"{cust_data.get('name', '')} {cust_data.get('surname', '')}".strip()
+                rut = cust_data.get("tax_id", "")
+
+                if email:
+                    user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
+                    if user:
+                        user.name = nombre
+                        user.rut = rut
+                        actualizados += 1
+                    else:
+                        db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
+                        nuevos += 1
+            
+            db_session.commit()
+            return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
     return {"status": "ok", "nuevos": 0}
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
