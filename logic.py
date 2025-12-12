@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import json
 import io
 import numpy as np
 import os
@@ -135,24 +136,44 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
 
 def crear_cupom_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0:
+        print(f"Error Interno: Monto inválido {monto}")
         return False
 
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
     
+    now = datetime.datetime.now()
+    begins = now.strftime('%Y-%m-%d')
+    expires = (now + datetime.timedelta(days=365)).strftime('%Y-%m-%d')
+
     payload = {
         "promotion": {
             "name": f"Canje GameCoins {codigo}",
             "code": codigo,
             "enabled": True,
             "discount_target": "order",
-            "discount_type": "fixed",
-            "discount_amount": monto,
+            "type": "fix",
+            "discount_amount_fix": monto,
             "minimum_order_amount": 0,
-            "begins_at": datetime.datetime.now().strftime('%Y-%m-%d'),
-            "expires_at": (datetime.datetime.now() + datetime.timedelta(days=365)).strftime('%Y-%m-%d'),
+            "begins_at": begins,
+            "expires_at": expires,
             "accumulable": False
         }
     }
+    
+    print(f"DEBUG ENVIO: {json.dumps(payload)}")
+
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+        
+        if r.status_code in [200, 201]:
+            print(f"✅ Cupón creado con éxito: {codigo}")
+            return True
+        else:
+            print(f"❌ RECHAZO JUMPSELLER ({r.status_code}): {r.text}") 
+            return False
+    except Exception as e:
+        print(f"❌ Error conexión: {str(e)}")
+        return False
     
     try:
         r = requests.post(url, json=payload, timeout=10)
