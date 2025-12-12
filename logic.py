@@ -1,16 +1,15 @@
 import pandas as pd
 import requests
-import json
 import io
 import numpy as np
 import os
-import datetime  
+import datetime
+import json
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
 
-# --- VARIABLES DE ENTORNO ---
 JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
 JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
 JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
@@ -18,14 +17,11 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") 
 TARGET_EMAIL = "contacto@gamequest.cl"
 
-# Variables de Negocio
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
 GAMECOIN_MULTIPLIER = 0.50
 MIN_PURCHASE_USD = 1.19
 STAKE_PRICE_THRESHOLD = 10.0
-
-# --- LÓGICA DE BUYLIST ---
 
 def normalize_card_name(name):
     if not isinstance(name, str): return ""
@@ -132,11 +128,8 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
         return {"status": "ok"}
     except Exception as e: return {"error": str(e)}
 
-# --- JUMPSELLER API HELPERS ---
-
 def crear_cupom_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0:
-        print(f"Error Interno: Monto inválido {monto}")
         return False
 
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
@@ -166,24 +159,12 @@ def crear_cupom_jumpseller(codigo, monto):
         r = requests.post(url, json=payload, timeout=10)
         
         if r.status_code in [200, 201]:
-            print(f"✅ Cupón creado con éxito: {codigo}")
             return True
         else:
-            print(f"❌ RECHAZO JUMPSELLER ({r.status_code}): {r.text}") 
+            print(f"ERROR JUMPSELLER: {r.text}") 
             return False
     except Exception as e:
-        print(f"❌ Error conexión: {str(e)}")
-        return False
-    
-    try:
-        r = requests.post(url, json=payload, timeout=10)
-        if r.status_code in [200, 201]:
-            return True
-        else:
-            print(f"Error Jumpseller: {r.text}") 
-            return False
-    except Exception as e:
-        print(f"Error conexión: {str(e)}")
+        print(f"ERROR CONEXION: {str(e)}")
         return False
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
@@ -196,13 +177,9 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
         
         try:
             resp = requests.get(url, timeout=20)
-            
-            if resp.status_code != 200:
-                break
-                
+            if resp.status_code != 200: break
             clientes = resp.json()
-            if not clientes:
-                break
+            if not clientes: break
             
             for c in clientes:
                 try:
@@ -213,10 +190,17 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     bill = cust.get("billing_address") or {} 
                     ship = cust.get("shipping_address") or {}
                     
-                    nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
-                    if not nombre: nombre = f"{bill.get('name', '')} {bill.get('surname', '')}".strip()
-                    if not nombre: nombre = f"{ship.get('name', '')} {ship.get('surname', '')}".strip()
-                    if nombre == " ": nombre = ""
+                    nombre_raw = cust.get('name', '').strip()
+                    apellido_raw = cust.get('surname', '').strip()
+                    
+                    if not nombre_raw: nombre_raw = bill.get('name', '').strip()
+                    if not apellido_raw: apellido_raw = bill.get('surname', '').strip()
+                    
+                    if not nombre_raw: nombre_raw = ship.get('name', '').strip()
+                    if not apellido_raw: apellido_raw = ship.get('surname', '').strip()
+                    
+                    if not nombre_raw: nombre_raw = "Cliente"
+                    if not apellido_raw: apellido_raw = "-"
 
                     rut = cust.get("tax_id") or cust.get("taxid") or ""
                     if not rut: rut = bill.get("taxid") or bill.get("tax_id") or ""
@@ -228,15 +212,26 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                             if "rut" in label or "tax" in label or "identidad" in label:
                                 rut = field.get("value", "")
                                 break
+                    
+                    if not rut:
+                        rut = f"PENDIENTE-{email}"
 
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
                     
                     if user:
-                        if nombre: user.name = nombre
-                        if rut: user.rut = rut
+                        user.name = nombre_raw
+                        user.surname = apellido_raw
+                        if "PENDIENTE" in user.rut and "PENDIENTE" not in rut:
+                            user.rut = rut
                         actualizados += 1
                     else:
-                        db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
+                        db_session.add(GameCoinUser_Model(
+                            email=email, 
+                            saldo=0, 
+                            name=nombre_raw, 
+                            surname=apellido_raw, 
+                            rut=rut
+                        ))
                         nuevos += 1
                         
                 except Exception:
