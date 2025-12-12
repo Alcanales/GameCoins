@@ -133,16 +133,21 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
 
 # --- JUMPSELLER API HELPERS ---
 
+# EN logic.py
+
 def crear_cupom_jumpseller(codigo, monto):
+    # Endpoint de Jumpseller
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
     
+    # Payload corregido según documentación oficial de Jumpseller
     payload = {
         "promotion": {
             "name": f"Canje GameCoins {codigo}",
             "code": codigo,
             "enabled": True,
-            "type": "fix",              
-            "discount_amount": monto,   
+            "discount_target": "order",       
+            "discount_type": "fixed",         
+            "discount_amount_fix": monto,     
             "minimum_order_amount": 0,
             "begins_at": datetime.datetime.now().strftime('%Y-%m-%d'),
             "expires_at": (datetime.datetime.now() + datetime.timedelta(days=2)).strftime('%Y-%m-%d'),
@@ -152,14 +157,15 @@ def crear_cupom_jumpseller(codigo, monto):
     
     try:
         r = requests.post(url, json=payload, timeout=10)
-        # Jumpseller devuelve 200 OK o 201 Created
-        if r.status_code in [200, 201]:
-            return True
-        else:
-            print(f"Error Jumpseller: {r.text}") 
+        
+        # Log para depuración en Render si falla
+        if r.status_code not in [200, 201]:
+            print(f"ERROR JUMPSELLER ({r.status_code}): {r.text}") 
             return False
+            
+        return True
     except Exception as e:
-        print(f"Error conexión: {str(e)}")
+        print(f"ERROR CONEXION JUMPSELLER: {str(e)}")
         return False
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
