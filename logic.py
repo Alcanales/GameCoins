@@ -127,26 +127,34 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
         return {"status": "ok"}
     except Exception as e: return {"error": str(e)}
 
+
 def crear_cupom_jumpseller(codigo, monto):
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
+    
     payload = {
         "promotion": {
-            "name": f"Canje GC {codigo}",
+            "name": f"Canje GameCoins {codigo}",
             "code": codigo,
-            "discount_amount": monto,
-            "type": "fix",
-            "enabled": True,  
-            "minimum_order_amount": 0
+            "enabled": True,
+            "discount_target": "order",  
+            "discount_type": "fixed",    
+            "value": monto,             
+            "minimum_order_amount": 0,
+    
         }
     }
+    
     try:
         r = requests.post(url, json=payload, timeout=10)
         if r.status_code in [200, 201]:
-            return True, ""
+            return True
         else:
-            return False, f"Jumpseller rechazó ({r.status_code}): {r.text}"
+            print(f"Error Jumpseller: {r.text}") 
+            return False
     except Exception as e:
-        return False, f"Error de conexión: {str(e)}"
+        print(f"Error conexión: {str(e)}")
+        return False
+        
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
     try:
