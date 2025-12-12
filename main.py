@@ -1,7 +1,11 @@
 import os
 import random
 import string
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Body
+import hmac
+import hashlib
+import base64
+import json
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -15,7 +19,7 @@ app = FastAPI()
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "Tomas_1_2_3")
 ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "GameQuest2025_1")
-
+JUMPSELLER_HOOKS_TOKEN = os.environ.get("JUMPSELLER_HOOKS_TOKEN", "")
 
 origins = [
     "http://localhost",
@@ -37,6 +41,8 @@ def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     return True
 
+# --- CLASES Y MODELOS ---
+
 class UpdateRequest(BaseModel):
     email: str
     monto: int
@@ -55,7 +61,7 @@ class BuylistSubmitRequest(BaseModel):
     total_clp: str
     total_gc: str
 
-# --- RUTAS DE LA API ---
+# --- RUTAS ---
 
 @app.get("/")
 def home():
@@ -138,13 +144,29 @@ def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), d
     return {"msg": "Eliminado"}
 
 @app.post("/webhook/order_created")
-async def procesar_pago_gamecoins(payload: dict = Body(...), db: Session = Depends(get_db)):
+async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
+    body_bytes = await request.body()
+    signature = request.headers.get("Jumpseller-Hmac-Sha256")
+    
+    if JUMPSELLER_HOOKS_TOKEN and signature:
+        calculated = base64.b64encode(
+            hmac.new(JUMPSELLER_HOOKS_TOKEN.encode(), body_bytes, hashlib.sha256).digest()
+        ).decode()
+        if signature != calculated:
+            print(f"ALERTA SEGURIDAD: Firma inválida. Recibido: {signature}")
+            return {"status": "ignored", "reason": "invalid_signature"}
+
+    try:
+        payload = await request.json()
+    except:
+        return {"status": "error", "msg": "JSON inválido"}
+
     order = payload.get("order", {})
     order_id = order.get("id")
     payment_method = order.get("payment_method_name", "")
-    status = order.get("status")
+    status = order.get("status", "")
     
-    if status == "Pending" and "GameCoins" in payment_method:
+    if "Pending" in status and "GameCoins" in payment_method:
         customer_email = order.get("customer", {}).get("email", "").strip().lower()
         total_order = float(order.get("total", 0))
         
