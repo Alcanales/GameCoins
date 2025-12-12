@@ -41,15 +41,10 @@ def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     return True
 
-# --- CLASES Y MODELOS ---
-
 class UpdateRequest(BaseModel):
     email: str
     monto: int
     accion: str
-
-class DeleteRequest(BaseModel):
-    user_id: int
 
 class CanjeRequest(BaseModel):
     email: str
@@ -60,8 +55,6 @@ class BuylistSubmitRequest(BaseModel):
     cartas: list
     total_clp: str
     total_gc: str
-
-# --- RUTAS ---
 
 @app.get("/")
 def home():
@@ -122,7 +115,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
         db.rollback()
         print(f"Error crítico: {e}")
         raise HTTPException(500, "Error interno del servidor")
-        
+
 @app.get("/admin/users")
 def listar_usuarios(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
@@ -135,7 +128,14 @@ def actualizar_saldo(payload: UpdateRequest, auth: bool = Depends(verificar_admi
     if not user:
         if payload.accion == "restar":
             raise HTTPException(404, "Usuario nuevo, no se puede restar saldo.")
-        user = GameCoinUser(email=email, saldo=0)
+        
+        user = GameCoinUser(
+            email=email, 
+            saldo=0, 
+            name="Manual", 
+            surname="User", 
+            rut=f"MANUAL-{email}"
+        )
         db.add(user)
     
     if payload.accion == "sumar":
@@ -151,22 +151,15 @@ def actualizar_saldo(payload: UpdateRequest, auth: bool = Depends(verificar_admi
 def sync_jumpseller(auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
     return sincronizar_clientes_jumpseller(db, GameCoinUser)
 
-@app.post("/admin/delete")
-def delete_user(payload: DeleteRequest, auth: bool = Depends(verificar_admin), db: Session = Depends(get_db)):
-    db.query(GameCoinUser).filter(GameCoinUser.id == payload.user_id).delete()
-    db.commit()
-    return {"msg": "Eliminado"}
-
-
 @app.get("/admin/hard_reset_db_emergency") 
 def reset_database_emergency():              
     try:
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
-        return {"status": "ok", "msg": "TABLAS CREADAS. Base de datos lista."}
+        return {"status": "ok", "msg": "TABLAS RECREADAS."}
     except Exception as e:
         return {"status": "error", "msg": str(e)}
-        
+
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
     body_bytes = await request.body()
@@ -177,7 +170,6 @@ async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db
             hmac.new(JUMPSELLER_HOOKS_TOKEN.encode(), body_bytes, hashlib.sha256).digest()
         ).decode()
         if signature != calculated:
-            print(f"ALERTA SEGURIDAD: Firma inválida. Recibido: {signature}")
             return {"status": "ignored", "reason": "invalid_signature"}
 
     try:
