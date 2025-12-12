@@ -2,10 +2,6 @@ from sqlalchemy import Column, Integer, String, DateTime
 from database import Base
 import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime
-from database import Base
-import datetime
-
 class GameCoinUser(Base):
     __tablename__ = "gamecoins"
 
