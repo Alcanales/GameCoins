@@ -147,7 +147,6 @@ def crear_cupom_jumpseller(codigo, monto):
             return False, f"Jumpseller rechazó ({r.status_code}): {r.text}"
     except Exception as e:
         return False, f"Error de conexión: {str(e)}"
-
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50"
     try:
@@ -155,27 +154,22 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
         if resp.status_code == 200:
             clientes = resp.json()
             nuevos = 0
-            actualizados = 0
-            
             for c in clientes:
-                cust_data = c.get("customer", {})
-                email = cust_data.get("email", "").strip().lower()
+                cust = c.get("customer", {})
+                email = cust.get("email", "").strip().lower()
+                nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
+                rut = cust.get("tax_id", "")
                 
-                nombre = f"{cust_data.get('name', '')} {cust_data.get('surname', '')}".strip()
-                rut = cust_data.get("tax_id", "")
-
                 if email:
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
                     if user:
                         user.name = nombre
                         user.rut = rut
-                        actualizados += 1
                     else:
                         db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
                         nuevos += 1
-            
             db_session.commit()
-            return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
+            return {"status": "ok", "nuevos": nuevos}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
     return {"status": "ok", "nuevos": 0}
