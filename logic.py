@@ -133,39 +133,36 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
 
 # --- JUMPSELLER API HELPERS ---
 
-# EN logic.py
-
 def crear_cupom_jumpseller(codigo, monto):
-    # Endpoint de Jumpseller
+    if not monto or int(monto) <= 0:
+        return False
+
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
     
-    # Payload corregido según documentación oficial de Jumpseller
     payload = {
         "promotion": {
             "name": f"Canje GameCoins {codigo}",
             "code": codigo,
             "enabled": True,
-            "discount_target": "order",       
-            "discount_type": "fixed",         
-            "discount_amount_fix": monto,     
+            "discount_target": "order",
+            "discount_type": "fixed",
+            "discount_amount": monto,
             "minimum_order_amount": 0,
             "begins_at": datetime.datetime.now().strftime('%Y-%m-%d'),
-            "expires_at": (datetime.datetime.now() + datetime.timedelta(days=2)).strftime('%Y-%m-%d'),
+            "expires_at": (datetime.datetime.now() + datetime.timedelta(days=365)).strftime('%Y-%m-%d'),
             "accumulable": False
         }
     }
     
     try:
         r = requests.post(url, json=payload, timeout=10)
-        
-        # Log para depuración en Render si falla
-        if r.status_code not in [200, 201]:
-            print(f"ERROR JUMPSELLER ({r.status_code}): {r.text}") 
+        if r.status_code in [200, 201]:
+            return True
+        else:
+            print(f"Error Jumpseller: {r.text}") 
             return False
-            
-        return True
     except Exception as e:
-        print(f"ERROR CONEXION JUMPSELLER: {str(e)}")
+        print(f"Error conexión: {str(e)}")
         return False
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
@@ -173,50 +170,44 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     nuevos = 0
     actualizados = 0
     
-    print("--- INICIANDO SINCRONIZACIÓN DE CLIENTES ---")
-    
     while True:
         url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50&page={page}"
         
         try:
-            resp = requests.get(url, timeout=15)
+            resp = requests.get(url, timeout=20)
             
             if resp.status_code != 200:
-                print(f"Error Jumpseller página {page}: {resp.status_code}")
                 break
                 
             clientes = resp.json()
             if not clientes:
                 break
             
-            if page == 1 and len(clientes) > 0:
-                print(f"DEBUG - Estructura Cliente Raw: {clientes[0]}")
-
             for c in clientes:
-                cust = c.get("customer", {})
-                email = cust.get("email", "").strip().lower()
-                
-                nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
-                if not nombre: 
-                    bill = cust.get("billing_address", {})
-                    nombre = f"{bill.get('name', '')} {bill.get('surname', '')}".strip()
-                if not nombre: 
-                    ship = cust.get("shipping_address", {})
-                    nombre = f"{ship.get('name', '')} {ship.get('surname', '')}".strip()
-                
-                rut = cust.get("tax_id", "")
-                if not rut: rut = cust.get("taxid", "") 
-                
-                if not rut and "billing_address" in cust:
-                    rut = cust.get("billing_address", {}).get("taxid", "")
-                    if not rut: rut = cust.get("billing_address", {}).get("tax_id", "")
-                
-                if not rut and "shipping_address" in cust:
-                    rut = cust.get("shipping_address", {}).get("taxid", "")
+                try:
+                    cust = c.get("customer") or {}
+                    email = cust.get("email", "").strip().lower()
+                    if not email: continue
+                    
+                    bill = cust.get("billing_address") or {} 
+                    ship = cust.get("shipping_address") or {}
+                    
+                    nombre = f"{cust.get('name', '')} {cust.get('surname', '')}".strip()
+                    if not nombre: nombre = f"{bill.get('name', '')} {bill.get('surname', '')}".strip()
+                    if not nombre: nombre = f"{ship.get('name', '')} {ship.get('surname', '')}".strip()
+                    if nombre == " ": nombre = ""
 
-                if nombre == " ": nombre = "" 
-                
-                if email:
+                    rut = cust.get("tax_id") or cust.get("taxid") or ""
+                    if not rut: rut = bill.get("taxid") or bill.get("tax_id") or ""
+                    if not rut: rut = ship.get("taxid") or ship.get("tax_id") or ""
+                    
+                    if not rut and "fields" in cust:
+                        for field in cust.get("fields", []) or []:
+                            label = field.get("label", "").lower()
+                            if "rut" in label or "tax" in label or "identidad" in label:
+                                rut = field.get("value", "")
+                                break
+
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
                     
                     if user:
@@ -226,16 +217,17 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     else:
                         db_session.add(GameCoinUser_Model(email=email, saldo=0, name=nombre, rut=rut))
                         nuevos += 1
+                        
+                except Exception:
+                    continue
             
             db_session.commit()
-            print(f"Página {page} procesada. Nuevos: {nuevos}, Actualizados: {actualizados}")
             page += 1
             
         except Exception as e:
-            print(f"Error Crítico: {str(e)}")
             return {"status": "error", "detail": str(e)}
             
-    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "paginas_recorridas": page-1}
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
     url = f"{JUMPSELLER_API_BASE}/orders/{order_id}.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
