@@ -16,12 +16,20 @@ app = FastAPI()
 ADMIN_USER = os.environ.get("ADMIN_USER", "Tomas_1_2_3")
 ADMIN_PASS = os.environ.get("ADMIN_PASSWORD", "GameQuest2025_1")
 
+
+origins = [
+    "http://localhost",
+    "http://localhost:8000",
+    "https://gamequest.cl",        
+    "https://www.gamequest.cl",    
+    "https://game-quest.jumpseller.com" 
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      
-    allow_credentials=False,  
-    allow_methods=["*"],       
-    allow_headers=["*"],      
+    allow_origins=origins,     
+    allow_credentials=True,    
+    allow_methods=["*"],      
+    allow_headers=["*"],       
 )
 
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
