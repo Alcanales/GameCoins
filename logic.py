@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
 
+# --- CONFIGURACIÓN ---
 JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
 JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
 JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
@@ -17,11 +18,14 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") 
 TARGET_EMAIL = "contacto@gamequest.cl"
 
+# Variables de Negocio
 USD_TO_CLP = 1000
 CASH_MULTIPLIER = 0.40
 GAMECOIN_MULTIPLIER = 0.50
 MIN_PURCHASE_USD = 1.19
 STAKE_PRICE_THRESHOLD = 10.0
+
+# --- FUNCIONES AUXILIARES ---
 
 def normalize_card_name(name):
     if not isinstance(name, str): return ""
@@ -128,8 +132,10 @@ def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
         return {"status": "ok"}
     except Exception as e: return {"error": str(e)}
 
+
 def crear_cupom_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0:
+        print(f"Error Interno: Monto inválido {monto}")
         return False
 
     url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
@@ -153,24 +159,26 @@ def crear_cupom_jumpseller(codigo, monto):
         }
     }
     
-    print(f"DEBUG ENVIO: {json.dumps(payload)}")
+    print(f"DEBUG ENVIO CUPON: {json.dumps(payload)}")
 
     try:
         r = requests.post(url, json=payload, timeout=10)
-        
         if r.status_code in [200, 201]:
+            print(f"✅ Cupón creado: {codigo}")
             return True
         else:
-            print(f"ERROR JUMPSELLER: {r.text}") 
+            print(f"❌ RECHAZO JUMPSELLER ({r.status_code}): {r.text}") 
             return False
     except Exception as e:
-        print(f"ERROR CONEXION: {str(e)}")
+        print(f"❌ Error conexión: {str(e)}")
         return False
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     page = 1
     nuevos = 0
     actualizados = 0
+    
+    print("--- 🛡️ INICIANDO MODO DETECTIVE DE DATOS ---")
     
     while True:
         url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50&page={page}"
@@ -181,11 +189,14 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             clientes = resp.json()
             if not clientes: break
             
+            if page == 1 and len(clientes) > 0:
+                print(f"🕵️ DEBUG CLIENTE CRUDO: {json.dumps(clientes[0], indent=2)}")
+
             for c in clientes:
                 try:
                     cust = c.get("customer") or {}
                     email = cust.get("email", "").strip().lower()
-                    if not email: continue
+                    if not email: continue 
                     
                     bill = cust.get("billing_address") or {} 
                     ship = cust.get("shipping_address") or {}
@@ -203,47 +214,60 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     if not apellido_raw: apellido_raw = "-"
 
                     rut = cust.get("tax_id") or cust.get("taxid") or ""
+                    
                     if not rut: rut = bill.get("taxid") or bill.get("tax_id") or ""
                     if not rut: rut = ship.get("taxid") or ship.get("tax_id") or ""
                     
                     if not rut and "fields" in cust:
                         for field in cust.get("fields", []) or []:
-                            label = field.get("label", "").lower()
-                            if "rut" in label or "tax" in label or "identidad" in label:
-                                rut = field.get("value", "")
-                                break
+                            label = str(field.get("label", "")).lower()
+                            if "rut" in label or "run" in label or "identidad" in label or "tax" in label:
+                                valor = str(field.get("value", "")).strip()
+                                if valor:
+                                    rut = valor
+                                    break
                     
-                    if not rut:
-                        rut = f"PENDIENTE-{email}"
-
                     user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
                     
                     if user:
-                        user.name = nombre_raw
-                        user.surname = apellido_raw
-                        if "PENDIENTE" in user.rut and "PENDIENTE" not in rut:
+                        if nombre_raw != "Cliente" and nombre_raw != "":
+                            user.name = nombre_raw
+                        if apellido_raw != "-" and apellido_raw != "":
+                            user.surname = apellido_raw
+                        
+                        if rut and "PENDIENTE" in user.rut:
                             user.rut = rut
+                        elif rut and rut != user.rut:
+                             existe = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut).first()
+                             if not existe:
+                                 user.rut = rut
+
                         actualizados += 1
                     else:
+                        rut_final = rut if rut else f"PENDIENTE-{email}"
+                        
                         db_session.add(GameCoinUser_Model(
                             email=email, 
                             saldo=0, 
                             name=nombre_raw, 
                             surname=apellido_raw, 
-                            rut=rut
+                            rut=rut_final
                         ))
                         nuevos += 1
                         
-                except Exception:
+                except Exception as inner_e:
+                    print(f"⚠️ Error procesando cliente {email}: {inner_e}")
                     continue
             
             db_session.commit()
+            print(f"✅ Página {page} procesada. Nuevos: {nuevos} | Actualizados: {actualizados}")
             page += 1
             
         except Exception as e:
+            print(f"❌ Error General Sync: {str(e)}")
             return {"status": "error", "detail": str(e)}
             
-    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "msg": "Limpieza completada"}
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
     url = f"{JUMPSELLER_API_BASE}/orders/{order_id}.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
