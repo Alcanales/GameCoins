@@ -1,41 +1,23 @@
 import pandas as pd
 import requests
 import io
-import numpy as np
-import os
-import datetime
 import json
 import smtplib
+import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
-
-# --- CONFIGURACIÓN ---
-JUMPSELLER_API_TOKEN = os.environ.get("JUMPSELLER_API_TOKEN", "")
-JUMPSELLER_STORE = os.environ.get("JUMPSELLER_STORE", "")
-JUMPSELLER_API_BASE = "https://api.jumpseller.com/v1"
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")    
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") 
-TARGET_EMAIL = "contacto@gamequest.cl"
-
-# Variables de Negocio
-USD_TO_CLP = 1000
-CASH_MULTIPLIER = 0.40
-GAMECOIN_MULTIPLIER = 0.50
-MIN_PURCHASE_USD = 1.19
-STAKE_PRICE_THRESHOLD = 10.0
-
-# --- FUNCIONES AUXILIARES ---
-
-def normalize_card_name(name):
-    if not isinstance(name, str): return ""
-    return name.split("|")[0].strip().lower()
+from sqlalchemy.orm import Session
+from models import GameCoinUser
+from config import settings
 
 def fetch_scryfall_prices(scryfall_ids):
+    """Obtiene precios de Scryfall en lotes para optimizar red."""
     url = "https://api.scryfall.com/cards/collection"
     unique_ids = [sid for sid in pd.unique(scryfall_ids) if isinstance(sid, str)]
     prices_map = {}
-    batch_size = 75
+    batch_size = 75  
+
     for i in range(0, len(unique_ids), batch_size):
         batch = unique_ids[i:i+batch_size]
         identifiers = [{"id": sid} for sid in batch]
@@ -50,95 +32,41 @@ def fetch_scryfall_prices(scryfall_ids):
                         "usd": float(p["usd"]) if p.get("usd") else None,
                         "usd_foil": float(p["usd_foil"]) if p.get("usd_foil") else None
                     }
-        except Exception: continue 
+        except Exception as e:
+            print(f"Error fetching Scryfall batch: {e}")
+            continue 
     return prices_map
 
 def get_jumpseller_stock_for_name(name):
+    """Busca stock de un producto por nombre. (Costoso, usar con cuidado)"""
     if not name: return 0
-    url = f"{JUMPSELLER_API_BASE}/products.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&query={name}&limit=1&fields=stock,name"
+    url = f"{settings.JUMPSELLER_API_BASE}/products.json"
+    params = {
+        "login": settings.JUMPSELLER_STORE,
+        "authtoken": settings.JUMPSELLER_API_TOKEN,
+        "query": name,
+        "limit": 1,
+        "fields": "stock,name"
+    }
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, params=params, timeout=5)
         if resp.status_code == 200:
             products = resp.json()
+            target_name = normalize_card_name(name)
             for p in products:
-                if normalize_card_name(p.get("product", {}).get("name", "")) == normalize_card_name(name):
+                prod_name = normalize_card_name(p.get("product", {}).get("name", ""))
+                if prod_name == target_name:
                     return p.get("product", {}).get("stock", 0)
-    except: pass
+    except: 
+        pass
     return 0
 
-def enrich_with_stock(df):
-    names = df["name"].unique()
-    stock_map = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        results = executor.map(get_jumpseller_stock_for_name, names)
-        for name, stock in zip(names, results):
-            stock_map[name] = stock
-    df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
-    return df
+def crear_cupon_jumpseller(codigo, monto):
+    """Crea un cupón de descuento en Jumpseller."""
+    if not monto or int(monto) <= 0: return False
 
-def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
-    try:
-        df = pd.read_csv(io.BytesIO(file_content))
-    except Exception: return {"error": "No se pudo leer el CSV."}
-
-    col_map = { "Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id", "ManaBox ID": "manabox_id" }
-    df = df.rename(columns=col_map)
-    if "name" not in df.columns: return {"error": "Falta columna Name."}
-
-    df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors="coerce")
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
-    df["has_price"] = df["purchase_price"].notna()
-    
-    if "scryfall_id" in df.columns: df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"])
-        
-    df["cash_buy_price_clp"] = (df["purchase_price"] * USD_TO_CLP * CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
-    df["gamecoin_price"] = (df["purchase_price"] * USD_TO_CLP * GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
-
-    if internal_mode: df = enrich_with_stock(df)
-    else: df["stock_tienda"] = 0
-
-    def clasificar(row):
-        price = row["purchase_price"]
-        is_foil = str(row.get("foil", "")).lower() == "foil"
-        if is_foil and price >= STAKE_PRICE_THRESHOLD: return "estaca", "Posible Estaca (Foil Caro)"
-        if not row["has_price"] or price < MIN_PURCHASE_USD: return "no_compra", "Bulk / Bajo Precio"
-        return "compra", "Comprar"
-
-    res = df.apply(clasificar, axis=1, result_type="expand")
-    df["categoria"], df["buy_decision"] = res[0], res[1]
-    df["sort_rank"] = df["categoria"].map({"compra": 1, "estaca": 2, "no_compra": 3})
-    
-    cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria", "stock_tienda"]
-    return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[cols].fillna("").to_dict(orient="records")
-
-def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
-    if not SMTP_EMAIL or not SMTP_PASSWORD: return {"error": "Correo no configurado"}
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_EMAIL
-    msg['To'] = TARGET_EMAIL
-    msg['Subject'] = f"Buylist Recibida: {datos_cliente.get('nombre')}"
-    
-    filas = ""
-    for c in lista_cartas: filas += f"<tr><td>{c['quantity']}</td><td>{c['name']} ({c['set_code']})</td><td>${c['price_unit']}</td><td>${c['price_total']}</td></tr>"
-
-    html = f"<h2>Solicitud de Venta</h2><p>Cliente: {datos_cliente.get('nombre')}<br>Email: {datos_cliente.get('email')}</p><table>{filas}</table><h3>Total: {total_clp} / GC: {total_gc}</h3>"
-    msg.attach(MIMEText(html, 'html'))
-    try:
-        s = smtplib.SMTP('smtp.gmail.com', 587)
-        s.starttls()
-        s.login(SMTP_EMAIL, SMTP_PASSWORD)
-        s.sendmail(SMTP_EMAIL, TARGET_EMAIL, msg.as_string())
-        s.quit()
-        return {"status": "ok"}
-    except Exception as e: return {"error": str(e)}
-
-
-def crear_cupom_jumpseller(codigo, monto):
-    if not monto or int(monto) <= 0:
-        print(f"Error Interno: Monto inválido {monto}")
-        return False
-
-    url = f"{JUMPSELLER_API_BASE}/promotions.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
+    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
     
     now = datetime.datetime.now()
     begins = now.strftime('%Y-%m-%d')
@@ -159,117 +87,210 @@ def crear_cupom_jumpseller(codigo, monto):
         }
     }
     
-    print(f"DEBUG ENVIO CUPON: {json.dumps(payload)}")
-
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        if r.status_code in [200, 201]:
-            print(f"✅ Cupón creado: {codigo}")
-            return True
-        else:
-            print(f"❌ RECHAZO JUMPSELLER ({r.status_code}): {r.text}") 
-            return False
+        r = requests.post(url, params=params, json=payload, timeout=10)
+        return r.status_code in [200, 201]
     except Exception as e:
-        print(f"❌ Error conexión: {str(e)}")
+        print(f"❌ Error creando cupón: {str(e)}")
         return False
 
-def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
+def actualizar_orden_jumpseller(order_id, estado, notas=""):
+    url = f"{settings.JUMPSELLER_API_BASE}/orders/{order_id}.json"
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
+    payload = {"order": {"status": estado, "additional_information": notas}}
+    try: 
+        requests.put(url, params=params, json=payload, timeout=10)
+    except: 
+        pass
+
+def normalize_card_name(name):
+    if not isinstance(name, str): return ""
+    return name.split("|")[0].strip().lower()
+
+def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
+    try:
+        df = pd.read_csv(io.BytesIO(file_content))
+    except Exception: 
+        return {"error": "No se pudo leer el CSV. Asegúrate de que sea válido."}
+
+    col_map = { 
+        "Name": "name", "Set code": "set_code", "Foil": "foil", 
+        "Quantity": "quantity", "Purchase price": "purchase_price", 
+        "Scryfall ID": "scryfall_id", "ManaBox ID": "manabox_id" 
+    }
+    df = df.rename(columns=col_map)
+    if "name" not in df.columns: return {"error": "Falta columna 'Name' en el CSV."}
+
+    df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors="coerce")
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
+    df["has_price"] = df["purchase_price"].notna()
+    
+    if "scryfall_id" in df.columns: 
+        df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"])
+        
+    df["cash_buy_price_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
+    df["gamecoin_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
+
+    if internal_mode:
+        names = df["name"].unique()
+        stock_map = {}
+        with ThreadPoolExecutor(max_workers=5) as executor: 
+            results = executor.map(get_jumpseller_stock_for_name, names)
+            for name, stock in zip(names, results):
+                stock_map[name] = stock
+        df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
+    else:
+        df["stock_tienda"] = 0
+
+    def clasificar(row):
+        price = row["purchase_price"]
+        is_foil = str(row.get("foil", "")).lower() == "foil"
+        
+        if is_foil and price >= settings.STAKE_PRICE_THRESHOLD: 
+            return "estaca", "Posible Estaca (Foil Caro)"
+        if not row["has_price"] or price < settings.MIN_PURCHASE_USD: 
+            return "no_compra", "Bulk / Bajo Precio"
+        return "compra", "Comprar"
+
+    res = df.apply(clasificar, axis=1, result_type="expand")
+    df["categoria"], df["buy_decision"] = res[0], res[1]
+    df["sort_rank"] = df["categoria"].map({"compra": 1, "estaca": 2, "no_compra": 3})
+    
+    cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria", "stock_tienda"]
+    
+    final_cols = [c for c in cols if c in df.columns]
+    
+    return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[final_cols].fillna("").to_dict(orient="records")
+
+def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
+    if not settings.SMTP_EMAIL or not settings.SMTP_PASSWORD: return {"error": "Correo no configurado"}
+    
+    msg = MIMEMultipart()
+    msg['From'] = settings.SMTP_EMAIL
+    msg['To'] = settings.TARGET_EMAIL
+    msg['Subject'] = f"Buylist Recibida: {datos_cliente.get('nombre')}"
+    
+    filas = ""
+    for c in lista_cartas: 
+        filas += f"<tr><td>{c.get('quantity')}</td><td>{c.get('name')} ({c.get('set_code')})</td><td>${c.get('price_unit')}</td><td>${c.get('price_total')}</td></tr>"
+
+    html = f"""
+    <h2>Solicitud de Venta</h2>
+    <p><strong>Cliente:</strong> {datos_cliente.get('nombre')}<br>
+    <strong>Email:</strong> {datos_cliente.get('email')}<br>
+    <strong>Método Pago:</strong> {datos_cliente.get('metodo_pago', 'No especificado')}</p>
+    <table border="1" style="border-collapse: collapse; width: 100%;">
+        <tr style="background-color: #f2f2f2;"><th>Cant</th><th>Carta</th><th>Unit</th><th>Total</th></tr>
+        {filas}
+    </table>
+    <h3>Total Cash: {total_clp} | Total GC: {total_gc}</h3>
+    """
+    msg.attach(MIMEText(html, 'html'))
+    
+    try:
+        s = smtplib.SMTP('smtp.gmail.com', 587)
+        s.starttls()
+        s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
+        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string())
+        s.quit()
+        return {"status": "ok"}
+    except Exception as e: 
+        return {"error": str(e)}
+
+def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
     page = 1
     nuevos = 0
     actualizados = 0
     
-    print("--- 🛡️ INICIANDO MODO DETECTIVE DE DATOS ---")
+    print("--- 🔄 INICIANDO SYNC OPTIMIZADO ---")
     
     while True:
-        url = f"{JUMPSELLER_API_BASE}/customers.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}&limit=50&page={page}"
+        url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+        params = {
+            "login": settings.JUMPSELLER_STORE,
+            "authtoken": settings.JUMPSELLER_API_TOKEN,
+            "limit": 50,
+            "page": page
+        }
         
         try:
-            resp = requests.get(url, timeout=20)
+            resp = requests.get(url, params=params, timeout=20)
             if resp.status_code != 200: break
-            clientes = resp.json()
-            if not clientes: break
+            clientes_api = resp.json()
+            if not clientes_api: break
             
-            if page == 1 and len(clientes) > 0:
-                print(f"🕵️ DEBUG CLIENTE CRUDO: {json.dumps(clientes[0], indent=2)}")
+            emails_lote = []
+            clientes_map = {}
+            
+            for c in clientes_api:
+                cust_data = c.get("customer", {})
+                email = cust_data.get("email", "").strip().lower()
+                if email:
+                    emails_lote.append(email)
+                    clientes_map[email] = cust_data
 
-            for c in clientes:
-                try:
-                    cust = c.get("customer") or {}
-                    email = cust.get("email", "").strip().lower()
-                    if not email: continue 
-                    
-                    bill = cust.get("billing_address") or {} 
-                    ship = cust.get("shipping_address") or {}
-                    
-                    nombre_raw = cust.get('name', '').strip()
-                    apellido_raw = cust.get('surname', '').strip()
-                    
-                    if not nombre_raw: nombre_raw = bill.get('name', '').strip()
-                    if not apellido_raw: apellido_raw = bill.get('surname', '').strip()
-                    
-                    if not nombre_raw: nombre_raw = ship.get('name', '').strip()
-                    if not apellido_raw: apellido_raw = ship.get('surname', '').strip()
-                    
-                    if not nombre_raw: nombre_raw = "Cliente"
-                    if not apellido_raw: apellido_raw = "-"
+            if not emails_lote:
+                page += 1
+                continue
 
-                    rut = cust.get("tax_id") or cust.get("taxid") or ""
-                    
-                    if not rut: rut = bill.get("taxid") or bill.get("tax_id") or ""
-                    if not rut: rut = ship.get("taxid") or ship.get("tax_id") or ""
-                    
-                    if not rut and "fields" in cust:
-                        for field in cust.get("fields", []) or []:
-                            label = str(field.get("label", "")).lower()
-                            if "rut" in label or "run" in label or "identidad" in label or "tax" in label:
-                                valor = str(field.get("value", "")).strip()
-                                if valor:
-                                    rut = valor
-                                    break
-                    
-                    user = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email == email).first()
-                    
-                    if user:
-                        if nombre_raw != "Cliente" and nombre_raw != "":
-                            user.name = nombre_raw
-                        if apellido_raw != "-" and apellido_raw != "":
-                            user.surname = apellido_raw
-                        
-                        if rut and "PENDIENTE" in user.rut:
-                            user.rut = rut
-                        elif rut and rut != user.rut:
-                             existe = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut).first()
-                             if not existe:
-                                 user.rut = rut
+            usuarios_db = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email.in_(emails_lote)).all()
+            usuarios_db_map = {u.email: u for u in usuarios_db}
 
-                        actualizados += 1
-                    else:
-                        rut_final = rut if rut else f"PENDIENTE-{email}"
-                        
-                        db_session.add(GameCoinUser_Model(
-                            email=email, 
-                            saldo=0, 
-                            name=nombre_raw, 
-                            surname=apellido_raw, 
-                            rut=rut_final
-                        ))
-                        nuevos += 1
-                        
-                except Exception as inner_e:
-                    print(f"⚠️ Error procesando cliente {email}: {inner_e}")
-                    continue
+            for email, data_api in clientes_map.items():
+                bill = data_api.get("billing_address") or {}
+                ship = data_api.get("shipping_address") or {}
+                
+                nombre = (data_api.get('name') or bill.get('name') or ship.get('name') or "Cliente").strip()
+                apellido = (data_api.get('surname') or bill.get('surname') or ship.get('surname') or "").strip()
+                if not apellido: apellido = "-"
+
+                rut = (data_api.get("tax_id") or data_api.get("taxid") or 
+                       bill.get("taxid") or bill.get("tax_id") or 
+                       ship.get("taxid") or ship.get("tax_id") or "")
+                
+                if not rut and "fields" in data_api:
+                    for field in data_api.get("fields", []) or []:
+                        if "rut" in str(field.get("label", "")).lower():
+                            rut = str(field.get("value", "")).strip()
+                            break
+
+                user = usuarios_db_map.get(email)
+                
+                if user:
+                    cambios = False
+                    if nombre and nombre != "Cliente" and user.name != nombre:
+                        user.name = nombre; cambios = True
+                    if apellido and apellido != "-" and user.surname != apellido:
+                        user.surname = apellido; cambios = True
+                    
+                    if rut:
+                        if "PENDIENTE" in user.rut or (user.rut != rut):
+                            rut_existe = db_session.query(GameCoinUser_Model).filter(
+                                GameCoinUser_Model.rut == rut, 
+                                GameCoinUser_Model.id != user.id
+                            ).first()
+                            if not rut_existe:
+                                user.rut = rut; cambios = True
+                    
+                    if cambios: actualizados += 1
+                else:
+                    rut_final = rut if rut else f"PENDIENTE-{email}"
+                    rut_ocupado = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut_final).first()
+                    if rut_ocupado: rut_final = f"DUP-{rut_final}-{email}"
+
+                    new_user = GameCoinUser_Model(
+                        email=email, saldo=0, name=nombre, surname=apellido, rut=rut_final
+                    )
+                    db_session.add(new_user)
+                    nuevos += 1
             
             db_session.commit()
-            print(f"✅ Página {page} procesada. Nuevos: {nuevos} | Actualizados: {actualizados}")
+            print(f"✅ Página {page} procesada. Nuevos: {nuevos} | Act: {actualizados}")
             page += 1
             
         except Exception as e:
-            print(f"❌ Error General Sync: {str(e)}")
+            print(f"❌ Error Critical Sync Page {page}: {str(e)}")
+            db_session.rollback()
             return {"status": "error", "detail": str(e)}
             
-    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "msg": "Limpieza completada"}
-
-def actualizar_orden_jumpseller(order_id, estado, notas=""):
-    url = f"{JUMPSELLER_API_BASE}/orders/{order_id}.json?login={JUMPSELLER_STORE}&authtoken={JUMPSELLER_API_TOKEN}"
-    try: requests.put(url, json={"order": {"status": estado, "additional_information": notas}}, timeout=10)
-    except: pass
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
