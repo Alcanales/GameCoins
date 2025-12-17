@@ -1,20 +1,14 @@
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from config import settings
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+connect_args = {}
+if "sqlite" not in settings.DATABASE_URL:
+    if "localhost" not in settings.DATABASE_URL and "127.0.0.1" not in settings.DATABASE_URL:
+         pass 
 
-if DATABASE_URL:
-    if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
- 
-    if "sslmode=" not in DATABASE_URL and "localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL:
-        separator = "&" if "?" in DATABASE_URL else "?"
-        DATABASE_URL += f"{separator}sslmode=require"
-
-engine = create_engine(DATABASE_URL if DATABASE_URL else "sqlite:///./local.db")
+engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
