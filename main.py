@@ -20,9 +20,11 @@ app = FastAPI(title="GameQuest GameCoins API", version="2.0")
 
 # CORS Setup
 origins = [
-    "http://localhost", "http://localhost:8000",
-    "https://gamequest.cl", "https://www.gamequest.cl",
-    "https://game-quest.jumpseller.com"
+    "http://localhost",
+    "http://localhost:8000",
+    "https://game-quest.jumpseller.com", 
+    "https://game-quest.cl",       
+    "https://www.game-quest.cl"    
 ]
 app.add_middleware(
     CORSMiddleware,
