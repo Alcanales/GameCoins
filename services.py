@@ -11,6 +11,17 @@ from sqlalchemy.orm import Session
 from models import GameCoinUser
 from config import settings
 
+def normalize_card_name(name):
+    """
+    Normaliza el nombre para comparar bases.
+    Ej: "Sol Ring (Commander) [Foil]" -> "sol ring"
+    """
+    if not isinstance(name, str): return ""
+    name = name.split("|")[0]  # Pipe del CSV
+    name = name.split("(")[0]  # Paréntesis de ediciones
+    name = name.split("[")[0]  # Corchetes de etiquetas
+    return name.strip().lower()
+
 def fetch_scryfall_prices(scryfall_ids):
     """Obtiene precios de Scryfall en lotes para optimizar red."""
     url = "https://api.scryfall.com/cards/collection"
@@ -38,28 +49,41 @@ def fetch_scryfall_prices(scryfall_ids):
     return prices_map
 
 def get_jumpseller_stock_for_name(name):
-    """Busca stock de un producto por nombre. (Costoso, usar con cuidado)"""
+  
     if not name: return 0
+    
+    clean_search = normalize_card_name(name)
+    
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
     params = {
         "login": settings.JUMPSELLER_STORE,
         "authtoken": settings.JUMPSELLER_API_TOKEN,
-        "query": name,
-        "limit": 1,
+        "query": clean_search,
+        "limit": 50, 
         "fields": "stock,name"
     }
+    
+    total_stock = 0
+    
     try:
         resp = requests.get(url, params=params, timeout=5)
         if resp.status_code == 200:
             products = resp.json()
-            target_name = normalize_card_name(name)
+            
             for p in products:
-                prod_name = normalize_card_name(p.get("product", {}).get("name", ""))
-                if prod_name == target_name:
-                    return p.get("product", {}).get("stock", 0)
-    except: 
+                prod_name_raw = p.get("product", {}).get("name", "")
+                prod_name_clean = normalize_card_name(prod_name_raw)
+                
+                if prod_name_clean == clean_search:
+                    stock_variant = p.get("product", {}).get("stock", 0)
+                    if stock_variant > 0:
+                        total_stock += stock_variant
+                        
+    except Exception as e: 
+        print(f"Error checking stock for {name}: {e}")
         pass
-    return 0
+        
+    return total_stock
 
 def crear_cupon_jumpseller(codigo, monto):
     """Crea un cupón de descuento en Jumpseller."""
@@ -103,10 +127,6 @@ def actualizar_orden_jumpseller(order_id, estado, notas=""):
     except: 
         pass
 
-def normalize_card_name(name):
-    if not isinstance(name, str): return ""
-    return name.split("|")[0].strip().lower()
-
 def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
     try:
         df = pd.read_csv(io.BytesIO(file_content))
@@ -134,6 +154,7 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
     if internal_mode:
         names = df["name"].unique()
         stock_map = {}
+        # Max workers 5 para no saturar Jumpseller API
         with ThreadPoolExecutor(max_workers=5) as executor: 
             results = executor.map(get_jumpseller_stock_for_name, names)
             for name, stock in zip(names, results):
