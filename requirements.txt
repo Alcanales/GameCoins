@@ -1,15 +1,11 @@
-# Core Framework & Server
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-python-multipart==0.0.9
-# Data Processing
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
 pandas==2.2.3
-numpy==1.26.4
-# Database
-sqlalchemy==2.0.27
-psycopg2-binary==2.9.9
-# Utilities & Validation
-requests==2.31.0
-pydantic==2.6.1
-pydantic[email]==2.6.1
-email-validator==2.1.0.post1
+numpy>=2.1.0
+sqlalchemy>=2.0.36
+psycopg2-binary>=2.9.10
+requests>=2.32.3
+pydantic>=2.10.0
+pydantic[email]>=2.10.0
+email-validator>=2.2.0
