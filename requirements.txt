@@ -3,7 +3,7 @@ fastapi==0.109.2
 uvicorn[standard]==0.27.1
 python-multipart==0.0.9
 # Data Processing
-pandas==2.2.0
+pandas==2.2.3
 numpy==1.26.4
 # Database
 sqlalchemy==2.0.27
