@@ -14,7 +14,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="GameQuest GameCoins API", version="2.0")
+app = FastAPI(...)
 
 # CORS Setup
 origins = [
