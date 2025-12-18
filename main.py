@@ -20,17 +20,25 @@ app = FastAPI(
     description="API para gestión de GameCoins"
 )
 # CORS Setup
+# CORS Setup
 origins = [
     "http://localhost",
     "http://localhost:8000",
     "https://game-quest.jumpseller.com", 
     "https://game-quest.cl",       
-    "https://www.game-quest.cl"    
+    "https://www.game-quest.cl",
+    "https://gamequest.cl",       
+    "https://www.gamequest.cl"    
 ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=origins, 
+    allow_credentials=True, 
+    allow_methods=["*"], 
+    allow_headers=["*"],
 )
+
 
 # --- DEPENDENCIAS ---
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
