@@ -7,13 +7,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, F
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-
 from config import settings
-from database import engine, Base, get_db
-from models import GameCoinUser
 import services as logic
+from database import engine, Base, get_db
+from models import GameCoinUser 
 
-# Inicialización DB
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GameQuest GameCoins API", version="2.0")
