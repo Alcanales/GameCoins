@@ -22,7 +22,7 @@ def normalize_card_name(name):
     name = name.split("|")[0]  
     name = name.split("(")[0]  
     name = name.split("[")[0]  
-    name = name.split("-")[0] 
+    name = name.split("-")[0]  # CLAVE: Ignora lo que venga después del guion
     return name.strip().lower()
 
 def fetch_scryfall_prices(scryfall_ids):
@@ -145,10 +145,10 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
     df["cash_buy_price_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
     df["gamecoin_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
 
+    # Solo si es modo interno consultamos stock
     if internal_mode:
         names = df["name"].unique()
         stock_map = {}
-        # Max workers 5 para no saturar Jumpseller API
         with ThreadPoolExecutor(max_workers=5) as executor: 
             results = executor.map(get_jumpseller_stock_for_name, names)
             for name, stock in zip(names, results):
