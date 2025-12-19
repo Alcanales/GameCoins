@@ -4,6 +4,7 @@ import io
 import json
 import smtplib
 import datetime
+import re 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
@@ -15,15 +16,16 @@ def normalize_card_name(name):
     """
     Normaliza el nombre para comparar bases.
     Ej: "Sol Ring (Commander) [Foil]" -> "sol ring"
+    Ej: "Sol Ring - Magic 2010" -> "sol ring"
     """
     if not isinstance(name, str): return ""
-    name = name.split("|")[0]  # Pipe del CSV
-    name = name.split("(")[0]  # Paréntesis de ediciones
-    name = name.split("[")[0]  # Corchetes de etiquetas
+    name = name.split("|")[0]  
+    name = name.split("(")[0]  
+    name = name.split("[")[0]  
+    name = name.split("-")[0] 
     return name.strip().lower()
 
 def fetch_scryfall_prices(scryfall_ids):
-    """Obtiene precios de Scryfall en lotes para optimizar red."""
     url = "https://api.scryfall.com/cards/collection"
     unique_ids = [sid for sid in pd.unique(scryfall_ids) if isinstance(sid, str)]
     prices_map = {}
@@ -49,9 +51,7 @@ def fetch_scryfall_prices(scryfall_ids):
     return prices_map
 
 def get_jumpseller_stock_for_name(name):
-  
     if not name: return 0
-    
     clean_search = normalize_card_name(name)
     
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
@@ -60,25 +60,21 @@ def get_jumpseller_stock_for_name(name):
         "authtoken": settings.JUMPSELLER_API_TOKEN,
         "query": clean_search,
         "limit": 50, 
-        "fields": "stock,name"
+        "fields": "stock,name" 
     }
     
     total_stock = 0
-    
     try:
         resp = requests.get(url, params=params, timeout=5)
         if resp.status_code == 200:
             products = resp.json()
-            
             for p in products:
-                prod_name_raw = p.get("product", {}).get("name", "")
+                prod = p.get("product", {})
+                prod_name_raw = prod.get("name", "")
                 prod_name_clean = normalize_card_name(prod_name_raw)
                 
                 if prod_name_clean == clean_search:
-                    stock_variant = p.get("product", {}).get("stock", 0)
-                    if stock_variant > 0:
-                        total_stock += stock_variant
-                        
+                    total_stock += prod.get("stock", 0)
     except Exception as e: 
         print(f"Error checking stock for {name}: {e}")
         pass
@@ -86,9 +82,7 @@ def get_jumpseller_stock_for_name(name):
     return total_stock
 
 def crear_cupon_jumpseller(codigo, monto):
-    """Crea un cupón de descuento en Jumpseller."""
     if not monto or int(monto) <= 0: return False
-
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
     
