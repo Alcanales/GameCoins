@@ -17,6 +17,7 @@ from config import settings
 
 # --- INFRAESTRUCTURA DE RED ---
 def create_robust_session():
+    """Sesión HTTP persistente con reintentos automáticos anti-caídas."""
     session = requests.Session()
     retry = Retry(
         total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
@@ -26,7 +27,7 @@ def create_robust_session():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "GameQuest-Bot/2.5 (Variant Fix)", 
+        "User-Agent": "GameQuest-Bot/3.0 (Ultra Robust)", 
         "Content-Type": "application/json"
     })
     return session
@@ -39,9 +40,27 @@ SCRYFALL_CACHE = {}
 CACHE_TTL = 300 
 
 def normalize_card_name(name):
+    """
+    Normalización Blindada: Convierte cualquier variación de nombre al nombre base.
+    Ejemplos que resuelve:
+    - "Sol Ring (Commander)" -> "sol ring"
+    - "Sol Ring - C19"       -> "sol ring"
+    - "Sol Ring C18"         -> "sol ring" (Nuevo: Detecta códigos de set al final)
+    - "Sol Ring Promo"       -> "sol ring" (Nuevo: Detecta palabras clave)
+    - "Fire // Ice"          -> "fire"
+    """
     if not isinstance(name, str): return ""
-    name = name.split("|")[0].split("(")[0].split("[")[0]
-    name = re.split(r'\s+[-–—]\s+', name)[0]
+    
+    name = name.split("|")[0]       
+    name = name.split(" // ")[0]    
+    name = name.split(" / ")[0]     
+    name = name.split("(")[0]       
+    name = name.split("[")[0]       
+    name = re.split(r'\s+[-–—]\s+', name)[0] 
+
+    name = name.strip()
+    name = re.sub(r'\s+(?:[a-zA-Z0-9]{3,4}|Promo|Foil|Prerelease|List|Art|Showcase|Extended|Borderless)\s*$', '', name, flags=re.IGNORECASE)
+
     return name.strip().lower()
 
 def _fetch_scryfall_batch(batch_ids):
@@ -88,17 +107,28 @@ def fetch_scryfall_data(scryfall_ids):
     return data_map
 
 def get_jumpseller_stock_for_name(name):
+    """
+    Busca productos en Jumpseller sumando TODAS las variantes y coincidencias.
+    Suma stock de "Sol Ring C18" + "Sol Ring Promo" si ambos normalizan a "sol ring".
+    """
     if not name: return 0
     clean = normalize_card_name(name)
     now = time.time()
     
+    # Check Caché
     if clean in STOCK_CACHE:
         if now - STOCK_CACHE[clean][1] < CACHE_TTL: return STOCK_CACHE[clean][0]
         else: del STOCK_CACHE[clean]
 
-    # FIX CRÍTICO: Solicitamos 'variants' para sumar stock real
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
-    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": clean, "limit": 50, "fields": "stock,name,variants"}
+    # Solicitamos variantes para sumar correctamente
+    params = {
+        "login": settings.JUMPSELLER_STORE, 
+        "authtoken": settings.JUMPSELLER_API_TOKEN, 
+        "query": clean, 
+        "limit": 50, 
+        "fields": "stock,name,variants"
+    }
     
     total = 0
     try:
@@ -106,12 +136,16 @@ def get_jumpseller_stock_for_name(name):
         if resp.status_code == 200:
             for p in resp.json():
                 prod = p.get("product", {})
-                # Verificamos nombre exacto normalizado
-                if normalize_card_name(prod.get("name", "")) == clean:
+                prod_name_raw = prod.get("name", "")
+                
+                # Normalizamos el nombre del producto de la tienda
+                if normalize_card_name(prod_name_raw) == clean:
                     stock_main = prod.get("stock", 0)
                     variants = prod.get("variants", [])
                     
-                    # Sumamos variantes si existen (Ej: Sol Ring con ediciones)
+                    # Lógica de Suma:
+                    # Si tiene variantes, sumamos sus stocks.
+                    # Usamos max() por seguridad si Jumpseller reporta el total en el padre.
                     if variants:
                         stock_vars = sum(v.get("stock", 0) for v in variants)
                         total += max(stock_main, stock_vars)
