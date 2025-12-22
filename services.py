@@ -91,23 +91,47 @@ def get_jumpseller_stock_for_name(name):
     now = time.time()
     
     if clean in STOCK_CACHE:
-        if now - STOCK_CACHE[clean][1] < CACHE_TTL: return STOCK_CACHE[clean][0]
-        else: del STOCK_CACHE[clean]
+        if now - STOCK_CACHE[clean][1] < CACHE_TTL: 
+            return STOCK_CACHE[clean][0]
+        else: 
+            del STOCK_CACHE[clean]
 
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
-    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": clean, "limit": 50, "fields": "stock,name"}
+    params = {
+        "login": settings.JUMPSELLER_STORE, 
+        "authtoken": settings.JUMPSELLER_API_TOKEN, 
+        "query": clean, 
+        "limit": 50, 
+        "fields": "stock,name,variants" 
+    }
+    
     total = 0
     try:
         resp = session.get(url, params=params, timeout=5)
         if resp.status_code == 200:
-            for p in resp.json():
-                if normalize_card_name(p.get("product", {}).get("name", "")) == clean:
-                    total += p.get("product", {}).get("stock", 0)
-    except Exception: pass
+            products = resp.json()
+            
+            for p in products:
+                prod = p.get("product", {})
+                prod_name = prod.get("name", "")
+                prod_clean = normalize_card_name(prod_name)
+                
+                if prod_clean == clean:
+                    stock_main = prod.get("stock", 0)
+                    variants = prod.get("variants", [])
+                    
+                    if variants:
+                        stock_variants = sum(v.get("stock", 0) for v in variants)
+                        total += max(stock_main, stock_variants)
+                    else:
+                        total += stock_main
+                        
+    except Exception as e: 
+        print(f"⚠️ Error stock Jumpseller: {e}")
+        pass
     
     STOCK_CACHE[clean] = (total, now)
     return total
-
 def crear_cupon_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0: return False
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
