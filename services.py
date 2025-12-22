@@ -4,308 +4,244 @@ import io
 import json
 import smtplib
 import datetime
-import re 
+import re
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from models import GameCoinUser
 from config import settings
 
+def create_robust_session():
+    session = requests.Session()
+    retry = Retry(
+        total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({
+        "User-Agent": "GameQuest-Bot/2.4 (Smart Stock)", 
+        "Content-Type": "application/json"
+    })
+    return session
+
+session = create_robust_session()
+
+STOCK_CACHE = {}     
+SCRYFALL_CACHE = {}  
+CACHE_TTL = 300 
+
 def normalize_card_name(name):
-    """
-    Normaliza el nombre para comparar bases.
-    Ej: "Sol Ring (Commander) [Foil]" -> "sol ring"
-    Ej: "Sol Ring - Magic 2010" -> "sol ring"
-    """
     if not isinstance(name, str): return ""
-    name = name.split("|")[0]  
-    name = name.split("(")[0]  
-    name = name.split("[")[0]  
-    name = name.split("-")[0]  # CLAVE: Ignora lo que venga después del guion
+    name = name.split("|")[0].split("(")[0].split("[")[0]
+    name = re.split(r'\s+[-–—]\s+', name)[0]
     return name.strip().lower()
 
-def fetch_scryfall_prices(scryfall_ids):
+def _fetch_scryfall_batch(batch_ids):
     url = "https://api.scryfall.com/cards/collection"
-    unique_ids = [sid for sid in pd.unique(scryfall_ids) if isinstance(sid, str)]
-    prices_map = {}
-    batch_size = 75  
+    identifiers = [{"id": sid} for sid in batch_ids]
+    local_map = {}
+    try:
+        resp = session.post(url, json={"identifiers": identifiers}, timeout=8)
+        if resp.status_code == 200:
+            for card in resp.json().get("data", []):
+                p = card.get("prices", {})
+                l = card.get("legalities", {})
+                local_map[card.get("id")] = {
+                    "usd": float(p["usd"]) if p.get("usd") else None,
+                    "usd_foil": float(p["usd_foil"]) if p.get("usd_foil") else None,
+                    "banned_commander": l.get("commander") == "banned",
+                    "banned_modern": l.get("modern") == "banned"
+                }
+    except Exception: pass
+    return local_map
 
-    for i in range(0, len(unique_ids), batch_size):
-        batch = unique_ids[i:i+batch_size]
-        identifiers = [{"id": sid} for sid in batch]
-        try:
-            resp = requests.post(url, json={"identifiers": identifiers}, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                for card in data.get("data", []):
-                    sid = card.get("id")
-                    p = card.get("prices", {})
-                    prices_map[sid] = {
-                        "usd": float(p["usd"]) if p.get("usd") else None,
-                        "usd_foil": float(p["usd_foil"]) if p.get("usd_foil") else None
-                    }
-        except Exception as e:
-            print(f"Error fetching Scryfall batch: {e}")
-            continue 
-    return prices_map
+def fetch_scryfall_data(scryfall_ids):
+    unique_ids = [sid for sid in pd.unique(scryfall_ids) if isinstance(sid, str)]
+    data_map = {}
+    missing = []
+    now = time.time()
+
+    for sid in unique_ids:
+        if sid in SCRYFALL_CACHE and (now - SCRYFALL_CACHE[sid][1] < CACHE_TTL):
+            data_map[sid] = SCRYFALL_CACHE[sid][0]
+        else:
+            missing.append(sid)
+
+    if missing:
+        batch_size = 75
+        batches = [missing[i:i+batch_size] for i in range(0, len(missing), batch_size)]
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(_fetch_scryfall_batch, b) for b in batches]
+            for f in as_completed(futures):
+                res = f.result()
+                data_map.update(res)
+                for k, v in res.items(): SCRYFALL_CACHE[k] = (v, now)
+            
+    return data_map
 
 def get_jumpseller_stock_for_name(name):
     if not name: return 0
-    clean_search = normalize_card_name(name)
+    clean = normalize_card_name(name)
+    now = time.time()
     
+    if clean in STOCK_CACHE:
+        if now - STOCK_CACHE[clean][1] < CACHE_TTL: return STOCK_CACHE[clean][0]
+        else: del STOCK_CACHE[clean]
+
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
-    params = {
-        "login": settings.JUMPSELLER_STORE,
-        "authtoken": settings.JUMPSELLER_API_TOKEN,
-        "query": clean_search,
-        "limit": 50, 
-        "fields": "stock,name" 
-    }
-    
-    total_stock = 0
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": clean, "limit": 50, "fields": "stock,name"}
+    total = 0
     try:
-        resp = requests.get(url, params=params, timeout=5)
+        resp = session.get(url, params=params, timeout=5)
         if resp.status_code == 200:
-            products = resp.json()
-            for p in products:
-                prod = p.get("product", {})
-                prod_name_raw = prod.get("name", "")
-                prod_name_clean = normalize_card_name(prod_name_raw)
-                
-                if prod_name_clean == clean_search:
-                    total_stock += prod.get("stock", 0)
-    except Exception as e: 
-        print(f"Error checking stock for {name}: {e}")
-        pass
-        
-    return total_stock
+            for p in resp.json():
+                if normalize_card_name(p.get("product", {}).get("name", "")) == clean:
+                    total += p.get("product", {}).get("stock", 0)
+    except Exception: pass
+    
+    STOCK_CACHE[clean] = (total, now)
+    return total
 
 def crear_cupon_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0: return False
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    
     now = datetime.datetime.now()
-    begins = now.strftime('%Y-%m-%d')
-    expires = (now + datetime.timedelta(days=365)).strftime('%Y-%m-%d')
-
     payload = {
         "promotion": {
-            "name": f"Canje GameCoins {codigo}",
-            "code": codigo,
-            "enabled": True,
-            "discount_target": "order",
-            "type": "fix",
-            "discount_amount_fix": monto,
-            "minimum_order_amount": 0,
-            "begins_at": begins,
-            "expires_at": expires,
-            "accumulable": False
+            "name": f"Canje GameCoins {codigo}", "code": codigo, "enabled": True,
+            "discount_target": "order", "type": "fix", "discount_amount_fix": monto,
+            "minimum_order_amount": 0, "begins_at": now.strftime('%Y-%m-%d'),
+            "expires_at": (now + datetime.timedelta(days=365)).strftime('%Y-%m-%d'), "accumulable": False
         }
     }
-    
-    try:
-        r = requests.post(url, params=params, json=payload, timeout=10)
-        return r.status_code in [200, 201]
-    except Exception as e:
-        print(f"❌ Error creando cupón: {str(e)}")
-        return False
+    try: return session.post(url, params=params, json=payload, timeout=10).status_code in [200, 201]
+    except: return False
 
 def actualizar_orden_jumpseller(order_id, estado, notas=""):
     url = f"{settings.JUMPSELLER_API_BASE}/orders/{order_id}.json"
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    payload = {"order": {"status": estado, "additional_information": notas}}
-    try: 
-        requests.put(url, params=params, json=payload, timeout=10)
-    except: 
-        pass
+    try: session.put(url, params=params, json={"order": {"status": estado, "additional_information": notas}}, timeout=10)
+    except: pass
 
 def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
-    try:
-        df = pd.read_csv(io.BytesIO(file_content))
-    except Exception: 
-        return {"error": "No se pudo leer el CSV. Asegúrate de que sea válido."}
+    try: df = pd.read_csv(io.BytesIO(file_content))
+    except: return {"error": "CSV inválido."}
 
-    col_map = { 
-        "Name": "name", "Set code": "set_code", "Foil": "foil", 
-        "Quantity": "quantity", "Purchase price": "purchase_price", 
-        "Scryfall ID": "scryfall_id", "ManaBox ID": "manabox_id" 
-    }
-    df = df.rename(columns=col_map)
-    if "name" not in df.columns: return {"error": "Falta columna 'Name' en el CSV."}
+    df = df.rename(columns={"Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id"})
+    if "name" not in df.columns: return {"error": "Falta columna 'Name'."}
 
     df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors="coerce")
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
     df["has_price"] = df["purchase_price"].notna()
     
+    scryfall_map = {}
     if "scryfall_id" in df.columns: 
-        df["scryfall_id_prices"] = fetch_scryfall_prices(df["scryfall_id"])
+        scryfall_map = fetch_scryfall_data(df["scryfall_id"])
         
+    df["banned_alert"] = df["scryfall_id"].map(lambda x: scryfall_map.get(x, {}).get("banned_commander", False))
+    
     df["cash_buy_price_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
     df["gamecoin_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
 
-    # Solo si es modo interno consultamos stock
     if internal_mode:
         names = df["name"].unique()
         stock_map = {}
-        with ThreadPoolExecutor(max_workers=5) as executor: 
+        with ThreadPoolExecutor(max_workers=10) as executor: 
             results = executor.map(get_jumpseller_stock_for_name, names)
-            for name, stock in zip(names, results):
-                stock_map[name] = stock
+            for name, stock in zip(names, results): stock_map[name] = stock
+        
         df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
+        
+        def calcular_sugerido(row):
+            nombre = normalize_card_name(row["name"])
+            stock_actual = row["stock_tienda"]
+            limite = settings.STOCK_LIMIT_HIGH_DEMAND if nombre in settings.HIGH_DEMAND_CARDS else settings.STOCK_LIMIT_DEFAULT
+            espacio = max(0, limite - stock_actual)
+            return min(row["quantity"], espacio)
+
+        df["qty_sugerida"] = df.apply(calcular_sugerido, axis=1)
     else:
         df["stock_tienda"] = 0
+        df["qty_sugerida"] = df["quantity"]
 
     def clasificar(row):
         price = row["purchase_price"]
         is_foil = str(row.get("foil", "")).lower() == "foil"
         
-        if is_foil and price >= settings.STAKE_PRICE_THRESHOLD: 
-            return "estaca", "Posible Estaca (Foil Caro)"
-        if not row["has_price"] or price < settings.MIN_PURCHASE_USD: 
-            return "no_compra", "Bulk / Bajo Precio"
+        if row.get("banned_alert"):
+            return "no_compra", "BANEADA (Commander)"
+
+        if is_foil and price >= settings.STAKE_PRICE_THRESHOLD: return "estaca", "Posible Estaca (Foil)"
+        if not row["has_price"] or price < settings.MIN_PURCHASE_USD: return "no_compra", "Bulk / Bajo Precio"
+        
+        if internal_mode and row["qty_sugerida"] == 0:
+            return "no_compra", "Stock Lleno"
+            
         return "compra", "Comprar"
 
     res = df.apply(clasificar, axis=1, result_type="expand")
     df["categoria"], df["buy_decision"] = res[0], res[1]
     df["sort_rank"] = df["categoria"].map({"compra": 1, "estaca": 2, "no_compra": 3})
     
-    cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria", "stock_tienda"]
+    final_cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria", "stock_tienda", "qty_sugerida", "banned_alert"]
+    cols_existentes = [c for c in final_cols if c in df.columns]
     
-    final_cols = [c for c in cols if c in df.columns]
-    
-    return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[final_cols].fillna("").to_dict(orient="records")
+    return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[cols_existentes].fillna("").to_dict(orient="records")
 
 def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
-    if not settings.SMTP_EMAIL or not settings.SMTP_PASSWORD: return {"error": "Correo no configurado"}
-    
+    if not settings.SMTP_EMAIL or not settings.SMTP_PASSWORD: return {"error": "SMTP no configurado"}
     msg = MIMEMultipart()
-    msg['From'] = settings.SMTP_EMAIL
-    msg['To'] = settings.TARGET_EMAIL
-    msg['Subject'] = f"Buylist Recibida: {datos_cliente.get('nombre')}"
-    
-    filas = ""
-    for c in lista_cartas: 
-        filas += f"<tr><td>{c.get('quantity')}</td><td>{c.get('name')} ({c.get('set_code')})</td><td>${c.get('price_unit')}</td><td>${c.get('price_total')}</td></tr>"
-
-    html = f"""
-    <h2>Solicitud de Venta</h2>
-    <p><strong>Cliente:</strong> {datos_cliente.get('nombre')}<br>
-    <strong>Email:</strong> {datos_cliente.get('email')}<br>
-    <strong>Método Pago:</strong> {datos_cliente.get('metodo_pago', 'No especificado')}</p>
-    <table border="1" style="border-collapse: collapse; width: 100%;">
-        <tr style="background-color: #f2f2f2;"><th>Cant</th><th>Carta</th><th>Unit</th><th>Total</th></tr>
-        {filas}
-    </table>
-    <h3>Total Cash: {total_clp} | Total GC: {total_gc}</h3>
-    """
+    msg['From'] = settings.SMTP_EMAIL; msg['To'] = settings.TARGET_EMAIL; msg['Subject'] = f"Buylist: {datos_cliente.get('nombre')}"
+    rows = "".join([f"<tr><td>{c.get('quantity')}</td><td>{c.get('name')} ({c.get('set_code')})</td><td>${c.get('price_unit')}</td><td>${c.get('price_total')}</td></tr>" for c in lista_cartas])
+    html = f"<h2>Solicitud Venta</h2><p>Cliente: {datos_cliente.get('nombre')}<br>Email: {datos_cliente.get('email')}</p><table border='1'>{rows}</table><h3>Total Cash: {total_clp} | Total GC: {total_gc}</h3>"
     msg.attach(MIMEText(html, 'html'))
-    
     try:
-        s = smtplib.SMTP('smtp.gmail.com', 587)
-        s.starttls()
-        s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string())
-        s.quit()
+        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
+        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string()); s.quit()
         return {"status": "ok"}
-    except Exception as e: 
-        return {"error": str(e)}
+    except Exception as e: return {"error": str(e)}
 
 def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
-    page = 1
-    nuevos = 0
-    actualizados = 0
-    
-    print("--- 🔄 INICIANDO SYNC OPTIMIZADO ---")
-    
+    page = 1; nuevos = 0; actualizados = 0
     while True:
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
-        params = {
-            "login": settings.JUMPSELLER_STORE,
-            "authtoken": settings.JUMPSELLER_API_TOKEN,
-            "limit": 50,
-            "page": page
-        }
-        
         try:
-            resp = requests.get(url, params=params, timeout=20)
-            if resp.status_code != 200: break
-            clientes_api = resp.json()
-            if not clientes_api: break
-            
-            emails_lote = []
-            clientes_map = {}
-            
-            for c in clientes_api:
-                cust_data = c.get("customer", {})
-                email = cust_data.get("email", "").strip().lower()
-                if email:
-                    emails_lote.append(email)
-                    clientes_map[email] = cust_data
-
-            if not emails_lote:
-                page += 1
-                continue
-
+            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "limit": 50, "page": page}, timeout=20)
+            if resp.status_code != 200 or not resp.json(): break
+            clientes_api = resp.json(); emails_lote = []
+            clientes_map = {c.get("customer", {}).get("email", "").strip().lower(): c.get("customer", {}) for c in clientes_api if c.get("customer", {}).get("email")}
+            emails_lote = list(clientes_map.keys())
+            if not emails_lote: page += 1; continue
             usuarios_db = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email.in_(emails_lote)).all()
             usuarios_db_map = {u.email: u for u in usuarios_db}
-
-            for email, data_api in clientes_map.items():
-                bill = data_api.get("billing_address") or {}
-                ship = data_api.get("shipping_address") or {}
-                
-                nombre = (data_api.get('name') or bill.get('name') or ship.get('name') or "Cliente").strip()
-                apellido = (data_api.get('surname') or bill.get('surname') or ship.get('surname') or "").strip()
-                if not apellido: apellido = "-"
-
-                rut = (data_api.get("tax_id") or data_api.get("taxid") or 
-                       bill.get("taxid") or bill.get("tax_id") or 
-                       ship.get("taxid") or ship.get("tax_id") or "")
-                
-                if not rut and "fields" in data_api:
-                    for field in data_api.get("fields", []) or []:
-                        if "rut" in str(field.get("label", "")).lower():
-                            rut = str(field.get("value", "")).strip()
-                            break
-
+            for email, data in clientes_map.items():
+                nom = (data.get('name') or "Cliente").strip()
+                ape = (data.get('surname') or "").strip() or "-"
+                rut = (data.get("tax_id") or "")
+                if not rut:
+                    for f in data.get("fields", []):
+                        if "rut" in str(f.get("label", "")).lower(): rut = str(f.get("value", "")).strip(); break
                 user = usuarios_db_map.get(email)
-                
                 if user:
-                    cambios = False
-                    if nombre and nombre != "Cliente" and user.name != nombre:
-                        user.name = nombre; cambios = True
-                    if apellido and apellido != "-" and user.surname != apellido:
-                        user.surname = apellido; cambios = True
-                    
-                    if rut:
-                        if "PENDIENTE" in user.rut or (user.rut != rut):
-                            rut_existe = db_session.query(GameCoinUser_Model).filter(
-                                GameCoinUser_Model.rut == rut, 
-                                GameCoinUser_Model.id != user.id
-                            ).first()
-                            if not rut_existe:
-                                user.rut = rut; cambios = True
-                    
-                    if cambios: actualizados += 1
+                    chg = False
+                    if user.name != nom: user.name = nom; chg = True
+                    if user.surname != ape: user.surname = ape; chg = True
+                    if rut and ("PENDIENTE" in user.rut or user.rut != rut):
+                        if not db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut, GameCoinUser_Model.id != user.id).first():
+                            user.rut = rut; chg = True
+                    if chg: actualizados += 1
                 else:
-                    rut_final = rut if rut else f"PENDIENTE-{email}"
-                    rut_ocupado = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut_final).first()
-                    if rut_ocupado: rut_final = f"DUP-{rut_final}-{email}"
-
-                    new_user = GameCoinUser_Model(
-                        email=email, saldo=0, name=nombre, surname=apellido, rut=rut_final
-                    )
-                    db_session.add(new_user)
-                    nuevos += 1
-            
-            db_session.commit()
-            print(f"✅ Página {page} procesada. Nuevos: {nuevos} | Act: {actualizados}")
-            page += 1
-            
+                    rf = rut if rut else f"PENDIENTE-{email}"
+                    if db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rf).first(): rf = f"DUP-{rf}-{email}"
+                    db_session.add(GameCoinUser_Model(email=email, name=nom, surname=ape, rut=rf)); nuevos += 1
+            db_session.commit(); page += 1
         except Exception as e:
-            print(f"❌ Error Critical Sync Page {page}: {str(e)}")
-            db_session.rollback()
-            return {"status": "error", "detail": str(e)}
-            
+            db_session.rollback(); return {"status": "error", "detail": str(e)}
     return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
