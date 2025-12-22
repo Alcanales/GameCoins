@@ -15,6 +15,7 @@ from urllib3.util.retry import Retry
 from models import GameCoinUser
 from config import settings
 
+# --- INFRAESTRUCTURA DE RED ---
 def create_robust_session():
     session = requests.Session()
     retry = Retry(
@@ -25,13 +26,14 @@ def create_robust_session():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "GameQuest-Bot/2.4 (Smart Stock)", 
+        "User-Agent": "GameQuest-Bot/2.5 (Variant Fix)", 
         "Content-Type": "application/json"
     })
     return session
 
 session = create_robust_session()
 
+# --- CACHÉS ---
 STOCK_CACHE = {}     
 SCRYFALL_CACHE = {}  
 CACHE_TTL = 300 
@@ -91,47 +93,35 @@ def get_jumpseller_stock_for_name(name):
     now = time.time()
     
     if clean in STOCK_CACHE:
-        if now - STOCK_CACHE[clean][1] < CACHE_TTL: 
-            return STOCK_CACHE[clean][0]
-        else: 
-            del STOCK_CACHE[clean]
+        if now - STOCK_CACHE[clean][1] < CACHE_TTL: return STOCK_CACHE[clean][0]
+        else: del STOCK_CACHE[clean]
 
+    # FIX CRÍTICO: Solicitamos 'variants' para sumar stock real
     url = f"{settings.JUMPSELLER_API_BASE}/products.json"
-    params = {
-        "login": settings.JUMPSELLER_STORE, 
-        "authtoken": settings.JUMPSELLER_API_TOKEN, 
-        "query": clean, 
-        "limit": 50, 
-        "fields": "stock,name,variants" 
-    }
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": clean, "limit": 50, "fields": "stock,name,variants"}
     
     total = 0
     try:
         resp = session.get(url, params=params, timeout=5)
         if resp.status_code == 200:
-            products = resp.json()
-            
-            for p in products:
+            for p in resp.json():
                 prod = p.get("product", {})
-                prod_name = prod.get("name", "")
-                prod_clean = normalize_card_name(prod_name)
-                
-                if prod_clean == clean:
+                # Verificamos nombre exacto normalizado
+                if normalize_card_name(prod.get("name", "")) == clean:
                     stock_main = prod.get("stock", 0)
                     variants = prod.get("variants", [])
                     
+                    # Sumamos variantes si existen (Ej: Sol Ring con ediciones)
                     if variants:
-                        stock_variants = sum(v.get("stock", 0) for v in variants)
-                        total += max(stock_main, stock_variants)
+                        stock_vars = sum(v.get("stock", 0) for v in variants)
+                        total += max(stock_main, stock_vars)
                     else:
                         total += stock_main
-                        
-    except Exception as e: 
-        print(f"⚠️ Error stock Jumpseller: {e}")
-        pass
+    except Exception: pass
     
     STOCK_CACHE[clean] = (total, now)
     return total
+
 def crear_cupon_jumpseller(codigo, monto):
     if not monto or int(monto) <= 0: return False
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
@@ -199,14 +189,10 @@ def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
         price = row["purchase_price"]
         is_foil = str(row.get("foil", "")).lower() == "foil"
         
-        if row.get("banned_alert"):
-            return "no_compra", "BANEADA (Commander)"
-
+        if row.get("banned_alert"): return "no_compra", "BANEADA (Commander)"
         if is_foil and price >= settings.STAKE_PRICE_THRESHOLD: return "estaca", "Posible Estaca (Foil)"
         if not row["has_price"] or price < settings.MIN_PURCHASE_USD: return "no_compra", "Bulk / Bajo Precio"
-        
-        if internal_mode and row["qty_sugerida"] == 0:
-            return "no_compra", "Stock Lleno"
+        if internal_mode and row["qty_sugerida"] == 0: return "no_compra", "Stock Lleno"
             
         return "compra", "Comprar"
 
