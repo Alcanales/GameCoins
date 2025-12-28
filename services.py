@@ -15,9 +15,7 @@ from urllib3.util.retry import Retry
 from models import GameCoinUser
 from config import settings
 
-# --- INFRAESTRUCTURA DE RED ---
 def create_robust_session():
-    """Sesión HTTP persistente con reintentos automáticos anti-caídas."""
     session = requests.Session()
     retry = Retry(
         total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
@@ -26,226 +24,183 @@ def create_robust_session():
     adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({
-        "User-Agent": "GameQuest-Bot/3.0 (Ultra Robust)", 
-        "Content-Type": "application/json"
-    })
+    session.headers.update({"User-Agent": "GameQuest-Bot/3.3", "Content-Type": "application/json"})
     return session
 
 session = create_robust_session()
-
-# --- CACHÉS ---
 STOCK_CACHE = {}     
-SCRYFALL_CACHE = {}  
+SCRYFALL_CACHE = {}
+BASE_PRICE_CACHE = {}
 CACHE_TTL = 300 
 
 def normalize_card_name(name):
-    """
-    Normalización Blindada: Convierte cualquier variación de nombre al nombre base.
-    Ejemplos que resuelve:
-    - "Sol Ring (Commander)" -> "sol ring"
-    - "Sol Ring - C19"       -> "sol ring"
-    - "Sol Ring C18"         -> "sol ring" (Nuevo: Detecta códigos de set al final)
-    - "Sol Ring Promo"       -> "sol ring" (Nuevo: Detecta palabras clave)
-    - "Fire // Ice"          -> "fire"
-    """
     if not isinstance(name, str): return ""
-    
-    name = name.split("|")[0]       
-    name = name.split(" // ")[0]    
-    name = name.split(" / ")[0]     
-    name = name.split("(")[0]       
-    name = name.split("[")[0]       
-    name = re.split(r'\s+[-–—]\s+', name)[0] 
-
+    name = name.split("|")[0].split("(")[0].split("[")[0]
+    name = name.split(" // ")[0].split(" / ")[0]
+    name = re.split(r'\s+[-–—]\s+', name)[0]
     name = name.strip()
-    name = re.sub(r'\s+(?:[a-zA-Z0-9]{3,4}|Promo|Foil|Prerelease|List|Art|Showcase|Extended|Borderless)\s*$', '', name, flags=re.IGNORECASE)
-
+    name = re.sub(r'\s+(?:[a-zA-Z0-9]{3,4}|Promo|Foil|Prerelease|List|Art|Showcase|Extended|Borderless|Etched)\s*$', '', name, flags=re.IGNORECASE)
     return name.strip().lower()
 
 def _fetch_scryfall_batch(batch_ids):
     url = "https://api.scryfall.com/cards/collection"
-    identifiers = [{"id": sid} for sid in batch_ids]
-    local_map = {}
     try:
-        resp = session.post(url, json={"identifiers": identifiers}, timeout=8)
+        resp = session.post(url, json={"identifiers": [{"id": sid} for sid in batch_ids]}, timeout=8)
         if resp.status_code == 200:
-            for card in resp.json().get("data", []):
-                p = card.get("prices", {})
-                l = card.get("legalities", {})
-                local_map[card.get("id")] = {
-                    "usd": float(p["usd"]) if p.get("usd") else None,
-                    "usd_foil": float(p["usd_foil"]) if p.get("usd_foil") else None,
-                    "banned_commander": l.get("commander") == "banned",
-                    "banned_modern": l.get("modern") == "banned"
-                }
-    except Exception: pass
-    return local_map
+            return {c["id"]: {"usd": float(c["prices"].get("usd") or 0), "usd_foil": float(c["prices"].get("usd_foil") or 0), "banned": c["legalities"].get("commander") == "banned"} for c in resp.json().get("data", [])}
+    except: pass
+    return {}
 
-def fetch_scryfall_data(scryfall_ids):
-    unique_ids = [sid for sid in pd.unique(scryfall_ids) if isinstance(sid, str)]
-    data_map = {}
-    missing = []
-    now = time.time()
-
-    for sid in unique_ids:
-        if sid in SCRYFALL_CACHE and (now - SCRYFALL_CACHE[sid][1] < CACHE_TTL):
-            data_map[sid] = SCRYFALL_CACHE[sid][0]
-        else:
-            missing.append(sid)
-
+def fetch_scryfall_data(ids):
+    u_ids = [i for i in pd.unique(ids) if isinstance(i, str)]
+    data, missing, now = {}, [], time.time()
+    for i in u_ids:
+        if i in SCRYFALL_CACHE and (now - SCRYFALL_CACHE[i][1] < CACHE_TTL): data[i] = SCRYFALL_CACHE[i][0]
+        else: missing.append(i)
     if missing:
-        batch_size = 75
-        batches = [missing[i:i+batch_size] for i in range(0, len(missing), batch_size)]
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_scryfall_batch, b) for b in batches]
-            for f in as_completed(futures):
-                res = f.result()
-                data_map.update(res)
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            for res in ex.map(_fetch_scryfall_batch, [missing[i:i+75] for i in range(0, len(missing), 75)]):
+                data.update(res)
                 for k, v in res.items(): SCRYFALL_CACHE[k] = (v, now)
-            
-    return data_map
+    return data
 
-def get_jumpseller_stock_for_name(name):
-    """
-    Busca productos en Jumpseller sumando TODAS las variantes y coincidencias.
-    Suma stock de "Sol Ring C18" + "Sol Ring Promo" si ambos normalizan a "sol ring".
-    """
-    if not name: return 0
+def get_cheapest_print_price(name):
     clean = normalize_card_name(name)
     now = time.time()
+    if clean in BASE_PRICE_CACHE:
+        if now - BASE_PRICE_CACHE[clean][1] < CACHE_TTL: return BASE_PRICE_CACHE[clean][0]
     
-    # Check Caché
-    if clean in STOCK_CACHE:
-        if now - STOCK_CACHE[clean][1] < CACHE_TTL: return STOCK_CACHE[clean][0]
-        else: del STOCK_CACHE[clean]
+    url = "https://api.scryfall.com/cards/search"
+    params = {"q": f'!"{clean}" game:paper -is:digital', "order": "usd", "dir": "asc", "unique": "prints"}
+    try:
+        time.sleep(0.05)
+        resp = session.get(url, params=params, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data"):
+                c = data["data"][0]
+                p = float(c.get("prices", {}).get("usd") or c.get("prices", {}).get("usd_foil") or 0)
+                BASE_PRICE_CACHE[clean] = (p, now)
+                return p
+    except: pass
+    BASE_PRICE_CACHE[clean] = (0.0, now)
+    return 0.0
 
-    url = f"{settings.JUMPSELLER_API_BASE}/products.json"
-    # Solicitamos variantes para sumar correctamente
-    params = {
-        "login": settings.JUMPSELLER_STORE, 
-        "authtoken": settings.JUMPSELLER_API_TOKEN, 
-        "query": clean, 
-        "limit": 50, 
-        "fields": "stock,name,variants"
-    }
+def get_jumpseller_stock_for_name(name):
+    if not name: return 0
+    clean = normalize_card_name(name); now = time.time()
+    if clean in STOCK_CACHE and (now - STOCK_CACHE[clean][1] < CACHE_TTL): return STOCK_CACHE[clean][0]
     
+    url = f"{settings.JUMPSELLER_API_BASE}/products.json"
     total = 0
     try:
-        resp = session.get(url, params=params, timeout=5)
+        resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": clean, "limit": 50, "fields": "stock,name,variants"}, timeout=6)
         if resp.status_code == 200:
             for p in resp.json():
                 prod = p.get("product", {})
-                prod_name_raw = prod.get("name", "")
-                
-                # Normalizamos el nombre del producto de la tienda
-                if normalize_card_name(prod_name_raw) == clean:
-                    stock_main = prod.get("stock", 0)
-                    variants = prod.get("variants", [])
-                    
-                    # Lógica de Suma:
-                    # Si tiene variantes, sumamos sus stocks.
-                    # Usamos max() por seguridad si Jumpseller reporta el total en el padre.
-                    if variants:
-                        stock_vars = sum(v.get("stock", 0) for v in variants)
-                        total += max(stock_main, stock_vars)
-                    else:
-                        total += stock_main
-    except Exception: pass
-    
+                if normalize_card_name(prod.get("name", "")) == clean:
+                    vars_stock = sum(v.get("stock", 0) for v in prod.get("variants", []))
+                    total += max(prod.get("stock", 0), vars_stock)
+    except: pass
     STOCK_CACHE[clean] = (total, now)
     return total
 
 def crear_cupon_jumpseller(codigo, monto):
-    if not monto or int(monto) <= 0: return False
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    now = datetime.datetime.now()
-    payload = {
-        "promotion": {
-            "name": f"Canje GameCoins {codigo}", "code": codigo, "enabled": True,
-            "discount_target": "order", "type": "fix", "discount_amount_fix": monto,
-            "minimum_order_amount": 0, "begins_at": now.strftime('%Y-%m-%d'),
-            "expires_at": (now + datetime.timedelta(days=365)).strftime('%Y-%m-%d'), "accumulable": False
-        }
-    }
-    try: return session.post(url, params=params, json=payload, timeout=10).status_code in [200, 201]
+    if monto <= 0: return False
+    payload = {"promotion": {"name": f"Canje GC {codigo}", "code": codigo, "enabled": True, "discount_target": "order", "type": "fix", "discount_amount_fix": monto, "begins_at": datetime.datetime.now().strftime('%Y-%m-%d'), "expires_at": (datetime.datetime.now() + datetime.timedelta(days=365)).strftime('%Y-%m-%d')}}
+    try: return session.post(f"{settings.JUMPSELLER_API_BASE}/promotions.json", params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}, json=payload, timeout=10).status_code in [200, 201]
     except: return False
 
-def actualizar_orden_jumpseller(order_id, estado, notas=""):
-    url = f"{settings.JUMPSELLER_API_BASE}/orders/{order_id}.json"
-    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    try: session.put(url, params=params, json={"order": {"status": estado, "additional_information": notas}}, timeout=10)
+def actualizar_orden_jumpseller(oid, st, msg=""):
+    try: session.put(f"{settings.JUMPSELLER_API_BASE}/orders/{oid}.json", params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}, json={"order": {"status": st, "additional_information": msg}}, timeout=10)
     except: pass
 
-def procesar_csv_manabox(file_content: bytes, internal_mode: bool = False):
-    try: df = pd.read_csv(io.BytesIO(file_content))
-    except: return {"error": "CSV inválido."}
-
-    df = df.rename(columns={"Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id"})
-    if "name" not in df.columns: return {"error": "Falta columna 'Name'."}
-
-    df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors="coerce")
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
-    df["has_price"] = df["purchase_price"].notna()
+def procesar_csv_manabox(content, internal_mode=False):
+    try: df = pd.read_csv(io.BytesIO(content))
+    except: return {"error": "CSV Inválido"}
     
-    scryfall_map = {}
-    if "scryfall_id" in df.columns: 
-        scryfall_map = fetch_scryfall_data(df["scryfall_id"])
-        
-    df["banned_alert"] = df["scryfall_id"].map(lambda x: scryfall_map.get(x, {}).get("banned_commander", False))
+    cols = {"Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id"}
+    df = df.rename(columns=cols)
+    if "name" not in df.columns: return {"error": "Falta columna Name"}
     
-    df["cash_buy_price_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
-    df["gamecoin_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100.0))*100)
-
+    df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
+    df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce')
+    
+    sf_data = fetch_scryfall_data(df["scryfall_id"]) if "scryfall_id" in df.columns else {}
+    df["banned"] = df["scryfall_id"].map(lambda x: sf_data.get(x, {}).get("banned", False))
+    
+    df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100)*100))
+    df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).fillna(0).apply(lambda x: int(round(x/100)*100))
+    
     if internal_mode:
-        names = df["name"].unique()
-        stock_map = {}
-        with ThreadPoolExecutor(max_workers=10) as executor: 
-            results = executor.map(get_jumpseller_stock_for_name, names)
-            for name, stock in zip(names, results): stock_map[name] = stock
-        
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            stocks = list(ex.map(get_jumpseller_stock_for_name, df["name"].unique()))
+            stock_map = dict(zip(df["name"].unique(), stocks))
         df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
         
-        def calcular_sugerido(row):
-            nombre = normalize_card_name(row["name"])
-            stock_actual = row["stock_tienda"]
-            limite = settings.STOCK_LIMIT_HIGH_DEMAND if nombre in settings.HIGH_DEMAND_CARDS else settings.STOCK_LIMIT_DEFAULT
-            espacio = max(0, limite - stock_actual)
-            return min(row["quantity"], espacio)
-
-        df["qty_sugerida"] = df.apply(calcular_sugerido, axis=1)
+        def calc_sug(row):
+            lim = settings.STOCK_LIMIT_HIGH_DEMAND if normalize_card_name(row["name"]) in settings.HIGH_DEMAND_CARDS else settings.STOCK_LIMIT_DEFAULT
+            return max(0, min(row["quantity"], lim - row["stock_tienda"]))
+        df["qty_sug"] = df.apply(calc_sug, axis=1)
     else:
         df["stock_tienda"] = 0
-        df["qty_sugerida"] = df["quantity"]
+        df["qty_sug"] = df["quantity"]
+
+    df["is_foil"] = df["foil"].astype(str).str.lower() == "foil"
+    variants = ["prerelease", "promo", "showcase", "extended", "borderless", "etched"]
+    
+    def check_candidate(row):
+        if row["purchase_price"] >= settings.STAKE_PRICE_THRESHOLD: return True
+        if row["is_foil"]: return True
+        if any(k in str(row["name"]).lower() for k in variants): return True
+        return False
+
+    cands = df[df.apply(check_candidate, axis=1)]["name"].unique()
+    base_ps = {}
+    if len(cands) > 0:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            ps = list(ex.map(get_cheapest_print_price, cands))
+            base_ps = dict(zip(cands, ps))
 
     def clasificar(row):
-        price = row["purchase_price"]
-        is_foil = str(row.get("foil", "")).lower() == "foil"
+        if row["banned"]: return "no_compra", "BANEADA"
         
-        if row.get("banned_alert"): return "no_compra", "BANEADA (Commander)"
-        if is_foil and price >= settings.STAKE_PRICE_THRESHOLD: return "estaca", "Posible Estaca (Foil)"
-        if not row["has_price"] or price < settings.MIN_PURCHASE_USD: return "no_compra", "Bulk / Bajo Precio"
-        if internal_mode and row["qty_sugerida"] == 0: return "no_compra", "Stock Lleno"
+        p = row["purchase_price"]
+        bp = base_ps.get(row["name"], 0)
+        nm = normalize_card_name(row["name"])
+        staple = nm in settings.HIGH_DEMAND_CARDS
+        
+        if row["is_foil"] or p >= settings.STAKE_PRICE_THRESHOLD or any(k in str(row["name"]).lower() for k in variants):
+            if any(k in str(row["name"]).lower() for k in variants) and p > 5.0 and bp > 0 and p > (bp * 3):
+                return "estaca", "ESTACA (Variante)"
             
-        return "compra", "Comprar"
+            if bp > 0 and (p - bp) > 15.0:
+                if not staple: return "estaca", "ESTACA (Gap)"
+                elif (p - bp) > 30.0: return "estaca", "ESTACA (Staple Cara)"
+            
+            ratio = 2.5 if staple else 1.8
+            if bp > 0 and p > (bp * ratio) and p > 5.0:
+                return "estaca", f"ESTACA (x{ratio})"
+            
+            if p >= 20.0 and not staple:
+                return "estaca", "ESTACA (Alto Valor)"
+
+        if not p or p < settings.MIN_PURCHASE_USD: return "no_compra", "BULK"
+        if internal_mode and row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
+        return "compra", "COMPRAR"
 
     res = df.apply(clasificar, axis=1, result_type="expand")
-    df["categoria"], df["buy_decision"] = res[0], res[1]
-    df["sort_rank"] = df["categoria"].map({"compra": 1, "estaca": 2, "no_compra": 3})
+    df["cat"], df["razon"] = res[0], res[1]
     
-    final_cols = ["name", "set_code", "foil", "quantity", "purchase_price", "cash_buy_price_clp", "gamecoin_price", "buy_decision", "categoria", "stock_tienda", "qty_sugerida", "banned_alert"]
-    cols_existentes = [c for c in final_cols if c in df.columns]
-    
-    return df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])[cols_existentes].fillna("").to_dict(orient="records")
+    return df.fillna("").to_dict(orient="records")
 
-def enviar_correo_buylist(datos_cliente, lista_cartas, total_clp, total_gc):
-    if not settings.SMTP_EMAIL or not settings.SMTP_PASSWORD: return {"error": "SMTP no configurado"}
+def enviar_correo_buylist(cli, items, clp, gc):
+    if not settings.SMTP_EMAIL: return {"error": "No SMTP"}
     msg = MIMEMultipart()
-    msg['From'] = settings.SMTP_EMAIL; msg['To'] = settings.TARGET_EMAIL; msg['Subject'] = f"Buylist: {datos_cliente.get('nombre')}"
-    rows = "".join([f"<tr><td>{c.get('quantity')}</td><td>{c.get('name')} ({c.get('set_code')})</td><td>${c.get('price_unit')}</td><td>${c.get('price_total')}</td></tr>" for c in lista_cartas])
-    html = f"<h2>Solicitud Venta</h2><p>Cliente: {datos_cliente.get('nombre')}<br>Email: {datos_cliente.get('email')}</p><table border='1'>{rows}</table><h3>Total Cash: {total_clp} | Total GC: {total_gc}</h3>"
-    msg.attach(MIMEText(html, 'html'))
+    msg['Subject'] = f"Buylist: {cli.get('nombre')}"
+    msg['From'] = settings.SMTP_EMAIL; msg['To'] = settings.TARGET_EMAIL
+    rows = "".join([f"<tr><td>{i['quantity']}</td><td>{i['name']}</td><td>${i['price_unit']}</td><td>${i['price_total']}</td></tr>" for i in items])
+    msg.attach(MIMEText(f"<h3>Cliente: {cli.get('nombre')}</h3><p>{cli.get('email')} | {cli.get('telefono')}</p><table border='1'>{rows}</table><br><b>Total Cash: {clp} | Total GC: {gc}</b>", 'html'))
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
         s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string()); s.quit()
