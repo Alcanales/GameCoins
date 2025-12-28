@@ -58,10 +58,10 @@ class BuylistSubmitRequest(BaseModel):
 def home(): return {"status": "Online"}
 
 @app.post("/api/analizar")
-async def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
-    if len(await file.read()) > 2*1024*1024: raise HTTPException(413, "Max 2MB")
-    await file.seek(0)
-    res = logic.procesar_csv_manabox(await file.read(), internal_mode=(mode == "internal"))
+def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
+    content = file.file.read()
+    if len(content) > 5*1024*1024: raise HTTPException(413, "Max 5MB")
+    res = logic.procesar_csv_manabox(content, internal_mode=(mode == "internal"))
     if isinstance(res, dict) and "error" in res: raise HTTPException(400, res["error"])
     return {"data": res}
 
@@ -120,7 +120,8 @@ def trigger_sync(db: Session = Depends(get_db)):
 async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
     if settings.JUMPSELLER_HOOKS_TOKEN:
         sig = request.headers.get("Jumpseller-Hmac-Sha256")
-        calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), await request.body(), hashlib.sha256).digest()).decode()
+        body = await request.body()
+        calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body, hashlib.sha256).digest()).decode()
         if not secrets.compare_digest(sig, calc): return {"status": "ignored"}
 
     try: payload = await request.json()
