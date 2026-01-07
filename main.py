@@ -73,12 +73,7 @@ def submit_buylist(payload: BuylistSubmitRequest):
 def consultar_saldo(email: str, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
     if user:
-        return {
-            "email": user.email, 
-            "saldo": user.saldo,
-            "nombre": user.name,
-            "apellido": user.surname
-        }
+        return {"email": user.email, "saldo": user.saldo, "nombre": user.name, "apellido": user.surname}
     return {"email": email, "saldo": 0, "nombre": "", "apellido": ""}
 
 @app.post("/api/canjear")

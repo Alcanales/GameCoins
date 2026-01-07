@@ -25,7 +25,7 @@ def create_robust_session():
     adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({"User-Agent": "GameQuest-Bot/6.0", "Content-Type": "application/json"})
+    session.headers.update({"User-Agent": "GameQuest-Bot/8.0 (Final)", "Content-Type": "application/json"})
     return session
 
 session = create_robust_session()
@@ -34,15 +34,21 @@ SCRYFALL_CACHE = {}
 BASE_PRICE_CACHE = {}
 CACHE_TTL = 300 
 
+def redondear_a_100(valor):
+    """Redondeo a la centena más cercana (Lógica Notebook)"""
+    return int(round(valor / 100.0) * 100)
+
 def clean_text_atomic(text):
+    """Normalización robusta para coincidencia exacta"""
     if not isinstance(text, str): return ""
-    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8').lower()
     text = text.replace(" - ", "|").replace(" // ", "|").replace(" / ", "|")
     text = text.split("|")[0]
     text = text.split("(")[0].split("[")[0]
+    text = text.replace("&", "and")
     text = re.sub(r"[^\w\s]", "", text)
-    text = re.sub(r'\s+(?:Promo|Foil|Prerelease|List|Art|Showcase|Extended|Borderless|Etched)\s*$', '', text, flags=re.IGNORECASE)
-    return re.sub(r'\s+', ' ', text).strip().lower()
+    text = re.sub(r'\s+(?:promo|foil|prerelease|list|art|showcase|extended|borderless|etched)\s*$', '', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
 def _fetch_scryfall_batch(batch_ids):
     url = "https://api.scryfall.com/cards/collection"
@@ -79,6 +85,7 @@ def fetch_scryfall_data(ids):
     return data
 
 def get_typical_nonfoil_price(name):
+    """Busca el precio 'Base' (Normal) para comparar Estacas"""
     clean = clean_text_atomic(name)
     now = time.time()
     if clean in BASE_PRICE_CACHE:
@@ -175,6 +182,7 @@ def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
             clientes_map = {c.get("customer", {}).get("email", "").strip().lower(): c.get("customer", {}) for c in clientes_api if c.get("customer", {}).get("email")}
             emails_lote = list(clientes_map.keys())
             if not emails_lote: page += 1; continue
+            
             usuarios_db = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email.in_(emails_lote)).all()
             usuarios_db_map = {u.email: u for u in usuarios_db}
             
@@ -198,6 +206,7 @@ def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
                 nom = (nom or data.get("name") or "Cliente").strip()
                 ape = (ape or data.get("surname") or "").strip() or "-"
                 rut = (data.get("tax_id") or "")
+                
                 if not rut:
                     for f in data.get("fields", []):
                         if "rut" in str(f.get("label", "")).lower(): rut = str(f.get("value", "")).strip(); break
@@ -214,7 +223,7 @@ def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
                 else:
                     rf = rut if rut else f"PENDIENTE-{email}"
                     if db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rf).first(): rf = f"DUP-{rf}-{email}"
-                    db_session.add(GameCoinUser_Model(email=email, name=nom, surname=ape, rut=rf)); nuevos += 1
+                    db_session.add(GameCoinUser_Model(email=email, name=nom, surname=ape, rut=rf, saldo=0)); nuevos += 1
             db_session.commit(); page += 1
         except Exception as e:
             db_session.rollback(); return {"status": "error", "detail": str(e)}
@@ -238,8 +247,8 @@ def procesar_csv_manabox(content, internal_mode=False):
     else:
         df["banned"] = False
 
-    df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(lambda x: int(round(x/100)*100))
-    df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(lambda x: int(round(x/100)*100))
+    df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(redondear_a_100)
+    df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(redondear_a_100)
     
     if internal_mode:
         unique_names = df["name"].unique()
@@ -272,16 +281,19 @@ def procesar_csv_manabox(content, internal_mode=False):
 
     def clasificar(row):
         if row["banned"]: return "no_compra", "BANEADA"
-        price_current = row["purchase_price"]
+        p_curr = row["purchase_price"]
         
-        if not price_current or price_current < settings.MIN_PURCHASE_USD: return "no_compra", "BULK"
+        if not p_curr or p_curr < settings.MIN_PURCHASE_USD: 
+            return "no_compra", "BULK"
         
-        if price_current >= settings.STAKE_MIN_PRICE_FOR_STAKE:
-            price_typical = base_prices.get(row["name"], 0)
-            if price_typical <= settings.NONFOIL_MAX_TYPICAL_FOR_STAKE:
-                ratio_ok = price_current >= (price_typical * settings.STAKE_RATIO_THRESHOLD)
-                spread_ok = (price_current - price_typical) >= settings.MIN_STAKE_SPREAD
-                if ratio_ok and spread_ok:
+        if p_curr >= settings.STAKE_MIN_PRICE_FOR_STAKE:
+            p_base = base_prices.get(row["name"], 0)
+            
+            if p_base <= settings.NONFOIL_MAX_TYPICAL_FOR_STAKE:
+                spread = p_curr - p_base
+                ratio_ok = p_curr >= (p_base * settings.STAKE_RATIO_THRESHOLD)
+                
+                if spread >= settings.MIN_STAKE_SPREAD and ratio_ok:
                     return "estaca", f"ESTACA (Ratio {settings.STAKE_RATIO_THRESHOLD}x)"
 
         if internal_mode and row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
