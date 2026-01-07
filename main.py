@@ -80,10 +80,8 @@ def consultar_saldo(email: str, db: Session = Depends(get_db)):
 def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower(); monto = int(payload.monto)
     if monto <= 0: raise HTTPException(400, "Inválido")
-    
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
     if not user or user.saldo < monto: raise HTTPException(400, "Saldo insuficiente")
-    
     user.saldo -= monto
     try:
         db.commit() 
@@ -108,7 +106,6 @@ def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db
         if payload.accion == "restar": raise HTTPException(404)
         user = GameCoinUser(email=email, saldo=0, rut=f"MAN-{email}")
         db.add(user)
-    
     if payload.accion == "sumar": user.saldo += payload.monto
     elif payload.accion == "restar": user.saldo = max(0, user.saldo - payload.monto)
     db.commit()
@@ -125,16 +122,13 @@ async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db
         body = await request.body()
         calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body, hashlib.sha256).digest()).decode()
         if not secrets.compare_digest(sig, calc): return {"status": "ignored"}
-
     try: payload = await request.json()
     except: return {"status": "error"}
-
     order = payload.get("order", {})
     if "GameCoins" in order.get("payment_method_name", "") and order.get("status") == "Pending":
         email = order.get("customer", {}).get("email", "").strip().lower()
         total = float(order.get("total", 0))
         user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
-        
         if user and user.saldo >= total:
             user.saldo -= int(total); db.commit()
             logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago GC: -${int(total)}")

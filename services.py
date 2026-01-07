@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import io
+import json
 import smtplib
 import datetime
 import re
@@ -34,8 +35,7 @@ SCRYFALL_METADATA_CACHE = {}
 CACHE_TTL = 300 
 
 def normalize_text_strict(text):
-    if not isinstance(text, str): 
-        return ""
+    if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFD', text)
     text = "".join(c for c in text if unicodedata.category(c) != 'Mn')
     text = text.lower()
@@ -62,20 +62,16 @@ def _fetch_scryfall_batch_metadata(batch_ids):
                     "edhrec_rank": c.get("edhrec_rank")
                 }
             return data
-    except Exception: 
-        pass
+    except Exception: pass
     return {}
 
 def fetch_scryfall_metadata(ids):
     u_ids = [i for i in pd.unique(ids) if isinstance(i, str)]
     data, missing, now = {}, [], time.time()
-    
     for i in u_ids:
         if i in SCRYFALL_METADATA_CACHE and (now - SCRYFALL_METADATA_CACHE[i][1] < CACHE_TTL): 
             data[i] = SCRYFALL_METADATA_CACHE[i][0]
-        else: 
-            missing.append(i)
-            
+        else: missing.append(i)
     if missing:
         with ThreadPoolExecutor(max_workers=5) as ex:
             batches = [missing[i:i+75] for i in range(0, len(missing), 75)]
@@ -83,15 +79,13 @@ def fetch_scryfall_metadata(ids):
             for f in as_completed(futures):
                 result = f.result()
                 data.update(result)
-                for k, v in result.items(): 
-                    SCRYFALL_METADATA_CACHE[k] = (v, now)
+                for k, v in result.items(): SCRYFALL_METADATA_CACHE[k] = (v, now)
     return data
 
 def get_jumpseller_stock_for_name(name):
     if not name: return 0
     clean_target = normalize_text_strict(name)
     now = time.time()
-    
     if clean_target in STOCK_CACHE and (now - STOCK_CACHE[clean_target][1] < CACHE_TTL): 
         return STOCK_CACHE[clean_target][0]
     
@@ -104,7 +98,6 @@ def get_jumpseller_stock_for_name(name):
             for p in resp.json():
                 prod = p.get("product", {})
                 prod_clean = normalize_text_strict(prod.get("name", ""))
-                
                 if prod_clean == clean_target or prod_clean.startswith(clean_target):
                     vars_stock = sum(v.get("stock", 0) for v in prod.get("variants", []))
                     total += max(prod.get("stock", 0), vars_stock)
@@ -113,25 +106,13 @@ def get_jumpseller_stock_for_name(name):
     return total
 
 def procesar_csv_manabox(content, internal_mode=False):
-    try: 
-        df = pd.read_csv(io.BytesIO(content))
-    except: 
-        return {"error": "CSV Inválido o Corrupto"}
+    try: df = pd.read_csv(io.BytesIO(content))
+    except: return {"error": "CSV Inválido"}
     
-    cols = {
-        "Name": "name", 
-        "Set code": "set_code", 
-        "Foil": "foil", 
-        "Quantity": "quantity", 
-        "Purchase price": "purchase_price",
-        "Scryfall ID": "scryfall_id"
-    }
-    
+    cols = {"Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id"}
     df.columns = [c.strip() for c in df.columns]
     df = df.rename(columns=cols)
-    
-    if "name" not in df.columns: 
-        return {"error": "Falta columna 'Name' en el CSV"}
+    if "name" not in df.columns: return {"error": "Falta columna Name"}
     
     df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
     df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
@@ -139,7 +120,6 @@ def procesar_csv_manabox(content, internal_mode=False):
     if "scryfall_id" in df.columns:
         sf_ids = df["scryfall_id"].dropna().unique()
         sf_data = fetch_scryfall_metadata(sf_ids)
-        
         def enrich_row(row):
             sid = row.get("scryfall_id")
             meta = sf_data.get(sid, {})
@@ -147,7 +127,6 @@ def procesar_csv_manabox(content, internal_mode=False):
             row["banned"] = meta.get("banned", False)
             row["edhrec_rank"] = meta.get("edhrec_rank", 999999)
             return row
-            
         df = df.apply(enrich_row, axis=1)
     else:
         df["banned"] = False
@@ -172,23 +151,16 @@ def procesar_csv_manabox(content, internal_mode=False):
         def calc_sug(row):
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple(row) else settings.STOCK_LIMIT_DEFAULT
             return max(0, min(row["quantity"], limit - row["stock_tienda"]))
-            
         df["qty_sug"] = df.apply(calc_sug, axis=1)
     else:
         df["stock_tienda"] = 0
         df["qty_sug"] = df["quantity"]
 
     def clasificar(row):
-        if row["banned"]: 
-            return "no_compra", "BANEADA (Commander)"
-            
+        if row["banned"]: return "no_compra", "BANEADA"
         p_curr = row["purchase_price"]
-        if p_curr < settings.MIN_PURCHASE_USD: 
-            return "no_compra", "BULK (< Min USD)"
-            
-        if internal_mode and row["qty_sug"] == 0: 
-            return "no_compra", "STOCK LLENO"
-            
+        if p_curr < settings.MIN_PURCHASE_USD: return "no_compra", "BULK"
+        if internal_mode and row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
         return "compra", "COMPRAR"
 
     res = df.apply(clasificar, axis=1, result_type="expand")
@@ -196,39 +168,20 @@ def procesar_csv_manabox(content, internal_mode=False):
     
     df["sort_rank"] = df["cat"].map({"compra": 1, "estaca": 2, "no_compra": 3})
     final_df = df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])
-    
     return final_df.fillna("").to_dict(orient="records")
 
 def enviar_correo_buylist(cli, items, clp, gc):
-    if not settings.SMTP_EMAIL: return {"error": "No SMTP Configurado"}
+    if not settings.SMTP_EMAIL: return {"error": "No SMTP"}
     msg = MIMEMultipart()
     msg['Subject'] = f"Buylist: {cli.get('nombre')}"
     msg['From'] = settings.SMTP_EMAIL; msg['To'] = settings.TARGET_EMAIL
-    
-    rows = ""
-    for i in items:
-        rows += f"<tr><td>{i['quantity']}</td><td>{i['name']}</td><td>${i.get('cash_clp',0)}</td><td>${i.get('gc_price',0)}</td></tr>"
-        
-    html = f"""
-    <h3>Cliente: {cli.get('nombre')}</h3>
-    <p>{cli.get('email')} | {cli.get('telefono')}</p>
-    <table border='1' cellpadding='5' style='border-collapse:collapse;'>
-    <tr><th>Cant</th><th>Carta</th><th>Cash (CLP)</th><th>GameCoins</th></tr>
-    {rows}
-    </table>
-    <br><b>Total Cash: {clp} | Total GC: {gc}</b>
-    """
-    msg.attach(MIMEText(html, 'html'))
-    
+    rows = "".join([f"<tr><td>{i['quantity']}</td><td>{i['name']}</td><td>${i.get('cash_clp',0)}</td><td>${i.get('gc_price',0)}</td></tr>" for i in items])
+    msg.attach(MIMEText(f"<h3>Cliente: {cli.get('nombre')}</h3><p>{cli.get('email')} | {cli.get('telefono')}</p><table border='1'>{rows}</table><br><b>Total Cash: {clp} | Total GC: {gc}</b>", 'html'))
     try:
-        s = smtplib.SMTP('smtp.gmail.com', 587)
-        s.starttls()
-        s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string())
-        s.quit()
+        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
+        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string()); s.quit()
         return {"status": "ok"}
-    except Exception as e: 
-        return {"error": str(e)}
+    except Exception as e: return {"error": str(e)}
 
 def crear_cupon_jumpseller(codigo, monto):
     if monto <= 0: return False
@@ -260,40 +213,50 @@ def sincronizar_clientes_jumpseller(db_session: Session, GameCoinUser_Model):
             resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "limit": 50, "page": page}, timeout=20)
             if resp.status_code != 200 or not resp.json(): break
             clientes_api = resp.json()
-            
             clientes_map = {}
             for c in clientes_api:
                 raw_email = c.get("customer", {}).get("email", "")
                 if raw_email:
                     clean_email = normalize_text_strict(raw_email).replace(" ", "")
                     clientes_map[clean_email] = c.get("customer", {})
-
             emails_lote = list(clientes_map.keys())
             if not emails_lote: page += 1; continue
-            
             usuarios_db = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email.in_(emails_lote)).all()
             usuarios_db_map = {u.email: u for u in usuarios_db}
-            
             for email, data in clientes_map.items():
                 nom = ""; ape = ""
                 billing = data.get("billing_address", {})
                 shipping = data.get("shipping_address", {})
-                
                 if billing.get("name"):
                     nom = billing.get("name", ""); ape = billing.get("surname", "")
                 elif shipping.get("name"):
                     nom = shipping.get("name", ""); ape = shipping.get("surname", "")
-                
                 if not nom:
                     fullname = data.get("fullname", "").strip()
                     if fullname:
                         parts = fullname.split(" ", 1)
                         nom = parts[0]
                         ape = parts[1] if len(parts) > 1 else ""
-                
                 nom = normalize_text_strict(nom or "Cliente").title()
                 ape = normalize_text_strict(ape or "").title()
                 rut = (data.get("tax_id") or "")
-                
                 if not rut:
-                    for f in data.get
+                    for f in data.get("fields", []):
+                        if "rut" in str(f.get("label", "")).lower(): rut = str(f.get("value", "")).strip(); break
+                user = usuarios_db_map.get(email)
+                if user:
+                    chg = False
+                    if user.name != nom: user.name = nom; chg = True
+                    if user.surname != ape: user.surname = ape; chg = True
+                    if rut and ("PENDIENTE" in user.rut or user.rut != rut):
+                        if not db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rut, GameCoinUser_Model.id != user.id).first():
+                            user.rut = rut; chg = True
+                    if chg: actualizados += 1
+                else:
+                    rf = rut if rut else f"PENDIENTE-{email}"
+                    if db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.rut == rf).first(): rf = f"DUP-{rf}-{email}"
+                    db_session.add(GameCoinUser_Model(email=email, name=nom, surname=ape, rut=rf, saldo=0)); nuevos += 1
+            db_session.commit(); page += 1
+        except Exception as e:
+            db_session.rollback(); return {"status": "error", "detail": str(e)}
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
