@@ -25,7 +25,7 @@ def create_robust_session():
     adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({"User-Agent": "GameQuest-Bot/8.0 (Final)", "Content-Type": "application/json"})
+    session.headers.update({"User-Agent": "GameQuest-Bot/8.1", "Content-Type": "application/json"})
     return session
 
 session = create_robust_session()
@@ -35,16 +35,14 @@ BASE_PRICE_CACHE = {}
 CACHE_TTL = 300 
 
 def redondear_a_100(valor):
-    """Redondeo a la centena más cercana (Lógica Notebook)"""
     return int(round(valor / 100.0) * 100)
 
 def clean_text_atomic(text):
-    """Normalización robusta para coincidencia exacta"""
     if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8').lower()
-    text = text.replace(" - ", "|").replace(" // ", "|").replace(" / ", "|")
-    text = text.split("|")[0]
-    text = text.split("(")[0].split("[")[0]
+    text = re.sub(r'\s*[-|/]+\s*', '|', text) 
+    text = text.split('|')[0]
+    text = text.split('(')[0].split('[')[0]
     text = text.replace("&", "and")
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r'\s+(?:promo|foil|prerelease|list|art|showcase|extended|borderless|etched)\s*$', '', text)
@@ -85,7 +83,6 @@ def fetch_scryfall_data(ids):
     return data
 
 def get_typical_nonfoil_price(name):
-    """Busca el precio 'Base' (Normal) para comparar Estacas"""
     clean = clean_text_atomic(name)
     now = time.time()
     if clean in BASE_PRICE_CACHE:
@@ -129,7 +126,7 @@ def get_jumpseller_stock_for_name(name):
             for p in resp.json():
                 prod = p.get("product", {})
                 prod_clean = clean_text_atomic(prod.get("name", ""))
-                if prod_clean == clean_target or prod_clean.startswith(clean_target + " "):
+                if prod_clean == clean_target or prod_clean.startswith(clean_target):
                     vars_stock = sum(v.get("stock", 0) for v in prod.get("variants", []))
                     total += max(prod.get("stock", 0), vars_stock)
     except: pass
