@@ -40,7 +40,7 @@ class Config:
         "sol ring", "arcane signet", "command tower", "swords to plowshares", 
         "counterspell", "cultivate", "kodama's reach", "dark ritual", 
         "rhystic study", "cyclonic rift", "dockside extortionist", "esper sentinel",
-        "mana crypt", "jeweled lotus" "blood pet"
+        "mana crypt", "jeweled lotus","blood pet"
     ]
 
 settings = Config()
