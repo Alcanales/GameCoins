@@ -27,7 +27,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         return response
 
-app = FastAPI(title="GameQuest GameCoins API", version="3.0")
+app = FastAPI(title="GameQuest GameCoins API", version="3.1")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -72,16 +72,22 @@ def submit_buylist(payload: BuylistSubmitRequest):
 @app.get("/api/saldo/{email}")
 def consultar_saldo(email: str, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
-    if user:
-        return {"email": user.email, "saldo": user.saldo, "nombre": user.name, "apellido": user.surname}
-    return {"email": email, "saldo": 0, "nombre": "", "apellido": ""}
+    return {"email": email, "saldo": user.saldo if user else 0}
 
 @app.post("/api/canjear")
 def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
+    """
+    Ruta Principal para Pagos Mixtos:
+    1. Descuenta saldo.
+    2. Crea cupón en Jumpseller.
+    3. Cliente usa cupón + Webpay en checkout.
+    """
     email = payload.email.strip().lower(); monto = int(payload.monto)
     if monto <= 0: raise HTTPException(400, "Inválido")
+    
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
     if not user or user.saldo < monto: raise HTTPException(400, "Saldo insuficiente")
+    
     user.saldo -= monto
     try:
         db.commit() 
@@ -96,7 +102,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
 
 @app.get("/admin/users", dependencies=[Depends(verificar_admin)])
 def listar_usuarios(db: Session = Depends(get_db)):
-    return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
+    return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).limit(200).all()
 
 @app.post("/admin/update", dependencies=[Depends(verificar_admin)])
 def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db)):
@@ -106,6 +112,7 @@ def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db
         if payload.accion == "restar": raise HTTPException(404)
         user = GameCoinUser(email=email, saldo=0, rut=f"MAN-{email}")
         db.add(user)
+    
     if payload.accion == "sumar": user.saldo += payload.monto
     elif payload.accion == "restar": user.saldo = max(0, user.saldo - payload.monto)
     db.commit()
@@ -117,21 +124,32 @@ def trigger_sync(db: Session = Depends(get_db)):
 
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
+    """
+    Maneja SOLO pagos totales con el método manual 'GameCoins'.
+    Si se usó un cupón (pago mixto), este webhook ignora el descuento
+    para no cobrar doble.
+    """
     if settings.JUMPSELLER_HOOKS_TOKEN:
         sig = request.headers.get("Jumpseller-Hmac-Sha256")
         body = await request.body()
         calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body, hashlib.sha256).digest()).decode()
         if not secrets.compare_digest(sig, calc): return {"status": "ignored"}
+
     try: payload = await request.json()
     except: return {"status": "error"}
+
     order = payload.get("order", {})
-    if "GameCoins" in order.get("payment_method_name", "") and order.get("status") == "Pending":
+    payment_method = order.get("payment_method_name", "")
+    
+    if "GameCoins" in payment_method and order.get("status") == "Pending":
         email = order.get("customer", {}).get("email", "").strip().lower()
         total = float(order.get("total", 0))
         user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
+        
         if user and user.saldo >= total:
             user.saldo -= int(total); db.commit()
-            logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago GC: -${int(total)}")
+            logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago Total GC: -${int(total)}")
         else:
-            logic.actualizar_orden_jumpseller(order.get("id"), "Canceled", "Saldo insuficiente GC")
+            logic.actualizar_orden_jumpseller(order.get("id"), "Canceled", "Saldo insuficiente para pago total")
+            
     return {"status": "ok"}
