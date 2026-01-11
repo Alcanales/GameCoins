@@ -124,32 +124,63 @@ def trigger_sync(db: Session = Depends(get_db)):
 
 @app.post("/webhook/order_created")
 async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
-    """
-    Maneja SOLO pagos totales con el método manual 'GameCoins'.
-    Si se usó un cupón (pago mixto), este webhook ignora el descuento
-    para no cobrar doble.
-    """
+    print("--- INICIO WEBHOOK GAMECOINS ---") # Log 1
+    
+    # 1. Leer el cuerpo
+    body = await request.body()
+    try:
+        payload = await request.json()
+    except:
+        print("ERROR: No se pudo leer el JSON del webhook")
+        return {"status": "error"}
+
+    # 2. Verificar Seguridad (Si hay token configurado)
     if settings.JUMPSELLER_HOOKS_TOKEN:
         sig = request.headers.get("Jumpseller-Hmac-Sha256")
-        body = await request.body()
+        # Calculamos la firma
         calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body, hashlib.sha256).digest()).decode()
-        if not secrets.compare_digest(sig, calc): return {"status": "ignored"}
-
-    try: payload = await request.json()
-    except: return {"status": "error"}
-
-    order = payload.get("order", {})
-    payment_method = order.get("payment_method_name", "")
-    
-    if "GameCoins" in payment_method and order.get("status") == "Pending":
-        email = order.get("customer", {}).get("email", "").strip().lower()
-        total = float(order.get("total", 0))
-        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
         
-        if user and user.saldo >= total:
-            user.saldo -= int(total); db.commit()
-            logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago Total GC: -${int(total)}")
+        if not secrets.compare_digest(sig, calc):
+            print(f"ERROR DE SEGURIDAD: Firma recibida ({sig}) no coincide con calculada ({calc})")
+            return {"status": "ignored_signature_mismatch"}
         else:
-            logic.actualizar_orden_jumpseller(order.get("id"), "Canceled", "Saldo insuficiente para pago total")
+            print("SEGURIDAD OK: Firma válida.")
+
+    # 3. Analizar la Orden
+    order = payload.get("order", {})
+    order_id = order.get("id", "Desconocido")
+    payment_method = order.get("payment_method_name", "")
+    status = order.get("status", "")
+    
+    print(f"PROCESANDO ORDEN #{order_id}")
+    print(f" - Metodo Pago: '{payment_method}'")
+    print(f" - Estado: '{status}'")
+
+    # 4. Validar si es GameCoins
+    if "GameCoins" in payment_method:
+        if status == "Pending":
+            print(" -> DETECTADO PAGO GAMECOINS PENDIENTE. PROCESANDO...")
+            email = order.get("customer", {}).get("email", "").strip().lower()
+            total = float(order.get("total", 0))
             
+            user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
+            
+            if user:
+                print(f" -> Usuario encontrado: {email}. Saldo: {user.saldo}, Total Orden: {total}")
+                if user.saldo >= total:
+                    user.saldo -= int(total)
+                    db.commit()
+                    print(" -> EXITO: Saldo descontado. Actualizando orden a Pagada...")
+                    logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago Total GC: -${int(total)}")
+                else:
+                    print(" -> FALLO: Saldo insuficiente.")
+                    logic.actualizar_orden_jumpseller(order.get("id"), "Canceled", "Saldo insuficiente para pago total")
+            else:
+                print(f" -> ERROR: Usuario {email} no existe en base de datos GameCoins.")
+        else:
+            print(f" -> IGNORADO: El estado es '{status}', se esperaba 'Pending'.")
+    else:
+        print(f" -> IGNORADO: El metodo de pago '{payment_method}' no contiene la palabra 'GameCoins'.")
+
+    print("--- FIN WEBHOOK ---")
     return {"status": "ok"}
