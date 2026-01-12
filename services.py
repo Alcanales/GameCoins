@@ -289,6 +289,7 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             for c in clientes_api:
                 raw_email = c.get("customer", {}).get("email", "")
                 if raw_email:
+                
                     clean_email = raw_email.strip().lower()
                     clientes_map[clean_email] = c.get("customer", {})
             
@@ -310,8 +311,8 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     parts = data.get("fullname", "Cliente").split(" ", 1)
                     nom = parts[0]; ape = parts[1] if len(parts) > 1 else ""
                 
-                nom = (nom or "Cliente").title().strip()
-                ape = (ape or "").title().strip()
+                nom = normalize_text_strict(nom or "Cliente").title()
+                ape = normalize_text_strict(ape or "").title()
                 
                 rut = data.get("tax_id") or ""
                 if not rut:
