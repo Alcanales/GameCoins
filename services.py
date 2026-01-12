@@ -274,13 +274,13 @@ def crear_cupon_jumpseller(codigo, monto):
         resp = session.post(url, params=params, json=payload, timeout=10)
         return resp.status_code in [200, 201]
     except: return False
-
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     page = 1; nuevos = 0; actualizados = 0
     while True:
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
         try:
-            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "limit": 50, "page": page}, timeout=20)
+            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}, timeout=20)
+            
             if resp.status_code != 200 or not resp.json(): break
             
             clientes_api = resp.json()
@@ -288,7 +288,7 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             for c in clientes_api:
                 raw_email = c.get("customer", {}).get("email", "")
                 if raw_email:
-                    clean_email = normalize_text_strict(raw_email).replace(" ", "")
+                    clean_email = raw_email.strip().lower()
                     clientes_map[clean_email] = c.get("customer", {})
             
             if not clientes_map: page += 1; continue
@@ -309,8 +309,8 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     parts = data.get("fullname", "Cliente").split(" ", 1)
                     nom = parts[0]; ape = parts[1] if len(parts) > 1 else ""
                 
-                nom = (nom or "Cliente").title()
-                ape = (ape or "").title()
+                nom = (nom or "Cliente").title().strip()
+                ape = (ape or "").title().strip()
                 
                 rut = data.get("tax_id") or ""
                 if not rut:
