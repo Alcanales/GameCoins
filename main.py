@@ -102,7 +102,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
 # --- ENDPOINTS ADMIN ---
 @app.get("/admin/users", dependencies=[Depends(verificar_admin)])
 def listar_usuarios(db: Session = Depends(get_db)):
-    return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).limit(200).all()
+    return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
 
 @app.post("/admin/update", dependencies=[Depends(verificar_admin)])
 def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db)):
