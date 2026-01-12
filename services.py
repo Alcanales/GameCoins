@@ -274,12 +274,13 @@ def crear_cupon_jumpseller(codigo, monto):
         resp = session.post(url, params=params, json=payload, timeout=10)
         return resp.status_code in [200, 201]
     except: return False
+
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     page = 1; nuevos = 0; actualizados = 0
     while True:
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
         try:
-            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}, timeout=20)
+            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "page": page}, timeout=20)
             
             if resp.status_code != 200 or not resp.json(): break
             
