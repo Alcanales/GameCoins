@@ -1,9 +1,6 @@
 import secrets
 import random
 import string
-import hmac
-import hashlib
-import base64
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -30,7 +27,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         return response
 
-app = FastAPI(title="GameQuest GameCoins API", version="3.1")
+app = FastAPI(title="GameQuest GameCoins API", version="4.0 (Coupon Only)")
 
 # --- MIDDLEWARES ---
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -50,7 +47,7 @@ def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header
     if not (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)): raise HTTPException(401)
     return True
 
-# --- MODELOS PYDANTIC ---
+# --- MODELOS ---
 class UpdateRequest(BaseModel):
     email: str; monto: int; accion: str
 
@@ -61,17 +58,14 @@ class BuylistSubmitRequest(BaseModel):
     cliente: dict; cartas: list; total_clp: str; total_gc: str
 
 @app.get("/")
-def home(): return {"status": "Online"}
+def home(): return {"status": "Online - Coupon Mode"}
 
 # --- ENDPOINTS BUYLIST ---
 @app.post("/api/analizar")
 def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     content = file.file.read()
     if len(content) > 5*1024*1024: raise HTTPException(413, "El archivo es muy grande (Max 5MB)")
-    
-    # Llama a la lógica avanzada (Estacas/Staples)
     res = logic.procesar_csv_manabox(content, internal_mode=(mode == "internal"))
-    
     if isinstance(res, dict) and "error" in res: raise HTTPException(400, res["error"])
     return {"data": res}
 
@@ -79,7 +73,7 @@ def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
 def submit_buylist(payload: BuylistSubmitRequest):
     return logic.enviar_correo_buylist(payload.cliente, payload.cartas, payload.total_clp, payload.total_gc)
 
-# --- ENDPOINTS CLIENTE ---
+# --- ENDPOINTS CLIENTE (SALDO Y CANJE) ---
 @app.get("/api/saldo/{email}")
 def consultar_saldo(email: str, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
@@ -100,7 +94,7 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
         if logic.crear_cupon_jumpseller(codigo, monto):
             return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
         else:
-            user.saldo += monto; db.commit() # Rollback manual
+            user.saldo += monto; db.commit() # Rollback si falla Jumpseller
             raise HTTPException(502, "Error al crear cupón en Jumpseller")
     except Exception:
         db.rollback(); raise HTTPException(500, "Error interno")
@@ -127,39 +121,3 @@ def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db
 @app.post("/admin/sync_clients", dependencies=[Depends(verificar_admin)])
 def trigger_sync(db: Session = Depends(get_db)):
     return logic.sincronizar_clientes_jumpseller(db, GameCoinUser)
-
-# --- WEBHOOK DE PAGO AUTOMÁTICO ---
-@app.post("/webhook/order_created")
-async def procesar_pago_gamecoins(request: Request, db: Session = Depends(get_db)):
-    # 1. Leer Body
-    body = await request.body()
-    try: payload = await request.json()
-    except: return {"status": "error_json"}
-
-    # 2. Seguridad HMAC
-    if settings.JUMPSELLER_HOOKS_TOKEN:
-        sig = request.headers.get("Jumpseller-Hmac-Sha256", "")
-        calc = base64.b64encode(hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body, hashlib.sha256).digest()).decode()
-        if not secrets.compare_digest(sig, calc): return {"status": "ignored_signature"}
-
-    # 3. Lógica
-    order = payload.get("order", {})
-    payment = order.get("payment_method_name", "")
-    status = order.get("status", "")
-    
-    # 4. Procesamiento
-    if "GameCoins" in payment and status == "Pending":
-        email = order.get("customer", {}).get("email", "").strip().lower()
-        total = float(order.get("total", 0))
-        
-        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
-        
-        if user and user.saldo >= total:
-            user.saldo -= int(total)
-            db.commit()
-            logic.actualizar_orden_jumpseller(order.get("id"), "Paid", f"Pago Total GC: -${int(total)}")
-            return {"status": "pagado_exitoso"}
-        else:
-            logic.actualizar_orden_jumpseller(order.get("id"), "Canceled", "Saldo insuficiente GameCoins")
-            
-    return {"status": "ok"}
