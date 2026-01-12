@@ -280,19 +280,24 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     while True:
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
         try:
-            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "page": page}, timeout=20)
+            resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "page": page}, timeout=30)
             
-            if resp.status_code != 200 or not resp.json(): break
+            if resp.status_code == 404: break
+            if resp.status_code != 200: break 
             
             clientes_api = resp.json()
+            if not clientes_api: break 
             clientes_map = {}
             for c in clientes_api:
                 raw_email = c.get("customer", {}).get("email", "")
                 if raw_email:
+                 
                     clean_email = raw_email.strip().lower()
                     clientes_map[clean_email] = c.get("customer", {})
             
-            if not clientes_map: page += 1; continue
+            if not clientes_map: 
+                page += 1
+                continue
             
             emails_lote = list(clientes_map.keys())
             usuarios_db = db_session.query(GameCoinUser_Model).filter(GameCoinUser_Model.email.in_(emails_lote)).all()
@@ -310,18 +315,23 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     parts = data.get("fullname", "Cliente").split(" ", 1)
                     nom = parts[0]; ape = parts[1] if len(parts) > 1 else ""
                 
-                nom = (nom or "Cliente").title().strip()
-                ape = (ape or "").title().strip()
+             
+                nom = (nom or "Cliente").strip().title()
+                ape = (ape or "").strip().title()
                 
                 rut = data.get("tax_id") or ""
                 if not rut:
                     for f in data.get("fields", []):
-                        if "rut" in str(f.get("label", "")).lower(): rut = str(f.get("value", "")).strip(); break
+                        if "rut" in str(f.get("label", "")).lower(): 
+                            rut = str(f.get("value", "")).strip()
+                            break
                 
                 user = usuarios_db_map.get(email)
                 if user:
                     if user.name != nom: user.name = nom
                     if user.surname != ape: user.surname = ape
+                    if (not user.rut or "PENDIENTE" in user.rut) and rut:
+                        user.rut = rut
                     actualizados += 1
                 else:
                     rf = rut if rut else f"PENDIENTE-{email}"
@@ -330,8 +340,9 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             
             db_session.commit()
             page += 1
+            
         except Exception as e:
             db_session.rollback()
-            return {"status": "error", "detail": str(e)}
+            return {"status": "error", "detail": f"Error en página {page}: {str(e)}"}
             
-    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
+    return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}    
