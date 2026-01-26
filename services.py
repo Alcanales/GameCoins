@@ -6,6 +6,7 @@ import datetime
 import re
 import time
 import unicodedata
+import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,8 +15,14 @@ from urllib3.util.retry import Retry
 from sqlalchemy.orm import Session
 from config import settings
 
+# --- LOGGING & CONFIG ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("GameCoinsServices")
+
+# --- SESIÓN ROBUSTA (Anti-Caídas) ---
 def create_robust_session():
     session = requests.Session()
+    # Retry agresivo para evitar fallos por parpadeos de red
     retry = Retry(
         total=3, 
         backoff_factor=0.3, 
@@ -25,26 +32,34 @@ def create_robust_session():
     adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=retry)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    session.headers.update({"User-Agent": "GameQuest-Bot/Final", "Content-Type": "application/json"})
+    session.headers.update({
+        "User-Agent": "GameQuest-BuylistBot/2.0", 
+        "Content-Type": "application/json"
+    })
     return session
 
 session = create_robust_session()
 
+# --- CACHÉS EN MEMORIA (Optimización) ---
 STOCK_CACHE = {}     
 SCRYFALL_METADATA_CACHE = {}
-CACHE_TTL = 300 
+CACHE_TTL = 300 # 5 Minutos de vida para caché
 
+# --- UTILIDADES DE TEXTO ---
 def normalize_text_strict(text):
+    """Normalización agresiva para comparar nombres (Jumpseller es quisquilloso)."""
     if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFD', text)
     text = "".join(c for c in text if unicodedata.category(c) != 'Mn') 
     text = text.lower().replace("&", "and") 
-    text = re.sub(r"[^a-z0-9\s]", "", text) 
+    text = re.sub(r"[^a-z0-9\s]", "", text) # Solo alfanumérico
     return " ".join(text.split())
 
 def redondear_a_100(valor):
+    """Regla de negocio: Precios chilenos siempre terminan en 00."""
     return int(round(valor / 100.0) * 100)
 
+# --- SCRYFALL (METADATA + PRECIOS DE MERCADO) ---
 def _fetch_scryfall_batch_metadata(batch_ids):
     url = "https://api.scryfall.com/cards/collection"
     try:
@@ -55,29 +70,36 @@ def _fetch_scryfall_batch_metadata(batch_ids):
             data = {}
             for c in resp.json().get("data", []):
                 canon = c.get("name", "").split(" // ")[0] 
+                prices = c.get("prices", {})
+                
                 data[c["id"]] = {
                     "canonical_name": canon,
                     "banned": c.get("legalities", {}).get("commander") == "banned",
-                    "edhrec_rank": c.get("edhrec_rank")
+                    "edhrec_rank": c.get("edhrec_rank") or 999999,
+                    "market_usd": float(prices.get("usd") or 0.0),
+                    "market_usd_foil": float(prices.get("usd_foil") or 0.0)
                 }
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error Scryfall Batch: {e}")
     return {}
 
 def fetch_scryfall_metadata(ids):
+    """Obtiene datos enriquecidos de Scryfall usando concurrencia."""
     u_ids = [i for i in pd.unique(ids) if isinstance(i, str)]
     data, missing, now = {}, [], time.time()
     
+    # 1. Revisar Caché
     for i in u_ids:
         if i in SCRYFALL_METADATA_CACHE and (now - SCRYFALL_METADATA_CACHE[i][1] < CACHE_TTL): 
             data[i] = SCRYFALL_METADATA_CACHE[i][0]
         else: 
             missing.append(i)
             
+    # 2. Fetch Remoto (si falta info)
     if missing:
-        with ThreadPoolExecutor(max_workers=5) as ex:
-            batches = [missing[i:i+75] for i in range(0, len(missing), 75)]
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            batches = [missing[i:i+200] for i in range(0, len(missing), 200)]
             futures = {ex.submit(_fetch_scryfall_batch_metadata, b): b for b in batches}
             
             for f in as_completed(futures):
@@ -87,6 +109,7 @@ def fetch_scryfall_metadata(ids):
                     SCRYFALL_METADATA_CACHE[k] = (v, now)
     return data
 
+# --- JUMPSELLER STOCK (Suma de Variantes) ---
 def get_jumpseller_stock_for_name(name):
     if not name: return 0
     clean_target = normalize_text_strict(name)
@@ -102,7 +125,7 @@ def get_jumpseller_stock_for_name(name):
             "login": settings.JUMPSELLER_STORE, 
             "authtoken": settings.JUMPSELLER_API_TOKEN, 
             "query": clean_target, 
-            "limit": 20, 
+            "limit": 100, 
             "fields": "stock,name,variants"
         }
         resp = session.get(url, params=params, timeout=5)
@@ -115,28 +138,35 @@ def get_jumpseller_stock_for_name(name):
                 if prod_clean == clean_target or prod_clean.startswith(clean_target + " "):
                     vars_stock = sum(v.get("stock", 0) for v in prod.get("variants", []))
                     total += max(prod.get("stock", 0), vars_stock)
-    except: 
+    except Exception as e: 
+        logger.warning(f"Error Jumpseller Stock '{name}': {e}")
         pass
         
     STOCK_CACHE[clean_target] = (total, now)
     return total
 
+# --- PROCESADOR CENTRAL ---
 def procesar_csv_manabox(content, internal_mode=True):
     try: 
         df = pd.read_csv(io.BytesIO(content))
     except: 
-        return {"error": "CSV Inválido"}
+        return {"error": "CSV Inválido. Asegúrate de exportar desde ManaBox correctamente."}
     
-    cols_map = {"Name": "name", "Set code": "set_code", "Foil": "foil", "Quantity": "quantity", "Purchase price": "purchase_price", "Scryfall ID": "scryfall_id"}
+    # Normalización columnas CSV
+    cols_map = {
+        "Name": "name", "Set code": "set_code", "Foil": "foil", 
+        "Quantity": "quantity", "Purchase price": "purchase_price", 
+        "Scryfall ID": "scryfall_id"
+    }
     df.columns = [c.strip() for c in df.columns]
     df = df.rename(columns=cols_map)
     
-    if "name" not in df.columns: 
-        return {"error": "Falta columna Name"}
+    if "name" not in df.columns: return {"error": "Falta columna 'Name' en el CSV."}
     
     df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
     df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
     
+    # 1. ENRIQUECIMIENTO (SCRYFALL)
     if "scryfall_id" in df.columns:
         sf_ids = df["scryfall_id"].dropna().unique()
         sf_data = fetch_scryfall_metadata(sf_ids)
@@ -144,20 +174,27 @@ def procesar_csv_manabox(content, internal_mode=True):
         def enrich_row(row):
             sid = row.get("scryfall_id")
             meta = sf_data.get(sid, {})
-            if meta.get("canonical_name"):
-                row["name"] = meta.get("canonical_name")
+            
+            if meta.get("canonical_name"): row["name"] = meta.get("canonical_name")
+            
             row["banned"] = meta.get("banned", False)
-            row["edhrec_rank"] = meta.get("edhrec_rank", 999999) 
+            row["edhrec_rank"] = meta.get("edhrec_rank", 999999)
+            row["market_usd"] = meta.get("market_usd", 0.0)      # VITAL
+            row["market_usd_foil"] = meta.get("market_usd_foil", 0.0)
             return row
             
         df = df.apply(enrich_row, axis=1)
     else:
+        # Fallback si no hay IDs (Raro en ManaBox)
         df["banned"] = False
         df["edhrec_rank"] = 999999
+        df["market_usd"] = 0.0
 
+    # 2. CÁLCULO DE OFERTAS
     df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(redondear_a_100)
     df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(redondear_a_100)
     
+    # 3. CONSULTA STOCK (SOLO MODO INTERNO)
     if internal_mode:
         unique_names = df["name"].unique()
         with ThreadPoolExecutor(max_workers=10) as ex:
@@ -165,12 +202,16 @@ def procesar_csv_manabox(content, internal_mode=True):
             stock_map = dict(zip(unique_names, stocks))
         df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
         
+        # Cálculo de Staple (Alta Demanda)
         def is_staple(row):
             norm_name = normalize_text_strict(row["name"])
+            # Lista manual de Config (Render)
             manual_staple = any(normalize_text_strict(s) == norm_name for s in settings.HIGH_DEMAND_CARDS)
+            # Lista automática por Ranking EDHREC
             rank_staple = (row.get("edhrec_rank", 999999) or 999999) < 500 
             return manual_staple or rank_staple
 
+        # Cálculo de Cantidad Sugerida a Comprar
         def calc_sug(row):
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple(row) else settings.STOCK_LIMIT_DEFAULT
             return max(0, min(row["quantity"], limit - row["stock_tienda"]))
@@ -180,40 +221,62 @@ def procesar_csv_manabox(content, internal_mode=True):
         df["stock_tienda"] = 0
         df["qty_sug"] = df["quantity"]
 
+    # 4. CLASIFICACIÓN INTELIGENTE (RISK MANAGEMENT)
     def clasificar(row):
-        if row["banned"]: return "no_compra", "BANEADA"
-        
+        # A. Filtros Duros
+        if row["banned"]: return "no_compra", "BANEADA (Commander)"
         if internal_mode and row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
 
-        p_curr = row["purchase_price"]
-        if p_curr < settings.MIN_PURCHASE_USD: return "no_compra", f"BULK (< ${settings.MIN_PURCHASE_USD})"
+        p_curr = float(row["purchase_price"])
+        is_foil = str(row.get("foil", "")).lower() == "foil"
+
+        # B. Filtro Bulk
+        if p_curr < settings.MIN_PURCHASE_USD: 
+            return "no_compra", f"BULK (< ${settings.MIN_PURCHASE_USD})"
         
-        if p_curr >= settings.STAKE_MIN_PRICE_FOR_STAKE:
-            return "compra", "ESTACA 🔥"
+        # C. ALGORITMO DE ESTACAS (RISK MANAGEMENT)
+        # Solo analizamos si supera el umbral de dolor ($20 USD por defecto) y es Foil
+        if is_foil and p_curr >= settings.STAKE_MIN_PRICE_FOR_STAKE:
             
+            market_norm = row.get("market_usd", 0.0)
+            
+            # Si no hay precio normal de referencia, es sospechoso
+            if market_norm == 0:
+                return "estaca", "ESTACA 🔥 (Sin ref. Normal)"
+            
+            ratio = p_curr / market_norm
+            spread = p_curr - market_norm
+            
+            # REGLA DE ORO: Si vale 2.5x más que la normal Y la diferencia es > $10
+            if ratio >= settings.STAKE_RATIO_THRESHOLD and spread >= settings.STAKE_MIN_SPREAD:
+                return "estaca", f"ESTACA 🔥 (Ratio {ratio:.1f}x)"
+
         return "compra", "COMPRAR"
 
     res = df.apply(clasificar, axis=1, result_type="expand")
     df["cat"], df["razon"] = res[0], res[1]
     
     df["sort_rank"] = df["cat"].map({"compra": 1, "no_compra": 2})
-    df.loc[df["razon"] == "ESTACA 🔥", "sort_rank"] = 0
+    df.loc[df["cat"] == "estaca", "sort_rank"] = 0 
     
     final_df = df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])
     return final_df.fillna("").to_dict(orient="records")
 
+# --- MAILING ---
 def enviar_correo_buylist(cli, items, clp, gc):
     if not settings.SMTP_EMAIL: return {"error": "SMTP no configurado"}
     
     msg = MIMEMultipart()
-    msg['Subject'] = f"Buylist: {cli.get('nombre')} (${clp:,} CLP)"
+    msg['Subject'] = f"Buylist: {cli.get('nombre')} ({clp})" 
     msg['From'] = settings.SMTP_EMAIL
     msg['To'] = settings.TARGET_EMAIL
     
     rows = ""
     for i in items:
-        color = "#dcfce7" if i['cat'] == 'compra' else "#fee2e2" 
-        if "ESTACA" in i['razon']: color = "#bfdbfe" 
+        color = "#dcfce7" # Verde (Compra)
+        if i['cat'] == 'no_compra': color = "#f3f4f6" # Gris (Bulk)
+        if i['cat'] == 'estaca': color = "#fff7ed" # Naranja (Estaca)
+
         rows += f"""<tr style="background-color:{color}">
             <td style="padding:5px; text-align:center;">{i['quantity']}</td>
             <td style="padding:5px;"><b>{i['name']}</b><br><small>{i['set_code'] or ''}</small></td>
@@ -223,24 +286,27 @@ def enviar_correo_buylist(cli, items, clp, gc):
         </tr>"""
             
     html = f"""
-    <h2>Nueva Solicitud de Venta</h2>
-    <p>
-        <b>Cliente:</b> {cli.get('nombre')} ({cli.get('email')})<br>
-        <b>Teléfono:</b> {cli.get('telefono')}<br>
-        <b>Notas:</b> {cli.get('notas')}
-    </p>
-    <hr>
-    <h3>Resumen de la Oferta:</h3>
-    <ul>
-        <li><b>Total Efectivo:</b> ${clp:,} CLP</li>
-        <li><b>Total GameCoins:</b> ${gc:,} GC</li>
-    </ul>
-    <table border='1' cellspacing='0' cellpadding='5' style="border-collapse: collapse; width: 100%; font-family: sans-serif;">
-        <tr style="background-color: #333; color: white;">
-            <th>Cant.</th><th>Carta</th><th>Estado</th><th>Oferta Cash</th><th>Oferta GC</th>
-        </tr>
-        {rows}
-    </table>
+    <div style="font-family: Arial, sans-serif;">
+        <h2 style="color: #D32F2F;">Nueva Solicitud de Venta</h2>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <p><b>Cliente:</b> {cli.get('nombre')} ({cli.get('email')})</p>
+            <p><b>RUT:</b> {cli.get('rut')} | <b>Tel:</b> {cli.get('telefono')}</p>
+            <p><b>Método Pago:</b> {cli.get('metodo_pago')}</p>
+            <p><b>Notas:</b> {cli.get('notas')}</p>
+        </div>
+        <hr>
+        <h3>Resumen de la Oferta:</h3>
+        <ul style="font-size: 1.1em;">
+            <li><b>Total Efectivo:</b> <span style="color:green">{clp}</span></li>
+            <li><b>Total GameCoins:</b> <span style="color:#D32F2F">{gc}</span></li>
+        </ul>
+        <table border='1' cellspacing='0' cellpadding='5' style="border-collapse: collapse; width: 100%; font-size: 0.9em;">
+            <tr style="background-color: #333; color: white;">
+                <th>Cant.</th><th>Carta</th><th>Estado</th><th>Oferta Cash</th><th>Oferta GC</th>
+            </tr>
+            {rows}
+        </table>
+    </div>
     """
     msg.attach(MIMEText(html, 'html'))
     
@@ -253,6 +319,7 @@ def enviar_correo_buylist(cli, items, clp, gc):
         return {"status": "ok"}
     except Exception as e: return {"error": str(e)}
 
+# --- JUMPSELLER CUPONES & SYNC ---
 def crear_cupon_jumpseller(codigo, monto):
     if monto <= 0: return False
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
@@ -277,6 +344,8 @@ def crear_cupon_jumpseller(codigo, monto):
 
 def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
     page = 1; nuevos = 0; actualizados = 0
+    print("🔄 Iniciando Sync Jumpseller...")
+    
     while True:
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
         try:
@@ -289,7 +358,6 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
             for c in clientes_api:
                 raw_email = c.get("customer", {}).get("email", "")
                 if raw_email:
-                
                     clean_email = raw_email.strip().lower()
                     clientes_map[clean_email] = c.get("customer", {})
             
@@ -314,6 +382,7 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                 nom = normalize_text_strict(nom or "Cliente").title()
                 ape = normalize_text_strict(ape or "").title()
                 
+                # Extracción RUT (Campo tricky)
                 rut = data.get("tax_id") or ""
                 if not rut:
                     for f in data.get("fields", []):
@@ -330,8 +399,10 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
                     nuevos += 1
             
             db_session.commit()
+            print(f"✅ Página {page} OK. Nuevos: {nuevos} - Actualizados: {actualizados}")
             page += 1
         except Exception as e:
+            print(f"❌ Error Sync Page {page}: {e}")
             db_session.rollback()
             return {"status": "error", "detail": str(e)}
             
