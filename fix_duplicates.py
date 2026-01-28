@@ -1,107 +1,159 @@
 import logging
-from sqlalchemy import text
+import json
+import datetime
+from sqlalchemy import or_
 from database import SessionLocal
 from models import GameCoinUser
 
-# Configuración de Logging para ver qué pasa en la consola
+# Configuración
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger("FixDuplicates")
+logger = logging.getLogger("TotalCleaner")
 
-def es_perfil_valido(user):
-    """Retorna un puntaje de calidad del perfil."""
+def respaldar_datos(session):
+    """Guarda una copia de seguridad en JSON antes de hacer cambios."""
+    logger.info("💾 Generando respaldo de seguridad...")
+    users = session.query(GameCoinUser).all()
+    data = []
+    for u in users:
+        data.append({
+            "id": u.id, "email": u.email, "rut": u.rut,
+            "name": u.name, "surname": u.surname, "saldo": u.saldo
+        })
+    
+    filename = f"backup_antes_de_limpiar_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    logger.info(f"✅ Respaldo guardado en: {filename}")
+
+def normalizar_usuario(u):
+    """Limpia los textos del usuario."""
+    cambios = False
+    
+    # Email: Minúsculas y sin espacios
+    if u.email:
+        clean_email = u.email.strip().lower()
+        if u.email != clean_email:
+            u.email = clean_email
+            cambios = True
+            
+    # Nombre: Title Case (Juan Perez)
+    if u.name:
+        clean_name = u.name.strip().title()
+        if u.name != clean_name:
+            u.name = clean_name
+            cambios = True
+            
+    # Apellido: Title Case
+    if u.surname:
+        clean_surname = u.surname.strip().title()
+        if u.surname != clean_surname:
+            u.surname = clean_surname
+            cambios = True
+            
+    # RUT: Mayúsculas y sin espacios
+    if u.rut:
+        clean_rut = u.rut.strip().upper()
+        if u.rut != clean_rut:
+            u.rut = clean_rut
+            cambios = True
+            
+    return cambios
+
+def puntaje_calidad(user):
+    """Define qué usuario vale más la pena conservar."""
     score = 0
-    # Preferimos perfiles con nombre real (no vacio, no default)
-    if user.name and user.name.lower() != "cliente" and len(user.name) > 2:
-        score += 10
-    # Preferimos perfiles con RUT válido
-    if user.rut and len(user.rut) > 5 and "MAN-" not in user.rut:
-        score += 5
-    # En caso de empate, preferimos el que tenga saldo
-    if user.saldo > 0:
-        score += 2
-    # Finalmente, preferimos el más reciente
-    score += (user.id * 0.0001) 
+    if user.rut and len(user.rut) > 3 and "MAN-" not in user.rut and "PENDIENTE" not in user.rut: score += 100
+    if user.name and user.name.lower() != "cliente": score += 50
+    if user.saldo > 0: score += 1000 # ¡El saldo es sagrado!
+    score += (user.id * 0.01) # Preferencia por el ID más alto (más nuevo) en empate
     return score
 
-def fusionar_duplicados():
+def ejecutar_limpieza_total():
     session = SessionLocal()
     try:
-        logger.info("🧹 Iniciando limpieza de duplicados...")
+        print("==========================================")
+        print("   🚀 INICIANDO PROTOCOLO DE LIMPIEZA TOTAL")
+        print("==========================================")
         
-        # 1. Obtener todos los usuarios
-        all_users = session.query(GameCoinUser).all()
-        logger.info(f"Total usuarios analizados: {len(all_users)}")
+        # 1. RESPALDO
+        respaldar_datos(session)
+        
+        # 2. NORMALIZACIÓN
+        logger.info("🛠️  Normalizando textos (Mayúsculas/Minúsculas)...")
+        users = session.query(GameCoinUser).all()
+        norm_count = 0
+        for u in users:
+            if normalizar_usuario(u):
+                norm_count += 1
+        session.commit() # Guardamos normalización para que el agrupamiento funcione bien
+        logger.info(f"✅ {norm_count} usuarios normalizados.")
 
-        # 2. Agrupar por Email Normalizado
+        # 3. FUSIÓN DE DUPLICADOS (Recargamos usuarios ya normalizados)
+        users = session.query(GameCoinUser).all()
         grupos = {}
-        for user in all_users:
-            # Normalización agresiva: minúsculas y sin espacios
-            clean_email = user.email.strip().lower()
+        for u in users:
+            email = u.email # Ya está en minúsculas
+            if email not in grupos: grupos[email] = []
+            grupos[email].append(u)
             
-            # FIX PARA CASOS COMO 'gmailcom' (sin punto o arroba)
-            # Esto ayuda a agrupar correos mal escritos si son muy obvios, 
-            # pero para seguridad, agrupamos por el string exacto normalizado.
-            
-            if clean_email not in grupos:
-                grupos[clean_email] = []
-            grupos[clean_email].append(user)
-
-        count_fusionados = 0
+        fusionados = 0
+        eliminados_fusion = 0
         
-        # 3. Procesar Grupos
-        for email_key, usuarios in grupos.items():
-            if len(usuarios) < 2:
-                continue # No hay duplicados aquí
-
-            # Ordenar usuarios por "Calidad" (El mejor va primero)
-            usuarios.sort(key=es_perfil_valido, reverse=True)
+        logger.info("🔄 Buscando y fusionando duplicados...")
+        for email, lista in grupos.items():
+            if len(lista) < 2: continue
             
-            maestro = usuarios[0]
-            esclavos = usuarios[1:]
+            lista.sort(key=puntaje_calidad, reverse=True)
+            maestro = lista[0]
+            duplicados = lista[1:]
             
-            logger.info(f"🔄 Fusionando {email_key} ({len(usuarios)} registros)")
-            logger.info(f"   👑 Maestro ID: {maestro.id} | Nombre: {maestro.name} | Saldo: ${maestro.saldo}")
-
-            saldo_total_esclavos = 0
-            
-            for esclavo in esclavos:
-                logger.info(f"   🗑️ Eliminando ID: {esclavo.id} | Nombre: {esclavo.name} | Saldo: ${esclavo.saldo}")
+            saldo_extra = 0
+            for dup in duplicados:
+                saldo_extra += dup.saldo
+                # Rescatar datos útiles
+                if (not maestro.rut or "MAN-" in maestro.rut) and (dup.rut and "MAN-" not in dup.rut):
+                    maestro.rut = dup.rut
+                if (not maestro.surname) and dup.surname:
+                    maestro.surname = dup.surname
                 
-                # FUSIONAR SALDO: Sumamos el dinero del duplicado al maestro
-                saldo_total_esclavos += esclavo.saldo
-                
-                # FUSIONAR DATOS: Si al maestro le falta info y el duplicado la tiene
-                if (not maestro.rut or len(maestro.rut) < 4) and (esclavo.rut and len(esclavo.rut) > 4):
-                    maestro.rut = esclavo.rut
-                    logger.info("      -> RUT rescatado del duplicado")
-                
-                if (not maestro.surname) and esclavo.surname:
-                    maestro.surname = esclavo.surname
-                    logger.info("      -> Apellido rescatado del duplicado")
-
-                # Borrar al duplicado
-                session.delete(esclavo)
+                session.delete(dup)
+                eliminados_fusion += 1
             
-            # Actualizar saldo del maestro
-            if saldo_total_esclavos > 0:
-                maestro.saldo += saldo_total_esclavos
-                logger.info(f"   💰 Nuevo saldo maestro: ${maestro.saldo}")
+            if saldo_extra > 0:
+                maestro.saldo += saldo_extra
+                logger.info(f"   💰 {email}: Fusionado saldo +${saldo_extra}. Total: ${maestro.saldo}")
             
-            count_fusionados += 1
-
+            fusionados += 1
+            
         session.commit()
-        logger.info(f"✅ Proceso terminado. Se fusionaron {count_fusionados} grupos de usuarios.")
+        logger.info(f"✅ Se fusionaron {fusionados} grupos (Total eliminados: {eliminados_fusion})")
+
+        # 4. PURGA DE ZOMBIES (Usuarios vacíos sin saldo)
+        logger.info("💀 Buscando usuarios 'Zombie' (Sin saldo y sin datos)...")
+        
+        # Criterio de Zombie: Saldo 0 Y (Rut 'MAN-' o 'PENDIENTE') Y (Nombre 'Cliente' o vacío)
+        zombies = session.query(GameCoinUser).filter(
+            GameCoinUser.saldo == 0,
+            or_(GameCoinUser.rut.like("MAN-%"), GameCoinUser.rut.like("PENDIENTE%"), GameCoinUser.rut == ""),
+            or_(GameCoinUser.name == "Cliente", GameCoinUser.name == "")
+        ).all()
+        
+        zombies_count = len(zombies)
+        for z in zombies:
+            session.delete(z)
+            
+        session.commit()
+        logger.info(f"✅ Se eliminaron {zombies_count} usuarios basura (Zombies).")
+        
+        print("==========================================")
+        print("   ✨ LIMPIEZA TOTAL FINALIZADA CON ÉXITO")
+        print("==========================================")
 
     except Exception as e:
         session.rollback()
-        logger.error(f"❌ Error crítico: {e}")
+        logger.error(f"❌ ERROR CRÍTICO: {e}")
     finally:
         session.close()
 
 if __name__ == "__main__":
-    # Confirmación de seguridad
-    print("⚠️  ADVERTENCIA: Este script modificará la base de datos fusionando usuarios.")
-    print("    Se eliminarán registros duplicados y se sumarán sus saldos.")
-    
-    # En Render (no interactivo) o local
-    fusionar_duplicados()
+    ejecutar_limpieza_total()
