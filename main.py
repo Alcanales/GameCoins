@@ -1,7 +1,8 @@
 import secrets
 import random
 import string
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Request, BackgroundTasks
+import json
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -25,7 +26,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         return response
 
-app = FastAPI(title="GameQuest GameCoins API", version="4.1")
+app = FastAPI(title="GameQuest GameCoins API", version="5.0.0")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -36,6 +37,7 @@ origins = [
     "https://game-quest.jumpseller.com", "https://game-quest.cl",       
     "https://www.game-quest.cl", "https://gamequest.cl", "https://www.gamequest.cl"    
 ]
+
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
@@ -53,20 +55,38 @@ class BuylistSubmitRequest(BaseModel):
     cliente: dict; cartas: list; total_clp: str; total_gc: str
 
 @app.get("/")
-def home(): return {"status": "Online"}
+def home(): return {"status": "Online", "version": "5.0.0"}
 
 @app.post("/api/analizar")
 def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     content = file.file.read()
-    if len(content) > 5*1024*1024: raise HTTPException(413, "El archivo es muy grande (Max 5MB)")
+    if len(content) > 5*1024*1024: raise HTTPException(413, "Payload Too Large")
     res = logic.procesar_csv_manabox(content, internal_mode=(mode == "internal"))
     if isinstance(res, dict) and "error" in res: raise HTTPException(400, res["error"])
     return {"data": res}
 
 @app.post("/api/enviar_buylist")
-def submit_buylist(payload: BuylistSubmitRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(logic.enviar_correo_buylist, payload.cliente, payload.cartas, payload.total_clp, payload.total_gc)
-    return {"status": "ok", "message": "Solicitud recibida correctamente"}
+def submit_buylist(background_tasks: BackgroundTasks, payload: str = Form(...), csv_file: UploadFile = File(...)):
+    try:
+        data_dict = json.loads(payload)
+        req = BuylistSubmitRequest(**data_dict)
+    except Exception:
+        raise HTTPException(400, "Invalid JSON Payload")
+
+    file_content = csv_file.file.read()
+    filename = csv_file.filename
+
+    background_tasks.add_task(
+        logic.enviar_correo_buylist_dual, 
+        req.cliente, 
+        req.cartas, 
+        req.total_clp, 
+        req.total_gc,
+        file_content,
+        filename
+    )
+    
+    return {"status": "ok", "message": "Queued"}
 
 @app.get("/api/saldo/{email}")
 def consultar_saldo(email: str, db: Session = Depends(get_db)):
@@ -76,10 +96,10 @@ def consultar_saldo(email: str, db: Session = Depends(get_db)):
 @app.post("/api/canjear")
 def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower(); monto = int(payload.monto)
-    if monto <= 0: raise HTTPException(400, "Monto inválido")
+    if monto <= 0: raise HTTPException(400, "Invalid Amount")
     
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).with_for_update().first()
-    if not user or user.saldo < monto: raise HTTPException(400, "Saldo insuficiente")
+    if not user or user.saldo < monto: raise HTTPException(400, "Insufficient Funds")
     
     user.saldo -= monto
     try:
@@ -89,9 +109,9 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
             return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
         else:
             user.saldo += monto; db.commit()
-            raise HTTPException(502, "Error al crear cupón en Jumpseller")
+            raise HTTPException(502, "Upstream Error")
     except Exception:
-        db.rollback(); raise HTTPException(500, "Error interno")
+        db.rollback(); raise HTTPException(500, "Internal Server Error")
 
 @app.get("/admin/users", dependencies=[Depends(verificar_admin)])
 def listar_usuarios(db: Session = Depends(get_db)):
@@ -102,7 +122,7 @@ def actualizar_saldo_manual(payload: UpdateRequest, db: Session = Depends(get_db
     email = payload.email.strip().lower()
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
     if not user:
-        if payload.accion == "restar": raise HTTPException(404, "Usuario no existe")
+        if payload.accion == "restar": raise HTTPException(404, "User Not Found")
         user = GameCoinUser(email=email, saldo=0, rut=f"MAN-{email}")
         db.add(user)
     

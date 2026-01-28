@@ -9,10 +9,10 @@ import unicodedata
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from sqlalchemy.orm import Session
 from config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +30,7 @@ def create_robust_session():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "GameQuest-BuylistBot/2.1", 
+        "User-Agent": "GameQuest-BuylistBot/3.0", 
         "Content-Type": "application/json"
     })
     return session
@@ -123,19 +123,13 @@ def get_jumpseller_stock_for_name(name):
         if resp.status_code == 200:
             for p in resp.json():
                 prod = p.get("product", {})
-                prod_raw_name = prod.get("name", "")
-                prod_clean = normalize_text_strict(prod_raw_name)
+                prod_clean = normalize_text_strict(prod.get("name", ""))
                 
-                # Coincidencia flexible: "krosan grip" in "krosan grip español"
-                match = f" {clean_target} " in f" {prod_clean} "
-                
-                if match:
+                if f" {clean_target} " in f" {prod_clean} ":
                     vars_stock = sum(v.get("stock", 0) for v in prod.get("variants", []))
                     total += max(prod.get("stock", 0), vars_stock)
                     
-    except Exception as e: 
-        logger.warning(f"Error Jumpseller Stock '{name}': {e}")
-        pass
+    except Exception: pass
         
     STOCK_CACHE[clean_target] = (total, now)
     return total
@@ -144,7 +138,7 @@ def procesar_csv_manabox(content, internal_mode=True):
     try: 
         df = pd.read_csv(io.BytesIO(content))
     except: 
-        return {"error": "CSV Inválido. Asegúrate de exportar desde ManaBox correctamente."}
+        return {"error": "Invalid CSV Format"}
     
     cols_map = {
         "Name": "name", "Set code": "set_code", "Foil": "foil", 
@@ -154,7 +148,7 @@ def procesar_csv_manabox(content, internal_mode=True):
     df.columns = [c.strip() for c in df.columns]
     df = df.rename(columns=cols_map)
     
-    if "name" not in df.columns: return {"error": "Falta columna 'Name' en el CSV."}
+    if "name" not in df.columns: return {"error": "Missing 'Name' column"}
     
     df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
     df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
@@ -206,12 +200,9 @@ def procesar_csv_manabox(content, internal_mode=True):
         return max(0, min(row["quantity"], limit - row["stock_tienda"]))
         
     df["qty_sug"] = df.apply(calc_sug, axis=1)
-    # ------------------------------------------------------------
 
     def clasificar(row):
         if row["banned"]: return "no_compra", "BANEADA"
-        
-  
         if row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
 
         p_curr = float(row["purchase_price"])
@@ -221,12 +212,11 @@ def procesar_csv_manabox(content, internal_mode=True):
         
         if is_foil and p_curr >= settings.STAKE_MIN_PRICE_FOR_STAKE:
             market_norm = row.get("market_usd", 0.0)
-            if market_norm == 0: return "estaca", "ESTACA 🔥 (Sin ref)"
-            
-            ratio = p_curr / market_norm
-            spread = p_curr - market_norm
-            if ratio >= settings.STAKE_RATIO_THRESHOLD and spread >= settings.STAKE_MIN_SPREAD:
-                return "estaca", f"ESTACA 🔥 (Ratio {ratio:.1f}x)"
+            if market_norm > 0:
+                ratio = p_curr / market_norm
+                spread = p_curr - market_norm
+                if ratio >= settings.STAKE_RATIO_THRESHOLD and spread >= settings.STAKE_MIN_SPREAD:
+                    return "estaca", f"ESTACA (Ratio {ratio:.1f}x)"
 
         return "compra", "COMPRAR"
 
@@ -239,35 +229,91 @@ def procesar_csv_manabox(content, internal_mode=True):
     final_df = df.sort_values(by=["sort_rank", "purchase_price"], ascending=[True, False])
     return final_df.fillna("").to_dict(orient="records")
 
-def enviar_correo_buylist(cli, items, clp, gc):
-    if not settings.SMTP_EMAIL: return {"error": "SMTP no configurado"}
-    msg = MIMEMultipart(); msg['Subject'] = f"Buylist: {cli.get('nombre')} ({clp})"; msg['From'] = settings.SMTP_EMAIL; msg['To'] = settings.TARGET_EMAIL
+def enviar_correo_buylist_dual(cli, items, clp, gc, csv_content=None, csv_filename="buylist.csv"):
+    if not settings.SMTP_EMAIL: return {"error": "SMTP Config Missing"}
     
-    rows = ""
+    table_rows = ""
     for i in items:
-        color = "#dcfce7" if i['cat'] == 'compra' else ("#fee2e2" if i['cat'] == 'no_compra' else "#fff7ed")
-        rows += f"<tr style='background-color:{color}'><td style='padding:5px;text-align:center'>{i['quantity']}</td><td style='padding:5px'><b>{i['name']}</b><br><small>{i['set_code'] or ''}</small></td><td style='padding:5px'>{i['razon']}</td><td style='padding:5px;text-align:right'>${i.get('cash_clp',0):,}</td><td style='padding:5px;text-align:right'>${i.get('gc_price',0):,}</td></tr>"
+        table_rows += f"""
+        <tr>
+            <td style='padding:8px;text-align:center;border-bottom:1px solid #eee;'>{i['quantity']}</td>
+            <td style='padding:8px;border-bottom:1px solid #eee;'>
+                <b>{i['name']}</b><br>
+                <span style='color:#666;font-size:0.8em'>{i['set_code']}</span>
+            </td>
+            <td style='padding:8px;text-align:right;border-bottom:1px solid #eee;'>${i.get('price_unit',0):,}</td>
+            <td style='padding:8px;text-align:right;border-bottom:1px solid #eee;font-weight:bold;'>${i.get('price_total',0):,}</td>
+        </tr>
+        """
     
-    html = f"""
-    <h2>Buylist de {cli.get('nombre')}</h2>
-    <p>RUT: {cli.get('rut')} | Pago: {cli.get('metodo_pago')}</p>
-    <p>Notas: {cli.get('notas')}</p>
-    <hr>
-    <h3>Total: <span style='color:green'>{clp}</span> | GC: <span style='color:orange'>{gc}</span></h3>
-    <table border='1' cellspacing='0' cellpadding='5' width='100%'>
-        <tr><th>Cant</th><th>Carta</th><th>Estado</th><th>Cash</th><th>GC</th></tr>
-        {rows}
-    </table>
+    base_html = f"""
+    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: #D32F2F; padding: 20px; text-align: center;">
+            <h2 style="color: #ffffff; margin: 0; font-size: 24px;">Confirmación de Solicitud</h2>
+        </div>
+        
+        <div style="padding: 20px;">
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; line-height: 1.6;">
+                <p style="margin: 0 0 5px;"><strong>Cliente:</strong> {cli.get('nombre')}</p>
+                <p style="margin: 0 0 5px;"><strong>RUT:</strong> {cli.get('rut')}</p>
+                <p style="margin: 0 0 5px;"><strong>Email:</strong> {cli.get('email')}</p>
+                <p style="margin: 0 0 5px;"><strong>Pago:</strong> {cli.get('metodo_pago')}</p>
+                <p style="margin: 0;"><strong>Notas:</strong> {cli.get('notas')}</p>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 10px;">
+                 <span style="font-size: 18px; font-weight: bold;">TOTAL ESTIMADO</span>
+                 <span style="font-size: 20px; font-weight: bold; color: #10B981;">{clp}</span>
+            </div>
+            <div style="text-align: right; font-size: 14px; color: #F59E0B; font-weight: bold; margin-bottom: 20px;">
+                (Valor QuestPoints: {gc})
+            </div>
+
+            <table border='0' cellspacing='0' cellpadding='0' width='100%'>
+                <tr style="background:#f1f1f1; text-transform:uppercase; font-size:12px; color:#555;">
+                    <th style="padding:10px;">Cant</th>
+                    <th style="padding:10px;text-align:left;">Carta</th>
+                    <th style="padding:10px;text-align:right;">Unit</th>
+                    <th style="padding:10px;text-align:right;">Total</th>
+                </tr>
+                {table_rows}
+            </table>
+        </div>
+        <div style="background: #eeeeee; padding: 15px; text-align: center; font-size: 12px; color: #777;">
+            <p style="margin: 0;">GameQuest Chile - Compra y Venta de TCG</p>
+        </div>
+    </div>
     """
-    msg.attach(MIMEText(html, 'html'))
+
+    recipients = [
+        {"email": settings.TARGET_EMAIL, "subject": f"🔔 Buylist: {cli.get('nombre')} ({clp})"},
+        {"email": cli.get('email'), "subject": f"✅ Solicitud Recibida - GameQuest"}
+    ]
+
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587)
         s.starttls()
         s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg.as_string())
+
+        for recipient in recipients:
+            msg = MIMEMultipart()
+            msg['Subject'] = recipient["subject"]
+            msg['From'] = settings.SMTP_EMAIL
+            msg['To'] = recipient["email"]
+            msg.attach(MIMEText(base_html, 'html'))
+            
+            if csv_content:
+                part = MIMEApplication(csv_content, Name=csv_filename)
+                part['Content-Disposition'] = f'attachment; filename="{csv_filename}"'
+                msg.attach(part)
+            
+            s.sendmail(settings.SMTP_EMAIL, recipient["email"], msg.as_string())
+        
         s.quit()
         return {"status": "ok"}
-    except Exception as e: return {"error": str(e)}
+    except Exception as e:
+        logger.error(f"SMTP Error: {e}")
+        return {"error": str(e)}
 
 def crear_cupon_jumpseller(codigo, monto):
     if monto <= 0: return False
@@ -296,7 +342,6 @@ def sincronizar_clientes_jumpseller(db_session, GameCoinUser_Model):
         url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
         try:
             resp = session.get(url, params={"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "page": page}, timeout=20)
-            
             if resp.status_code != 200 or not resp.json(): break
             
             clientes_api = resp.json()
