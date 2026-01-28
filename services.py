@@ -30,7 +30,7 @@ def create_robust_session():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update({
-        "User-Agent": "GameQuest-BuylistBot/2.0", 
+        "User-Agent": "GameQuest-BuylistBot/2.1", 
         "Content-Type": "application/json"
     })
     return session
@@ -126,6 +126,7 @@ def get_jumpseller_stock_for_name(name):
                 prod_raw_name = prod.get("name", "")
                 prod_clean = normalize_text_strict(prod_raw_name)
                 
+                # Coincidencia flexible: "krosan grip" in "krosan grip español"
                 match = f" {clean_target} " in f" {prod_clean} "
                 
                 if match:
@@ -157,6 +158,15 @@ def procesar_csv_manabox(content, internal_mode=True):
     
     df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
     df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
+
+    group_keys = [c for c in ["name", "set_code", "foil", "scryfall_id"] if c in df.columns]
+    for col in group_keys: df[col] = df[col].fillna("")
+
+    if group_keys:
+        df["_total_value"] = df["quantity"] * df["purchase_price"]
+        df = df.groupby(group_keys, as_index=False).agg({"quantity": "sum", "_total_value": "sum"})
+        df["purchase_price"] = df.apply(lambda x: x["_total_value"]/x["quantity"] if x["quantity"]>0 else 0.0, axis=1)
+        df = df.drop(columns=["_total_value"])
     
     if "scryfall_id" in df.columns:
         sf_ids = df["scryfall_id"].dropna().unique()
@@ -171,7 +181,6 @@ def procesar_csv_manabox(content, internal_mode=True):
             row["market_usd"] = meta.get("market_usd", 0.0)
             row["market_usd_foil"] = meta.get("market_usd_foil", 0.0)
             return row
-            
         df = df.apply(enrich_row, axis=1)
     else:
         df["banned"] = False; df["edhrec_rank"] = 999999; df["market_usd"] = 0.0
@@ -179,31 +188,31 @@ def procesar_csv_manabox(content, internal_mode=True):
     df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(redondear_a_100)
     df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(redondear_a_100)
     
-    if internal_mode:
-        unique_names = df["name"].unique()
-        with ThreadPoolExecutor(max_workers=10) as ex:
-            stocks = list(ex.map(get_jumpseller_stock_for_name, unique_names))
-            stock_map = dict(zip(unique_names, stocks))
-        df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
-        
-        def is_staple(row):
-            norm_name = normalize_text_strict(row["name"])
-            manual_staple = any(normalize_text_strict(s) == norm_name for s in settings.HIGH_DEMAND_CARDS)
-            rank_staple = (row.get("edhrec_rank", 999999) or 999999) < 500 
-            return manual_staple or rank_staple
+    unique_names = df["name"].unique()
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        stocks = list(ex.map(get_jumpseller_stock_for_name, unique_names))
+        stock_map = dict(zip(unique_names, stocks))
+    
+    df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
+    
+    def is_staple(row):
+        norm_name = normalize_text_strict(row["name"])
+        manual_staple = any(normalize_text_strict(s) == norm_name for s in settings.HIGH_DEMAND_CARDS)
+        rank_staple = (row.get("edhrec_rank", 999999) or 999999) < 500 
+        return manual_staple or rank_staple
 
-        def calc_sug(row):
-            limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple(row) else settings.STOCK_LIMIT_DEFAULT
-            return max(0, min(row["quantity"], limit - row["stock_tienda"]))
-            
-        df["qty_sug"] = df.apply(calc_sug, axis=1)
-    else:
-        df["stock_tienda"] = 0
-        df["qty_sug"] = df["quantity"]
+    def calc_sug(row):
+        limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple(row) else settings.STOCK_LIMIT_DEFAULT
+        return max(0, min(row["quantity"], limit - row["stock_tienda"]))
+        
+    df["qty_sug"] = df.apply(calc_sug, axis=1)
+    # ------------------------------------------------------------
 
     def clasificar(row):
         if row["banned"]: return "no_compra", "BANEADA"
-        if internal_mode and row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
+        
+  
+        if row["qty_sug"] == 0: return "no_compra", "STOCK LLENO"
 
         p_curr = float(row["purchase_price"])
         is_foil = str(row.get("foil", "")).lower() == "foil"
@@ -216,7 +225,6 @@ def procesar_csv_manabox(content, internal_mode=True):
             
             ratio = p_curr / market_norm
             spread = p_curr - market_norm
-            
             if ratio >= settings.STAKE_RATIO_THRESHOLD and spread >= settings.STAKE_MIN_SPREAD:
                 return "estaca", f"ESTACA 🔥 (Ratio {ratio:.1f}x)"
 
