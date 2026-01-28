@@ -1,88 +1,107 @@
 import logging
-from sqlalchemy import func
-from database import SessionLocal, engine
-from models import GameCoinUser, Base
+from sqlalchemy import text
+from database import SessionLocal
+from models import GameCoinUser
 
-# Configuración de Logging
-logging.basicConfig(level=logging.INFO)
+# Configuración de Logging para ver qué pasa en la consola
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("FixDuplicates")
+
+def es_perfil_valido(user):
+    """Retorna un puntaje de calidad del perfil."""
+    score = 0
+    # Preferimos perfiles con nombre real (no vacio, no default)
+    if user.name and user.name.lower() != "cliente" and len(user.name) > 2:
+        score += 10
+    # Preferimos perfiles con RUT válido
+    if user.rut and len(user.rut) > 5 and "MAN-" not in user.rut:
+        score += 5
+    # En caso de empate, preferimos el que tenga saldo
+    if user.saldo > 0:
+        score += 2
+    # Finalmente, preferimos el más reciente
+    score += (user.id * 0.0001) 
+    return score
 
 def fusionar_duplicados():
     session = SessionLocal()
     try:
-        logger.info("🔍 Analizando base de datos en busca de duplicados...")
+        logger.info("🧹 Iniciando limpieza de duplicados...")
         
-        # 1. Encontrar emails duplicados
-        # Hacemos una consulta agrupando por email y contando cuántas veces aparece
-        duplicados_query = (
-            session.query(GameCoinUser.email)
-            .group_by(GameCoinUser.email)
-            .having(func.count(GameCoinUser.email) > 1)
-            .all()
-        )
-        
-        if not duplicados_query:
-            logger.info("✅ No se encontraron duplicados. La base de datos está limpia.")
-            return
+        # 1. Obtener todos los usuarios
+        all_users = session.query(GameCoinUser).all()
+        logger.info(f"Total usuarios analizados: {len(all_users)}")
 
-        logger.info(f"⚠️ Se encontraron {len(duplicados_query)} correos con registros duplicados.")
+        # 2. Agrupar por Email Normalizado
+        grupos = {}
+        for user in all_users:
+            # Normalización agresiva: minúsculas y sin espacios
+            clean_email = user.email.strip().lower()
+            
+            # FIX PARA CASOS COMO 'gmailcom' (sin punto o arroba)
+            # Esto ayuda a agrupar correos mal escritos si son muy obvios, 
+            # pero para seguridad, agrupamos por el string exacto normalizado.
+            
+            if clean_email not in grupos:
+                grupos[clean_email] = []
+            grupos[clean_email].append(user)
 
-        # 2. Procesar cada caso de duplicidad
         count_fusionados = 0
-        for (email,) in duplicados_query:
-            # Traemos TODOS los registros de ese email
-            registros = session.query(GameCoinUser).filter_by(email=email).all()
+        
+        # 3. Procesar Grupos
+        for email_key, usuarios in grupos.items():
+            if len(usuarios) < 2:
+                continue # No hay duplicados aquí
+
+            # Ordenar usuarios por "Calidad" (El mejor va primero)
+            usuarios.sort(key=es_perfil_valido, reverse=True)
             
-            # Estrategia de Selección del "Maestro" (El mejor registro)
-            # Priorizamos:
-            # 1. El que tenga RUT (suele ser el más oficial)
-            # 2. El que tenga Nombre (no vacío)
-            # 3. El que tenga mayor ID (el más reciente)
+            maestro = usuarios[0]
+            esclavos = usuarios[1:]
             
-            # Ordenamos la lista según calidad de datos
-            registros.sort(
-                key=lambda u: (
-                    u.rut is not None and u.rut != "",  # Tiene RUT? (True > False)
-                    u.name is not None and u.name != "", # Tiene Nombre?
-                    u.id # ID más alto
-                ), 
-                reverse=True # Los mejores quedan al principio (índice 0)
-            )
+            logger.info(f"🔄 Fusionando {email_key} ({len(usuarios)} registros)")
+            logger.info(f"   👑 Maestro ID: {maestro.id} | Nombre: {maestro.name} | Saldo: ${maestro.saldo}")
+
+            saldo_total_esclavos = 0
             
-            maestro = registros[0]
-            sobrantes = registros[1:]
+            for esclavo in esclavos:
+                logger.info(f"   🗑️ Eliminando ID: {esclavo.id} | Nombre: {esclavo.name} | Saldo: ${esclavo.saldo}")
+                
+                # FUSIONAR SALDO: Sumamos el dinero del duplicado al maestro
+                saldo_total_esclavos += esclavo.saldo
+                
+                # FUSIONAR DATOS: Si al maestro le falta info y el duplicado la tiene
+                if (not maestro.rut or len(maestro.rut) < 4) and (esclavo.rut and len(esclavo.rut) > 4):
+                    maestro.rut = esclavo.rut
+                    logger.info("      -> RUT rescatado del duplicado")
+                
+                if (not maestro.surname) and esclavo.surname:
+                    maestro.surname = esclavo.surname
+                    logger.info("      -> Apellido rescatado del duplicado")
+
+                # Borrar al duplicado
+                session.delete(esclavo)
             
-            saldo_acumulado = 0
-            ids_eliminados = []
-            
-            # 3. Fusionar Saldos y Eliminar Sobrantes
-            for s in sobrantes:
-                saldo_acumulado += s.saldo
-                ids_eliminados.append(str(s.id))
-                session.delete(s) # Marcamos para borrar
-            
-            # Actualizamos al maestro
-            saldo_antiguo = maestro.saldo
-            maestro.saldo += saldo_acumulado
-            
-            logger.info(f"✨ Fusionando {email}:")
-            logger.info(f"   - Maestro ID: {maestro.id} (Nombre: {maestro.name})")
-            logger.info(f"   - Eliminados IDs: {', '.join(ids_eliminados)}")
-            logger.info(f"   - Saldo fusionado: {saldo_antiguo} + {saldo_acumulado} = {maestro.saldo}")
+            # Actualizar saldo del maestro
+            if saldo_total_esclavos > 0:
+                maestro.saldo += saldo_total_esclavos
+                logger.info(f"   💰 Nuevo saldo maestro: ${maestro.saldo}")
             
             count_fusionados += 1
 
-        # 4. Confirmar Cambios
         session.commit()
-        logger.info(f"🚀 ¡Éxito! Se unificaron {count_fusionados} usuarios duplicados.")
+        logger.info(f"✅ Proceso terminado. Se fusionaron {count_fusionados} grupos de usuarios.")
 
     except Exception as e:
         session.rollback()
-        logger.error(f"❌ Error crítico durante la fusión: {e}")
+        logger.error(f"❌ Error crítico: {e}")
     finally:
         session.close()
 
 if __name__ == "__main__":
-    print("--- INICIANDO SCRIPT DE LIMPIEZA ---")
+    # Confirmación de seguridad
+    print("⚠️  ADVERTENCIA: Este script modificará la base de datos fusionando usuarios.")
+    print("    Se eliminarán registros duplicados y se sumarán sus saldos.")
+    
+    # En Render (no interactivo) o local
     fusionar_duplicados()
-    print("--- FIN DEL PROCESO ---")
