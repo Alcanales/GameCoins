@@ -1,7 +1,7 @@
 import secrets
 import random
 import string
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Form, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -14,10 +14,8 @@ import services as logic
 from database import engine, Base, get_db
 from models import GameCoinUser 
 
-# Crear tablas al iniciar
 Base.metadata.create_all(bind=engine)
 
-# --- MIDDLEWARE DE SEGURIDAD ---
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -27,9 +25,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         return response
 
-app = FastAPI(title="GameQuest GameCoins API", version="4.0 (Coupon Only)")
+app = FastAPI(title="GameQuest GameCoins API", version="4.1")
 
-# --- MIDDLEWARES ---
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["gamecoins.onrender.com", "gamequest.cl", "*.gamequest.cl", "localhost", "127.0.0.1"])
@@ -41,13 +38,11 @@ origins = [
 ]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# --- DEPENDENCIAS ---
 def verificar_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
     if not (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)): raise HTTPException(401)
     return True
 
-# --- MODELOS ---
 class UpdateRequest(BaseModel):
     email: str; monto: int; accion: str
 
@@ -58,9 +53,8 @@ class BuylistSubmitRequest(BaseModel):
     cliente: dict; cartas: list; total_clp: str; total_gc: str
 
 @app.get("/")
-def home(): return {"status": "Online - Coupon Mode"}
+def home(): return {"status": "Online"}
 
-# --- ENDPOINTS BUYLIST ---
 @app.post("/api/analizar")
 def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     content = file.file.read()
@@ -70,10 +64,10 @@ def buylist_analisis(file: UploadFile = File(...), mode: str = Form("client")):
     return {"data": res}
 
 @app.post("/api/enviar_buylist")
-def submit_buylist(payload: BuylistSubmitRequest):
-    return logic.enviar_correo_buylist(payload.cliente, payload.cartas, payload.total_clp, payload.total_gc)
+def submit_buylist(payload: BuylistSubmitRequest, background_tasks: BackgroundTasks):
+    background_tasks.add_task(logic.enviar_correo_buylist, payload.cliente, payload.cartas, payload.total_clp, payload.total_gc)
+    return {"status": "ok", "message": "Solicitud recibida correctamente"}
 
-# --- ENDPOINTS CLIENTE (SALDO Y CANJE) ---
 @app.get("/api/saldo/{email}")
 def consultar_saldo(email: str, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email.strip().lower()).first()
@@ -94,12 +88,11 @@ def canjear_puntos(payload: CanjeRequest, db: Session = Depends(get_db)):
         if logic.crear_cupon_jumpseller(codigo, monto):
             return {"status": "ok", "codigo": codigo, "nuevo_saldo": user.saldo}
         else:
-            user.saldo += monto; db.commit() # Rollback si falla Jumpseller
+            user.saldo += monto; db.commit()
             raise HTTPException(502, "Error al crear cupón en Jumpseller")
     except Exception:
         db.rollback(); raise HTTPException(500, "Error interno")
 
-# --- ENDPOINTS ADMIN ---
 @app.get("/admin/users", dependencies=[Depends(verificar_admin)])
 def listar_usuarios(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).order_by(GameCoinUser.updated_at.desc()).all()
