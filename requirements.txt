@@ -9,3 +9,4 @@ pandas>=2.1.4
 python-magic>=0.4.27
 requests>=2.31.0
 email-validator>=2.1.0
+psycopg2-binary>=2.9.9
