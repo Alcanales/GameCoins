@@ -163,6 +163,7 @@ async def procesar_csv_logic(content, internal_mode):
             
             clean = clean_card_name(row["name"])
             is_staple = any(clean_card_name(s) == clean for s in settings.HIGH_DEMAND_CARDS)
+            
             if row["edhrec"] < 500: is_staple = True
             
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT

@@ -10,18 +10,18 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./local.db"
     
     # Jumpseller
-    JUMPSELLER_API_TOKEN: str
-    JUMPSELLER_STORE: str
+    JUMPSELLER_API_TOKEN: str=""
+    JUMPSELLER_STORE: str=""
     JUMPSELLER_API_BASE: str = "https://api.jumpseller.com/v1"
     
     # SMTP / Email
-    SMTP_EMAIL: str
-    SMTP_PASSWORD: str
+    SMTP_EMAIL: str=""
+    SMTP_PASSWORD: str=""
     TARGET_EMAIL: str = "contacto@gamequest.cl"
     
     # Security
-    ADMIN_USER: str = "Admin"
-    ADMIN_PASS: str = "ChangeMeNow!"
+    ADMIN_USER: str = "Tomas1_2_3"
+    ADMIN_PASS: str = "S3cur3P@ss"
     
     # Business Logic
     USD_TO_CLP: int = 1000
@@ -50,6 +50,5 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Hotfix para Postgres en Render/Heroku
 if settings.DATABASE_URL.startswith("postgres://"):
     settings.DATABASE_URL = settings.DATABASE_URL.replace("postgres://", "postgresql://", 1)
