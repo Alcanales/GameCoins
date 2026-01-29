@@ -10,12 +10,15 @@ class GameCoinUser(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     rut: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     
+    # Datos Personales (Opcionales para flexibilidad)
     name: Mapped[str] = mapped_column(String(255), nullable=True)
     surname: Mapped[str] = mapped_column(String(255), nullable=True)
     
-    # Campos de QuestPoints
+    # --- GESTIÓN DE PUNTOS (QUESTPOINTS) ---
     saldo: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
     historico_canjeado: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # ---------------------------------------
 
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

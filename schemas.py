@@ -1,6 +1,8 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import List, Optional
 
+# --- Esquemas para Buylist (Cliente) ---
+
 class ClienteSchema(BaseModel):
     nombre: str = Field(..., min_length=2)
     rut: str = Field(..., min_length=8)
@@ -27,6 +29,8 @@ class BuylistSubmitRequest(BaseModel):
             raise ValueError('La lista de cartas no puede estar vacía')
         return v
 
+# --- Esquemas para Administración (Bóveda) ---
+
 class CanjeRequest(BaseModel):
     email: EmailStr
     monto: int = Field(..., gt=0)
@@ -34,4 +38,4 @@ class CanjeRequest(BaseModel):
 class UpdateRequest(BaseModel):
     email: EmailStr
     monto: int = Field(..., gt=0)
-    accion: str
+    accion: str  
