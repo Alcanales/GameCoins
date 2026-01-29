@@ -133,15 +133,12 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             if "name" not in df.columns: return None
             
             df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
-            # Leemos el precio del CSV tal cual viene
             df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
             
             keys = [k for k in ["name", "set_code", "foil", "scryfall_id"] if k in df.columns]
             for k in keys: df[k] = df[k].fillna("")
             
-            # Agrupar si hay duplicados
             if keys:
-                # Calculamos valor total temporal para preservar el precio ponderado si varía
                 df["_val"] = df["quantity"] * df["purchase_price"]
                 df = df.groupby(keys, as_index=False).agg({"quantity": "sum", "_val": "sum"})
                 df["purchase_price"] = df.apply(lambda x: x["_val"]/x["quantity"] if x["quantity"]>0 else 0, axis=1)
@@ -177,9 +174,6 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             row["edhrec"] = meta.get("edhrec", 999999)
             row["mkt"] = meta.get("usd", 0.0)
             
-            # --- LÓGICA DE PRECIO CORREGIDA ---
-            # 1. Si el CSV trae precio (>0), lo respetamos absolutamente.
-            # 2. Solo si el CSV trae 0 o error, usamos el precio de mercado (Scryfall) como rescate.
             if row["purchase_price"] <= 0 and row["mkt"] > 0:
                 row["purchase_price"] = row["mkt"]
                 
