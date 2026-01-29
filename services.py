@@ -7,8 +7,8 @@ import re
 import unicodedata
 import logging
 import json
-from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -17,11 +17,11 @@ from config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
-STOCK_CACHE = {}
-SCRYFALL_CACHE = {}
+STOCK_CACHE: Dict[str, tuple] = {}
+SCRYFALL_CACHE: Dict[str, tuple] = {}
 CACHE_TTL = 300
 
-def clean_card_name(name):
+def clean_card_name(name: str) -> str:
     if not isinstance(name, str): return ""
     name = re.sub(r"[\(\[].*?[\)\]]", "", name)
     name = unicodedata.normalize('NFD', name)
@@ -30,10 +30,10 @@ def clean_card_name(name):
     name = re.sub(r"[^a-z0-9\s]", " ", name)
     return " ".join(name.split())
 
-def round_clp(val):
+def round_clp(val: float) -> int:
     return int(round(val / 100.0) * 100)
 
-async def fetch_json(session, url, params=None, method="GET", json_body=None):
+async def fetch_json(session: aiohttp.ClientSession, url: str, method: str = "GET", params: Optional[dict] = None, json_body: Optional[dict] = None) -> Any:
     try:
         async with session.request(method, url, params=params, json=json_body, timeout=15) as resp:
             if resp.status == 200:
@@ -45,74 +45,91 @@ async def fetch_json(session, url, params=None, method="GET", json_body=None):
     except Exception:
         return None
 
-async def fetch_scryfall_metadata(ids):
-    unique = list(set(i for i in ids if isinstance(i, str) and i))
+async def fetch_scryfall_metadata(ids: List[str]) -> Dict[str, Any]:
+    unique_ids = list(set(i for i in ids if isinstance(i, str) and i))
     result = {}
     missing = []
     now = datetime.now().timestamp()
 
-    for i in unique:
-        if i in SCRYFALL_CACHE and (now - SCRYFALL_CACHE[i][1] < CACHE_TTL):
-            result[i] = SCRYFALL_CACHE[i][0]
+    for uid in unique_ids:
+        if uid in SCRYFALL_CACHE and (now - SCRYFALL_CACHE[uid][1] < CACHE_TTL):
+            result[uid] = SCRYFALL_CACHE[uid][0]
         else:
-            missing.append(i)
+            missing.append(uid)
 
     if not missing: return result
 
+    batches = [missing[i:i + 75] for i in range(0, len(missing), 75)]
+    
     async with aiohttp.ClientSession() as session:
-        batches = [missing[i:i+75] for i in range(0, len(missing), 75)]
         tasks = []
-        for b in batches:
-            tasks.append(fetch_json(session, "https://api.scryfall.com/cards/collection", method="POST", json_body={"identifiers": [{"id": x} for x in b]}))
+        for batch in batches:
+            payload = {"identifiers": [{"id": sid} for sid in batch]}
+            tasks.append(fetch_json(session, "https://api.scryfall.com/cards/collection", method="POST", json_body=payload))
         
-        resps = await asyncio.gather(*tasks)
-        for r in resps:
-            if not r or "data" not in r: continue
-            for c in r["data"]:
+        responses = await asyncio.gather(*tasks)
+
+        for resp in responses:
+            if not resp or "data" not in resp: continue
+            for card in resp["data"]:
+                cid = card.get("id")
+                prices = card.get("prices", {})
                 info = {
-                    "canonical_name": c.get("name", "").split(" // ")[0],
-                    "banned": c.get("legalities", {}).get("commander") == "banned",
-                    "edhrec": c.get("edhrec_rank") or 999999,
-                    "usd": float(c.get("prices", {}).get("usd") or 0),
-                    "usd_foil": float(c.get("prices", {}).get("usd_foil") or 0)
+                    "canonical_name": card.get("name", "").split(" // ")[0],
+                    "banned": card.get("legalities", {}).get("commander") == "banned",
+                    "edhrec": card.get("edhrec_rank") or 999999,
+                    "usd": float(prices.get("usd") or 0.0),
+                    "usd_foil": float(prices.get("usd_foil") or 0.0)
                 }
-                result[c["id"]] = info
-                SCRYFALL_CACHE[c["id"]] = (info, now)
+                result[cid] = info
+                SCRYFALL_CACHE[cid] = (info, now)
+    
     return result
 
-async def get_jumpseller_stock(session, name):
+async def get_jumpseller_stock(session: aiohttp.ClientSession, name: str) -> int:
     if not name: return 0
-    target = clean_card_name(name)
-    if not target: return 0
+    target_clean = clean_card_name(name)
+    if not target_clean: return 0
     
     now = datetime.now().timestamp()
-    if target in STOCK_CACHE and (now - STOCK_CACHE[target][1] < CACHE_TTL):
-        return STOCK_CACHE[target][0]
+    if target_clean in STOCK_CACHE and (now - STOCK_CACHE[target_clean][1] < CACHE_TTL):
+        return STOCK_CACHE[target_clean][0]
 
-    data = await fetch_json(session, f"{settings.JUMPSELLER_API_BASE}/products.json", params={
-        "login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN,
-        "query": target, "fields": "stock,name,variants", "limit": 50
-    })
+    params = {
+        "login": settings.JUMPSELLER_STORE,
+        "authtoken": settings.JUMPSELLER_API_TOKEN,
+        "query": target_clean,
+        "limit": 50,
+        "fields": "stock,name,variants"
+    }
     
-    total = 0
+    data = await fetch_json(session, f"{settings.JUMPSELLER_API_BASE}/products.json", params=params)
+    total_stock = 0
+    
     if data:
         for p in data:
-            p_name = clean_card_name(p.get("product", {}).get("name", ""))
-            if target in p_name:
-                base = p.get("product", {}).get("stock", 0)
-                vars_stock = sum(v.get("stock", 0) for v in p.get("product", {}).get("variants", []))
-                total += max(base, vars_stock)
+            prod_name_clean = clean_card_name(p.get("product", {}).get("name", ""))
+            if target_clean in prod_name_clean:
+                base_stock = p.get("product", {}).get("stock", 0)
+                variants = p.get("product", {}).get("variants", [])
+                variant_stock = sum(v.get("stock", 0) for v in variants)
+                total_stock += max(base_stock, variant_stock)
 
-    STOCK_CACHE[target] = (total, now)
-    return total
+    STOCK_CACHE[target_clean] = (total_stock, now)
+    return total_stock
 
-async def procesar_csv_logic(content, internal_mode):
-    def parse():
+async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
+    def parse_csv():
         try:
             df = pd.read_csv(io.BytesIO(content))
-            cols = {"Name":"name","Set code":"set_code","Foil":"foil","Quantity":"quantity","Purchase price":"purchase_price","Scryfall ID":"scryfall_id"}
+            cols_map = {
+                "Name": "name", "Set code": "set_code", "Foil": "foil",
+                "Quantity": "quantity", "Purchase price": "purchase_price",
+                "Scryfall ID": "scryfall_id"
+            }
             df.columns = [c.strip() for c in df.columns]
-            df.rename(columns=cols, inplace=True)
+            df = df.rename(columns=cols_map)
+            
             if "name" not in df.columns: return None
             
             df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
@@ -122,38 +139,44 @@ async def procesar_csv_logic(content, internal_mode):
             for k in keys: df[k] = df[k].fillna("")
             
             if keys:
-                df["_v"] = df["quantity"] * df["purchase_price"]
-                df = df.groupby(keys, as_index=False).agg({"quantity":"sum", "_v":"sum"})
-                df["purchase_price"] = df.apply(lambda x: x["_v"]/x["quantity"] if x["quantity"]>0 else 0, axis=1)
-                df.drop(columns=["_v"], inplace=True)
+                df["_val"] = df["quantity"] * df["purchase_price"]
+                df = df.groupby(keys, as_index=False).agg({"quantity": "sum", "_val": "sum"})
+                df["purchase_price"] = df.apply(lambda x: x["_val"]/x["quantity"] if x["quantity"]>0 else 0, axis=1)
+                df = df.drop(columns=["_val"])
+            
             return df
-        except: return None
+        except Exception: return None
 
     loop = asyncio.get_event_loop()
-    df = await loop.run_in_executor(None, parse)
-    if df is None: return {"error": "CSV Inválido"}
+    df = await loop.run_in_executor(None, parse_csv)
+    if df is None: return {"error": "El archivo CSV no tiene el formato correcto."}
 
-    sf_data = await fetch_scryfall_metadata(df["scryfall_id"].unique().tolist() if "scryfall_id" in df.columns else [])
-    
+    sf_ids = df["scryfall_id"].unique().tolist() if "scryfall_id" in df.columns else []
+    sf_meta = await fetch_scryfall_metadata(sf_ids)
+
     unique_names = df["name"].unique().tolist()
     stock_map = {}
-    async with aiohttp.ClientSession() as sess:
-        sem = asyncio.Semaphore(12)
-        async def task(n):
-            async with sem: return n, await get_jumpseller_stock(sess, n)
-        stock_res = await asyncio.gather(*[task(n) for n in unique_names])
-        stock_map = dict(stock_res)
+    
+    async with aiohttp.ClientSession() as session:
+        sem = asyncio.Semaphore(12) 
+        async def bounded_stock_check(name):
+            async with sem:
+                return name, await get_jumpseller_stock(session, name)
+        
+        stock_results = await asyncio.gather(*[bounded_stock_check(n) for n in unique_names])
+        stock_map = dict(stock_results)
 
-    def logic(df):
+    def apply_rules(df):
         def enrich(row):
-            m = sf_data.get(row.get("scryfall_id"), {})
-            if m.get("canonical_name"): row["name"] = m["canonical_name"]
-            row["banned"] = m.get("banned", False)
-            row["edhrec"] = m.get("edhrec", 999999)
-            row["mkt"] = m.get("usd", 0.0)
+            meta = sf_meta.get(row.get("scryfall_id"), {})
+            if meta.get("canonical_name"): row["name"] = meta.get("canonical_name")
+            row["banned"] = meta.get("banned", False)
+            row["edhrec"] = meta.get("edhrec", 999999)
+            row["mkt"] = meta.get("usd", 0.0)
             return row
+        
         df = df.apply(enrich, axis=1)
-
+        
         df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(round_clp)
         df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(round_clp)
         df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
@@ -161,59 +184,89 @@ async def procesar_csv_logic(content, internal_mode):
         def classify(row):
             if row["banned"]: return "no_compra", "BANEADA"
             
-            clean = clean_card_name(row["name"])
-            is_staple = any(clean_card_name(s) == clean for s in settings.HIGH_DEMAND_CARDS)
-            
+            clean_name = clean_card_name(row["name"])
+            is_staple = any(clean_card_name(s) == clean_name for s in settings.HIGH_DEMAND_CARDS)
             if row["edhrec"] < 500: is_staple = True
             
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
             qty_sug = max(0, min(row["quantity"], limit - row["stock_tienda"]))
+            
             row["qty_sug"] = qty_sug
             
             if qty_sug == 0: return "no_compra", "STOCK LLENO"
             if row["purchase_price"] < settings.MIN_PURCHASE_USD: return "no_compra", "BULK"
             
-            if str(row.get("foil","")).lower() == "foil" and row["purchase_price"] >= settings.STAKE_MIN_PRICE_FOR_STAKE:
+            is_foil = str(row.get("foil", "")).lower() == "foil"
+            if is_foil and row["purchase_price"] >= settings.STAKE_MIN_PRICE_FOR_STAKE:
                 if row["mkt"] > 0:
                     ratio = row["purchase_price"] / row["mkt"]
-                    if ratio >= settings.STAKE_RATIO_THRESHOLD: return "estaca", f"ESTACA ({ratio:.1f}x)"
+                    if ratio >= settings.STAKE_RATIO_THRESHOLD:
+                        return "estaca", f"ESTACA ({ratio:.1f}x)"
             
             return "compra", "COMPRAR"
 
-        r = df.apply(classify, axis=1, result_type="expand")
-        df["cat"], df["razon"] = r[0], r[1]
-        df["rank"] = df["cat"].map({"compra":1, "no_compra":2, "estaca":0})
+        res = df.apply(classify, axis=1, result_type="expand")
+        df["cat"], df["razon"] = res[0], res[1]
+        
+        df["rank"] = df["cat"].map({"compra": 1, "no_compra": 2, "estaca": 0})
         return df.sort_values(["rank", "purchase_price"], ascending=[True, False]).fillna("").to_dict(orient="records")
 
-    return await loop.run_in_executor(None, logic, df)
+    return await loop.run_in_executor(None, apply_rules, df)
 
-def enviar_correo_dual(cli, items, clp, gc, csv, fname):
+def enviar_correo_dual(cli, items, clp, gc, csv_bytes, filename):
     if not settings.SMTP_EMAIL: return
-    rows = "".join([f"<tr><td style='padding:5px;border-bottom:1px solid #ddd;text-align:center'>{i['quantity']}</td><td style='padding:5px;border-bottom:1px solid #ddd'>{i['name']} <small>({i['set_code']})</small></td><td style='padding:5px;border-bottom:1px solid #ddd;text-align:right'>${i.get('price_unit',0):,}</td><td style='padding:5px;border-bottom:1px solid #ddd;text-align:right'><b>${i.get('price_total',0):,}</b></td></tr>" for i in items])
     
-    html = f"""<div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #eee;border-radius:8px;overflow:hidden">
-        <div style="background:#D32F2F;color:white;padding:15px;text-align:center"><h2>Cotización Recibida</h2></div>
-        <div style="padding:20px;background:#f9f9f9">
+    rows = ""
+    for i in items:
+        rows += f"""<tr>
+            <td style='padding:8px;border-bottom:1px solid #ddd;text-align:center'>{i['quantity']}</td>
+            <td style='padding:8px;border-bottom:1px solid #ddd'>{i['name']} <small style='color:#777'>({i['set_code']})</small></td>
+            <td style='padding:8px;border-bottom:1px solid #ddd;text-align:right'>${i.get('price_unit',0):,}</td>
+            <td style='padding:8px;border-bottom:1px solid #ddd;text-align:right'><b>${i.get('price_total',0):,}</b></td>
+        </tr>"""
+
+    html_body = f"""
+    <div style="font-family:Helvetica,Arial,sans-serif;max-width:600px;margin:auto;border:1px solid #eee;border-radius:8px;overflow:hidden">
+        <div style="background:#D32F2F;color:white;padding:15px;text-align:center"><h2 style="margin:0">Solicitud de Venta</h2></div>
+        <div style="padding:20px;background:#fafafa">
             <p><strong>Cliente:</strong> {cli.get('nombre')} ({cli.get('rut')})</p>
             <p><strong>Pago:</strong> {cli.get('metodo_pago')}</p>
-            <h3 style="text-align:right;color:#10B981">{clp} <small style="color:#F59E0B">({gc})</small></h3>
-            <table width="100%" cellspacing="0" style="background:white">{rows}</table>
-            <p style="margin-top:20px;color:#777;font-size:0.9em">{cli.get('notas')}</p>
+            <div style="text-align:right;margin:20px 0;font-size:1.2em">
+                <span style="color:#10B981;font-weight:bold">{clp}</span> <small style="color:#F59E0B">({gc})</small>
+            </div>
+            <table width="100%" cellspacing="0" style="background:white;font-size:0.9em">{rows}</table>
+            <p style="margin-top:20px;font-size:0.8em;color:#999">Notas: {cli.get('notas')}</p>
         </div>
-    </div>"""
+    </div>
+    """
 
     try:
-        s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-        
-        m1 = MIMEMultipart(); m1['Subject'] = f"🔔 Buylist: {cli.get('nombre')}"; m1['From'] = settings.SMTP_EMAIL; m1['To'] = settings.TARGET_EMAIL
-        m1.attach(MIMEText(html, 'html'))
-        if csv: m1.attach(MIMEApplication(csv, Name=fname))
-        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, m1.as_string())
+        s = smtplib.SMTP('smtp.gmail.com', 587)
+        s.starttls()
+        s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
 
-        m2 = MIMEMultipart(); m2['Subject'] = "✅ Recibido - GameQuest"; m2['From'] = settings.SMTP_EMAIL; m2['To'] = cli.get('email')
-        m2.attach(MIMEText(html, 'html'))
-        if csv: m2.attach(MIMEApplication(csv, Name=fname))
-        s.sendmail(settings.SMTP_EMAIL, cli.get('email'), m2.as_string())
+        msg1 = MIMEMultipart()
+        msg1['Subject'] = f"🔔 Buylist: {cli.get('nombre')} ({clp})"
+        msg1['From'] = settings.SMTP_EMAIL
+        msg1['To'] = settings.TARGET_EMAIL
+        msg1.attach(MIMEText(html_body, 'html'))
+        if csv_bytes:
+            att = MIMEApplication(csv_bytes, Name=filename)
+            att['Content-Disposition'] = f'attachment; filename="{filename}"'
+            msg1.attach(att)
+        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, msg1.as_string())
+
+        msg2 = MIMEMultipart()
+        msg2['Subject'] = "✅ Solicitud Recibida - GameQuest"
+        msg2['From'] = settings.SMTP_EMAIL
+        msg2['To'] = cli.get('email')
+        msg2.attach(MIMEText(html_body.replace("Solicitud de Venta", "Confirmación de Recibo"), 'html'))
+        if csv_bytes:
+            att = MIMEApplication(csv_bytes, Name=filename)
+            att['Content-Disposition'] = f'attachment; filename="{filename}"'
+            msg2.attach(att)
+        s.sendmail(settings.SMTP_EMAIL, cli.get('email'), msg2.as_string())
         
         s.quit()
-    except Exception: pass
+    except Exception as e:
+        logger.error(f"SMTP Error: {e}")

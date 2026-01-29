@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import List, Optional, Any
+from typing import List, Optional
 
 class ClienteSchema(BaseModel):
     nombre: str = Field(..., min_length=2)
@@ -34,4 +34,4 @@ class CanjeRequest(BaseModel):
 class UpdateRequest(BaseModel):
     email: EmailStr
     monto: int = Field(..., gt=0)
-    accion: str # "sumar" | "restar"
+    accion: str
