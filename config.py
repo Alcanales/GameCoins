@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     
     # Security
     ADMIN_USER: str = "Tomas1_2_3"
-    ADMIN_PASS: str = "S3cur3P@ss"
+    ADMIN_PASS: str = "GameQuest2025_1"
     
     # Business Logic
     USD_TO_CLP: int = 1000
