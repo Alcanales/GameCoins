@@ -1,8 +1,6 @@
 import magic
 import json
 import secrets
-import random
-import string
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -16,7 +14,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="5.3.0")
+app = FastAPI(title=settings.APP_NAME, version="5.4.0")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -27,22 +25,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- VALIDACIÓN DE CREDENCIALES DUAL ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    if not (x_admin_user and x_admin_pass):
-        raise HTTPException(status_code=401, detail="Credenciales faltantes")
-
-    # Opción A: Credenciales de Render (Configurables)
+    if not (x_admin_user and x_admin_pass): raise HTTPException(401)
+    
     auth_render = (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and 
                    secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS))
     
-    # Opción B: Credenciales Maestras (Tus personales)
     auth_master = (secrets.compare_digest(x_admin_user, settings.MASTER_USER) and 
                    secrets.compare_digest(x_admin_pass, settings.MASTER_PASS))
 
-    # Si ninguna coincide, denegar acceso
     if not (auth_render or auth_master):
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+        raise HTTPException(401)
 
 @app.get("/")
 def health_check():
@@ -85,13 +78,13 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
     )
     return {"status": "received", "message": "Procesando solicitud"}
 
-# --- Endpoints Protegidos (Bóveda) ---
+# --- RUTAS DE ADMINISTRACIÓN (Corregidas: sin /api) ---
 
-@app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
+@app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
 
-@app.post("/api/admin/canje", dependencies=[Depends(verify_admin)])
+@app.post("/admin/canje", dependencies=[Depends(verify_admin)])
 def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).first()
     if not user:
@@ -106,7 +99,7 @@ def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "ok", "nuevo_saldo": user.saldo_actual}
 
-@app.post("/api/admin/update_saldo", dependencies=[Depends(verify_admin)])
+@app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).first()
     if not user:
