@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     TARGET_EMAIL: str = "contacto@gamequest.cl"
     
     # Security
-    ADMIN_USER: str = "Tomas1_2_3"
-    ADMIN_PASS: str = "GameQuest2025_1"
+    ADMIN_USER: str = ""
+    ADMIN_PASS: str = ""
     
     # Business Logic
     USD_TO_CLP: int = 1000
