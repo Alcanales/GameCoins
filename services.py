@@ -24,7 +24,10 @@ CACHE_TTL = 300
 def clean_card_name(name):
     if not isinstance(name, str): return ""
     name = re.sub(r"[\(\[].*?[\)\]]", "", name)
-    name = name.lower().strip()
+    name = unicodedata.normalize('NFD', name)
+    name = "".join(c for c in name if unicodedata.category(c) != 'Mn')
+    name = name.lower().replace("&", "and")
+    name = re.sub(r"[^a-z0-9\s]", " ", name)
     return " ".join(name.split())
 
 def round_clp(val):
@@ -32,15 +35,18 @@ def round_clp(val):
 
 async def fetch_json(session, url, params=None, method="GET", json_body=None):
     try:
-        async with session.request(method, url, params=params, json=json_body) as resp:
+        async with session.request(method, url, params=params, json=json_body, timeout=15) as resp:
             if resp.status == 200:
                 return await resp.json()
+            elif resp.status == 429:
+                await asyncio.sleep(1)
+                return await fetch_json(session, url, method, params, json_body)
             return None
     except Exception:
         return None
 
 async def fetch_scryfall_metadata(ids):
-    unique = list(set(ids))
+    unique = list(set(i for i in ids if isinstance(i, str) and i))
     result = {}
     missing = []
     now = datetime.now().timestamp()
@@ -91,11 +97,11 @@ async def get_jumpseller_stock(session, name):
     total = 0
     if data:
         for p in data:
-            prod_name = p.get("product", {}).get("name", "").lower()
-            if target in prod_name:
-                variants = p.get("product", {}).get("variants", [])
-                v_stock = sum(v.get("stock", 0) for v in variants)
-                total += max(p.get("product", {}).get("stock", 0), v_stock)
+            p_name = clean_card_name(p.get("product", {}).get("name", ""))
+            if target in p_name:
+                base = p.get("product", {}).get("stock", 0)
+                vars_stock = sum(v.get("stock", 0) for v in p.get("product", {}).get("variants", []))
+                total += max(base, vars_stock)
 
     STOCK_CACHE[target] = (total, now)
     return total
@@ -132,7 +138,7 @@ async def procesar_csv_logic(content, internal_mode):
     unique_names = df["name"].unique().tolist()
     stock_map = {}
     async with aiohttp.ClientSession() as sess:
-        sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(12)
         async def task(n):
             async with sem: return n, await get_jumpseller_stock(sess, n)
         stock_res = await asyncio.gather(*[task(n) for n in unique_names])
@@ -156,7 +162,7 @@ async def procesar_csv_logic(content, internal_mode):
             if row["banned"]: return "no_compra", "BANEADA"
             
             clean = clean_card_name(row["name"])
-            is_staple = any(clean_card_name(s) == clean for s in settings.high_demand_cards)
+            is_staple = any(clean_card_name(s) == clean for s in settings.HIGH_DEMAND_CARDS)
             if row["edhrec"] < 500: is_staple = True
             
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
@@ -191,18 +197,22 @@ def enviar_correo_dual(cli, items, clp, gc, csv, fname):
             <p><strong>Pago:</strong> {cli.get('metodo_pago')}</p>
             <h3 style="text-align:right;color:#10B981">{clp} <small style="color:#F59E0B">({gc})</small></h3>
             <table width="100%" cellspacing="0" style="background:white">{rows}</table>
+            <p style="margin-top:20px;color:#777;font-size:0.9em">{cli.get('notas')}</p>
         </div>
     </div>"""
 
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
         
-        for dest, subj in [(settings.TARGET_EMAIL, f"🔔 Buylist: {cli.get('nombre')}"), (cli.get('email'), "✅ Recibimos tu Solicitud")]:
-            m = MIMEMultipart(); m['Subject'] = subj; m['From'] = settings.SMTP_EMAIL; m['To'] = dest
-            m.attach(MIMEText(html, 'html'))
-            if csv:
-                p = MIMEApplication(csv, Name=fname); p['Content-Disposition'] = f'attachment; filename="{fname}"'
-                m.attach(p)
-            s.sendmail(settings.SMTP_EMAIL, dest, m.as_string())
+        m1 = MIMEMultipart(); m1['Subject'] = f"🔔 Buylist: {cli.get('nombre')}"; m1['From'] = settings.SMTP_EMAIL; m1['To'] = settings.TARGET_EMAIL
+        m1.attach(MIMEText(html, 'html'))
+        if csv: m1.attach(MIMEApplication(csv, Name=fname))
+        s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, m1.as_string())
+
+        m2 = MIMEMultipart(); m2['Subject'] = "✅ Recibido - GameQuest"; m2['From'] = settings.SMTP_EMAIL; m2['To'] = cli.get('email')
+        m2.attach(MIMEText(html, 'html'))
+        if csv: m2.attach(MIMEApplication(csv, Name=fname))
+        s.sendmail(settings.SMTP_EMAIL, cli.get('email'), m2.as_string())
+        
         s.quit()
-    except Exception as e: logger.error(f"SMTP: {e}")
+    except Exception: pass
