@@ -168,7 +168,6 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             row["edhrec"] = m.get("edhrec", 999999)
             row["mkt"] = m.get("usd", 0.0)
             
-            # Hybrid Price Logic: CSV Priority > Scryfall Fallback
             if row["purchase_price"] <= 0 and row["mkt"] > 0:
                 row["purchase_price"] = row["mkt"]
             return row
@@ -187,7 +186,6 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             if row["edhrec"] < 500: is_staple = True
             
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
-            # Stock Suggestion Logic
             qty_sug = max(0, min(row["quantity"], limit - row["stock_tienda"]))
             row["qty_sug"] = qty_sug
             

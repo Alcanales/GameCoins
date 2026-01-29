@@ -43,7 +43,7 @@ async def analizar_csv(file: UploadFile = File(...), mode: str = Form("client"))
         raise HTTPException(400, "El archivo debe ser un CSV.")
         
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024: # 10MB limit
+    if len(content) > 10 * 1024 * 1024:
         raise HTTPException(413, "Archivo excede 10MB")
     
     result = await logic.procesar_csv_logic(content, internal_mode=(mode == "internal"))
