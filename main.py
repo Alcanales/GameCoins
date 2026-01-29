@@ -16,7 +16,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="5.1.0")
+app = FastAPI(title=settings.APP_NAME, version="5.3.0")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -27,11 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- VALIDACIÓN DE CREDENCIALES DUAL ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    if not (x_admin_user and x_admin_pass): raise HTTPException(401)
-    if not (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and 
-            secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)):
-        raise HTTPException(401)
+    if not (x_admin_user and x_admin_pass):
+        raise HTTPException(status_code=401, detail="Credenciales faltantes")
+
+    # Opción A: Credenciales de Render (Configurables)
+    auth_render = (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and 
+                   secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS))
+    
+    # Opción B: Credenciales Maestras (Tus personales)
+    auth_master = (secrets.compare_digest(x_admin_user, settings.MASTER_USER) and 
+                   secrets.compare_digest(x_admin_pass, settings.MASTER_PASS))
+
+    # Si ninguna coincide, denegar acceso
+    if not (auth_render or auth_master):
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
 @app.get("/")
 def health_check():
@@ -74,3 +85,40 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
     )
     return {"status": "received", "message": "Procesando solicitud"}
 
+# --- Endpoints Protegidos (Bóveda) ---
+
+@app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
+def get_users(db: Session = Depends(get_db)):
+    return db.query(GameCoinUser).all()
+
+@app.post("/api/admin/canje", dependencies=[Depends(verify_admin)])
+def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).first()
+    if not user:
+        user = GameCoinUser(email=req.email, saldo_actual=0, historico_canjeado=0)
+        db.add(user)
+    
+    if user.saldo_actual < req.monto:
+         raise HTTPException(400, "Saldo insuficiente")
+         
+    user.saldo_actual -= req.monto
+    user.historico_canjeado += req.monto
+    db.commit()
+    return {"status": "ok", "nuevo_saldo": user.saldo_actual}
+
+@app.post("/api/admin/update_saldo", dependencies=[Depends(verify_admin)])
+def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).first()
+    if not user:
+        user = GameCoinUser(email=req.email, saldo_actual=0, historico_canjeado=0)
+        db.add(user)
+    
+    if req.accion == "add":
+        user.saldo_actual += req.monto
+    elif req.accion == "set":
+        user.saldo_actual = req.monto
+    elif req.accion == "subtract":
+        user.saldo_actual = max(0, user.saldo_actual - req.monto)
+        
+    db.commit()
+    return {"status": "ok", "nuevo_saldo": user.saldo_actual}
