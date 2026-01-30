@@ -3,33 +3,30 @@ from typing import List
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # --- Configuración General ---
+    # App Config
     APP_NAME: str = "GameQuest API"
     ENV: str = "production"
     
-    # --- Base de Datos ---
+    # Database
     DATABASE_URL: str = "sqlite:///./local.db"
     
-    # --- Jumpseller (Configurar en Render) ---
-    JUMPSELLER_API_TOKEN: str = ""
-    JUMPSELLER_STORE: str = ""
+    # Integraciones (Deben venir de variables de entorno en Prod)
+    JUMPSELLER_API_TOKEN: str = os.getenv("JUMPSELLER_API_TOKEN", "")
+    JUMPSELLER_STORE: str = os.getenv("JUMPSELLER_STORE", "")
     JUMPSELLER_API_BASE: str = "https://api.jumpseller.com/v1"
     
-    # --- Email (Configurar en Render) ---
-    SMTP_EMAIL: str = ""
-    SMTP_PASSWORD: str = ""
-    TARGET_EMAIL: str = "contacto@gamequest.cl"
+    SMTP_EMAIL: str = os.getenv("SMTP_EMAIL", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    TARGET_EMAIL: str = os.getenv("TARGET_EMAIL", "contacto@gamequest.cl")
     
-    # --- SISTEMA DE DOBLE SEGURIDAD ---
-    # 1. Acceso Render (Dinámico, se configura en el Dashboard)
-    ADMIN_USER: str = "Tomas1_2_3"
-    ADMIN_PASS: str = "S3cur3P@ss"
+
+    ADMIN_USER: str = os.getenv("ADMIN_USER", "Tomas_1_2_3")
+    ADMIN_PASS: str = os.getenv("ADMIN_PASS", "GameQuest2025_1")
     
-    # 2. Acceso Maestro (Estático, siempre funciona)
-    MASTER_USER: str = "Tomas_1_2_3"
-    MASTER_PASS: str = "GameQuest2025_1"
+    MASTER_USER: str = os.getenv("MASTER_USER", "Tomas_1_2_3")
+    MASTER_PASS: str = os.getenv("MASTER_PASS", "GameQuest2025_1")
     
-    # --- Lógica de Negocio ---
+    # Lógica de Negocio
     USD_TO_CLP: int = 1000
     CASH_MULTIPLIER: float = 0.45
     GAMECOIN_MULTIPLIER: float = 0.55
@@ -37,7 +34,6 @@ class Settings(BaseSettings):
     
     STAKE_MIN_PRICE_FOR_STAKE: float = 20.0
     STAKE_RATIO_THRESHOLD: float = 2.5
-    STAKE_MIN_SPREAD: float = 10.0
     
     STOCK_LIMIT_DEFAULT: int = 4
     STOCK_LIMIT_HIGH_DEMAND: int = 12
@@ -56,6 +52,5 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Corrección automática para PostgreSQL en Render
 if settings.DATABASE_URL.startswith("postgres://"):
     settings.DATABASE_URL = settings.DATABASE_URL.replace("postgres://", "postgresql://", 1)
