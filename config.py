@@ -19,10 +19,10 @@ class Settings(BaseSettings):
     TARGET_EMAIL: str = os.getenv("TARGET_EMAIL", "contacto@gamequest.cl")
     
     # Seguridad
-    ADMIN_USER: str = os.getenv("ADMIN_USER", "admin")
-    ADMIN_PASS: str = os.getenv("ADMIN_PASS", "change_me")
-    MASTER_USER: str = os.getenv("MASTER_USER", "master")
-    MASTER_PASS: str = os.getenv("MASTER_PASS", "change_me_now")
+    ADMIN_USER: str = os.getenv("ADMIN_USER", "Tomas_1_2_3")
+    ADMIN_PASS: str = os.getenv("ADMIN_PASS", "GameQuest2025_1")
+    MASTER_USER: str = os.getenv("MASTER_USER", "Master_1_2_3")
+    MASTER_PASS: str = os.getenv("MASTER_PASS", "GameQuest2025_1")
     
     # --- KILL-SWITCH: MODO MANTENIMIENTO ---
     # Si True, bloquea endpoints de canje y buylist.
