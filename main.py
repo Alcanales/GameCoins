@@ -17,7 +17,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="6.3.0")
+app = FastAPI(title=settings.APP_NAME, version="6.5.0")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -43,13 +43,25 @@ def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(No
 def health_check():
     return {"status": "ok", "env": settings.ENV}
 
-# --- BUYLIST ---
+# --- PÚBLICO (Frontend Safe) ---
+@app.get("/api/public/balance/{email}")
+def get_public_balance(email: str, db: Session = Depends(get_db)):
+    if not email: return {"saldo": 0, "historico_canjeado": 0}
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+    # Retorno seguro: No exponer ID interno ni otros metadatos
+    if not user: return {"saldo": 0, "historico_canjeado": 0}
+    return {"email": user.email, "saldo": user.saldo, "historico_canjeado": user.historico_canjeado}
+
 @app.post("/api/analizar")
 async def analizar_csv(file: UploadFile = File(...), mode: str = Form("client")):
-    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Debe ser CSV")
+    # Validar extensión
+    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere .csv")
     content = await file.read()
-    if len(content) > 10*1024*1024: raise HTTPException(413, "Max 10MB")
+    if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo muy grande")
     
+    # Validar integridad opcional con magic si está instalado
+    # if magic.from_buffer(content, mime=True) != 'text/csv': ...
+
     result = await logic.procesar_csv_logic(content, internal_mode=(mode == "internal"))
     if isinstance(result, dict) and "error" in result: raise HTTPException(400, result["error"])
     return {"data": result}
@@ -59,43 +71,39 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
     try:
         data = json.loads(payload)
         req = BuylistSubmitRequest(**data)
-    except Exception as e: raise HTTPException(422, f"JSON Error: {str(e)}")
+    except Exception: raise HTTPException(422, "JSON inválido")
     
     file_content = await csv_file.read()
     background_tasks.add_task(logic.enviar_correo_dual, req.cliente.model_dump(), [c.model_dump() for c in req.cartas], req.total_clp, req.total_gc, file_content, csv_file.filename)
     return {"status": "received"}
 
-# --- BÓVEDA & CANJE SEGURO ---
+# --- PRIVADO (Admin Only) ---
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
 
 @app.post("/admin/canje", dependencies=[Depends(verify_admin)])
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
-    """
-    Procesa el canje con BLOQUEO DE FILA para evitar Race Conditions.
-    """
+    """Canje transaccional atómico."""
     try:
-        # 1. Bloqueo Transaccional (Wait for Update)
-        # Esto pone en "pausa" cualquier otra petición sobre este usuario
+        # Bloqueo de fila
         user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
         
         if not user:
             user = GameCoinUser(email=req.email, rut="N/A", saldo=0, historico_canjeado=0)
             db.add(user)
-            db.flush() # Persistir para tener ID
+            db.flush()
         
-        # 2. Validación de Saldo Atómica
         if user.saldo < req.monto:
-            db.rollback() # Liberar bloqueo
-            raise HTTPException(400, f"Saldo insuficiente. Tiene: {user.saldo} QP")
+            db.rollback()
+            raise HTTPException(400, f"Saldo insuficiente ({user.saldo} QP)")
         
-        # 3. Descuento
+        # Modificación de estado
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
-        db.commit() # Guardado en DB. El saldo ya se gastó.
+        db.commit() 
         
-        # 4. Generación de Cupón (Post-Commit)
+        # Generación Cupón (Externo)
         suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
         coupon_code = f"GQ-{suffix}"
         
@@ -103,30 +111,17 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
             res = await logic.crear_cupon_jumpseller(session, coupon_code, req.monto, req.email)
             
             if not res or "promotion" not in res:
-                # Alerta: El saldo se descontó pero falló la API
-                return {
-                    "status": "warning",
-                    "mensaje": "Saldo descontado, pero error al crear cupón en Jumpseller.",
-                    "nuevo_saldo": user.saldo,
-                    "cupon": "ERROR_API_JUMPSELLER"
-                }
+                return {"status": "warning", "mensaje": "Error API Jumpseller", "nuevo_saldo": user.saldo}
 
-            return {
-                "status": "ok",
-                "nuevo_saldo": user.saldo,
-                "cupon_codigo": coupon_code,
-                "mensaje": f"Canje exitoso: {coupon_code}"
-            }
+            return {"status": "ok", "nuevo_saldo": user.saldo, "cupon_codigo": coupon_code}
 
-    except HTTPException as he:
-        raise he
+    except HTTPException as he: raise he
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, f"Error interno: {str(e)}")
+        raise HTTPException(500, f"Error: {str(e)}")
 
 @app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
-    # También usamos bloqueo para evitar ediciones simultáneas
     user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
     if not user:
         user = GameCoinUser(email=req.email, rut="N/A", saldo=0, historico_canjeado=0)

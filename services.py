@@ -8,61 +8,47 @@ import unicodedata
 import logging
 import json
 import math
-import random
-import string
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+# python-magic para validación real de archivos (opcional pero recomendado)
+# import magic 
 from config import settings
 
-# Configuración de Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
-# Cachés en Memoria (TTL)
 STOCK_CACHE: Dict[str, tuple] = {}
 SCRYFALL_CACHE: Dict[str, tuple] = {}
 CACHE_TTL = 300
 
-# --- OPTIMIZACIÓN: EXPRESIONES REGULARES PRE-COMPILADAS ---
-# 1. Elimina metadatos entre paréntesis/corchetes: [M21], (Foil), (Showcase)
+# --- OPTIMIZACIÓN: REGEX PRE-COMPILADO (Ámbito Global) ---
 REGEX_BRACKETS = re.compile(r"[\(\[].*?[\)\]]")
-
-# 2. Términos técnicos a eliminar (Case Insensitive)
 FORBIDDEN_TERMS = [
     "foil", "retro", "etched", "borderless", "extended art", "showcase", 
     "surge", "textured", "serialized", "schematic", "thick", "frame", 
-    "art series", "gold border", "oversized"
+    "art series", "gold border", "oversized", "promo", "prerelease"
 ]
 REGEX_KEYWORDS = re.compile(r"(?i)\b(" + "|".join(FORBIDDEN_TERMS) + r")\b")
-
-# 3. Limpieza final (solo alfanuméricos y espacios)
 REGEX_CLEANUP = re.compile(r"[^a-z0-9\s]")
 
-
 def clean_card_name(name: str) -> str:
-    """
-    Sanitiza el nombre de la carta para compatibilidad estricta con Jumpseller.
-    """
+    """Sanitización agresiva para compatibilidad Jumpseller."""
     if not isinstance(name, str) or not name: return ""
     
-    # Paso 1: Eliminar contenido entre paréntesis/corchetes
+    # 1. Eliminar metadata
     name = REGEX_BRACKETS.sub("", name)
-    
-    # Paso 2: Eliminar keywords prohibidas
+    # 2. Eliminar keywords
     name = REGEX_KEYWORDS.sub("", name)
-    
-    # Paso 3: Normalización Unicode (NFD -> ASCII) para eliminar tildes/caracteres raros
+    # 3. Normalización Unicode
     name = unicodedata.normalize('NFD', name)
     name = "".join(c for c in name if unicodedata.category(c) != 'Mn')
-    
-    # Paso 4: Ajustes finales
+    # 4. Limpieza final
     name = name.lower().replace("&", "and")
     name = REGEX_CLEANUP.sub(" ", name)
     
-    # Paso 5: Colapsar espacios múltiples
     return " ".join(name.split())
 
 def round_clp(val: float) -> int:
@@ -70,30 +56,30 @@ def round_clp(val: float) -> int:
     return int(round(val / 100.0) * 100)
 
 async def fetch_json_with_retry(session, url, method="GET", params=None, json_body=None, retries=3):
-    """Realiza peticiones HTTP con estrategia de reintento exponencial."""
+    """Backoff exponencial para APIs externas."""
     for attempt in range(retries):
         try:
             async with session.request(method, url, params=params, json=json_body, timeout=15) as resp:
                 if resp.status in [200, 201]:
                     return await resp.json()
-                elif resp.status == 429: # Rate Limit
+                elif resp.status == 429:
                     wait = 1.5 * (attempt + 1)
+                    logger.warning(f"Rate Limit {url}. Esperando {wait}s...")
                     await asyncio.sleep(wait)
                     continue
-                elif resp.status >= 500: # Error Servidor
+                elif resp.status >= 500:
                     await asyncio.sleep(1)
                     continue
                 else:
                     logger.error(f"Error API {url}: {resp.status}")
                     return None
         except Exception as e:
-            logger.error(f"Error Red ({attempt+1}/{retries}): {e}")
+            logger.error(f"Error Red ({attempt+1}): {e}")
             await asyncio.sleep(1)
     return None
 
-# --- MOTOR DE CUPONES ---
 async def crear_cupon_jumpseller(session, codigo: str, descuento: int, email: str):
-    """Crea un cupón de uso único estricto."""
+    """Genera cupón con bloqueo de uso único."""
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
     
@@ -103,14 +89,13 @@ async def crear_cupon_jumpseller(session, codigo: str, descuento: int, email: st
             "code": codigo,
             "discount_amount": descuento,
             "status": "active",
-            "usage_limit": 1, # REGLA DE ORO: 1 Uso Total
+            "usage_limit": 1, # Seguridad Crítica
             "minimum_order_amount": 0,
             "begins_at": datetime.now().strftime("%Y-%m-%d")
         }
     }
     return await fetch_json_with_retry(session, url, method="POST", params=params, json_body=payload)
 
-# --- SCRYFALL & STOCK ---
 async def fetch_scryfall_metadata(ids: List[str]) -> Dict[str, Any]:
     unique_ids = list(set(i for i in ids if isinstance(i, str) and i))
     result = {}
@@ -170,7 +155,6 @@ async def get_jumpseller_stock(session, name: str) -> int:
     STOCK_CACHE[target] = (total, now)
     return total
 
-# --- LÓGICA DE CSV ---
 async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
     def parse_csv():
         try:
@@ -184,6 +168,7 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             df.rename(columns=cols, inplace=True)
             if "name" not in df.columns: return None
             
+            # Limpieza y conversión de tipos
             df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
             df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
             
@@ -191,13 +176,15 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
                 if k not in df.columns: df[k] = ""
                 else: df[k] = df[k].fillna("")
             
-            # Agregación eficiente
+            # Agrupación eficiente
             keys = ["name", "set_code", "foil", "scryfall_id", "meta_name"]
             df["_v"] = df["quantity"] * df["purchase_price"]
             df = df.groupby(keys, as_index=False).agg({"quantity":"sum", "_v":"sum"})
             df["purchase_price"] = df.apply(lambda x: x["_v"]/x["quantity"] if x["quantity"]>0 else 0, axis=1)
             return df
-        except Exception: return None
+        except Exception as e:
+            logger.error(f"Error parseando CSV: {e}")
+            return None
 
     loop = asyncio.get_event_loop()
     df = await loop.run_in_executor(None, parse_csv)
@@ -206,18 +193,16 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
     sf_ids = df["scryfall_id"].unique().tolist()
     sf_meta = await fetch_scryfall_metadata(sf_ids)
     
-    # --- RESOLUCIÓN DE NOMBRES (Prioridad Estricta) ---
+    # --- RESOLUCIÓN DE NOMBRES ---
     def resolve_name(row):
-        # 1. Meta Name (Manual Override)
+        # 1. Meta Name
         meta = str(row.get("meta_name", "")).strip()
         if meta: return clean_card_name(meta)
-        
-        # 2. Scryfall Name (API)
+        # 2. Scryfall Name
         scry_id = row.get("scryfall_id")
         scry_name = sf_meta.get(scry_id, {}).get("canonical_name", "")
         if scry_name: return clean_card_name(scry_name)
-        
-        # 3. CSV Original (Fallback)
+        # 3. CSV Fallback
         return clean_card_name(row.get("name", ""))
 
     df["clean_name"] = df.apply(resolve_name, axis=1)
@@ -225,7 +210,7 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
     
     stock_map = {}
     async with aiohttp.ClientSession() as sess:
-        sem = asyncio.Semaphore(12) # Control de concurrencia
+        sem = asyncio.Semaphore(12)
         async def task(n):
             async with sem: return n, await get_jumpseller_stock(sess, n)
         stock_res = await asyncio.gather(*[task(n) for n in unique_names])
@@ -234,7 +219,7 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
     def logic(df):
         def enrich(row):
             m = sf_meta.get(row.get("scryfall_id"), {})
-            row["name"] = row["clean_name"] # Usar nombre limpio
+            row["name"] = row["clean_name"] # Usar nombre sanitizado
             row["banned"] = m.get("banned", False)
             row["edhrec"] = m.get("edhrec", 999999)
             row["mkt"] = m.get("usd", 0.0)
@@ -252,10 +237,11 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
         def classify(row):
             if row["banned"]: return "no_compra"
             
-            is_staple = any(clean_card_name(s) == row["name"] for s in settings.high_demand_cards)
+            clean_n = row["name"]
+            is_staple = any(clean_card_name(s) == clean_n for s in settings.high_demand_cards)
             if row["edhrec"] < 500: is_staple = True
-            limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
             
+            limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
             qty_sug = max(0, min(row["quantity"], limit - row["stock_tienda"]))
             row["qty_sug"] = qty_sug
             
@@ -276,23 +262,22 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
 def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
     if not settings.SMTP_EMAIL: return
     
-    rows = "".join([f"<tr><td style='padding:8px;border-bottom:1px solid #eee;text-align:center'>{i['quantity']}</td><td style='padding:8px;border-bottom:1px solid #eee'>{i['name']} <small>({i['set_code']})</small></td><td style='text-align:right'>${i.get('price_total',0):,}</td></tr>" for i in items])
+    rows = "".join([f"<tr><td style='padding:8px;border-bottom:1px solid #ddd;text-align:center'>{i['quantity']}</td><td style='padding:8px;border-bottom:1px solid #ddd'>{i['name']} <small>({i['set_code']})</small></td><td style='text-align:right'>${i.get('price_total',0):,}</td></tr>" for i in items])
     
-    # Textos Legales aplicados ANTES de exportar
     terms = """
     <div style='background:#f9fafb; padding:15px; margin-top:20px; font-size:0.85em; color:#374151; border-left: 4px solid #D32F2F;'>
-        <strong>Términos y Condiciones de Compra:</strong>
-        <ul style='margin:10px 0 0 0; padding-left:20px;'>
-            <li>Precios sujetos a validación presencial del estado (NM/EX).</li>
-            <li>GameQuest se reserva el derecho de rechazo por stock.</li>
-            <li>Cotización válida por 24 horas hábiles.</li>
+        <strong>Términos y Condiciones:</strong>
+        <ul style='margin:5px 0 0 20px;'>
+            <li>Precios sujetos a validación de estado.</li>
+            <li>Derecho de admisión y compra reservado.</li>
+            <li>Validez: 24 horas.</li>
         </ul>
     </div>
     """
 
     html = f"""
-    <div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #e5e7eb;border-radius:8px;">
-        <div style="background:#D32F2F;color:white;padding:20px;text-align:center"><h2>Buylist: {cli.get('nombre')}</h2></div>
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #ddd;border-radius:8px;">
+        <div style="background:#D32F2F;color:white;padding:15px;text-align:center"><h3>Buylist: {cli.get('nombre')}</h3></div>
         <div style="padding:20px;">
             <p><strong>RUT:</strong> {cli.get('rut')} | <strong>Pago:</strong> {cli.get('metodo_pago')}</p>
             <div style="text-align:right; margin-bottom:15px;">
@@ -308,7 +293,6 @@ def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
         
-        # Correo Interno
         m1 = MIMEMultipart(); m1['Subject'] = f"🔔 Buylist: {cli.get('nombre')}"; m1['From'] = settings.SMTP_EMAIL; m1['To'] = settings.TARGET_EMAIL
         m1.attach(MIMEText(html, 'html'))
         if csv_content:
@@ -317,8 +301,7 @@ def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
             m1.attach(att)
         s.sendmail(settings.SMTP_EMAIL, settings.TARGET_EMAIL, m1.as_string())
 
-        # Correo Cliente
-        m2 = MIMEMultipart(); m2['Subject'] = "✅ Confirmación GameQuest"; m2['From'] = settings.SMTP_EMAIL; m2['To'] = cli.get('email')
+        m2 = MIMEMultipart(); m2['Subject'] = "✅ Recepción GameQuest"; m2['From'] = settings.SMTP_EMAIL; m2['To'] = cli.get('email')
         m2.attach(MIMEText(html.replace("Buylist:", "Recepción:"), 'html'))
         if csv_content:
             att = MIMEApplication(csv_content, Name=fname)
