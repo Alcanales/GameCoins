@@ -2,20 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from config import settings
 
-connect_args = {}
-# Ajuste para que funcione tanto en SQLite local como en Postgres (Render)
-if "sqlite" in settings.DATABASE_URL:
-    connect_args = {"check_same_thread": False}
-
-# --- ESTA ES LA PARTE QUE TE FALTA O ESTÁ DAÑADA ---
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args=connect_args,
-    pool_pre_ping=True,
-    pool_recycle=1800
-)
-# ---------------------------------------------------
-
+engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
