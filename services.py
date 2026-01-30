@@ -1,22 +1,20 @@
 import aiohttp
 import asyncio
-import io
-import pandas as pd
-import math
 from datetime import datetime
+from sqlalchemy.orm import Session
+from models import SystemConfig
 from config import settings
 
-async def fetch_json_with_retry(session, url, params=None, json_body=None):
-    try:
-        method = "POST" if json_body else "GET"
-        async with session.request(method, url, params=params, json=json_body, timeout=10) as resp:
-            if resp.status < 300: return await resp.json()
-    except: pass
-    return None
+def get_db_config(db: Session, key: str) -> str:
+    """Obtiene configuración persistente de la DB"""
+    item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    return item.value if item else ""
 
-async def crear_cupon_jumpseller(session, codigo, descuento, email):
-    # Usar las credenciales dinámicas de settings
-    if not settings.JUMPSELLER_API_TOKEN or not settings.JUMPSELLER_STORE:
+async def crear_cupon_jumpseller(session, codigo, descuento, email, db: Session):
+    token = get_db_config(db, "JUMPSELLER_API_TOKEN")
+    store = get_db_config(db, "JUMPSELLER_STORE")
+    
+    if not token or not store:
         return None
         
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
@@ -32,17 +30,12 @@ async def crear_cupon_jumpseller(session, codigo, descuento, email):
             "customer_emails": [email]
         }
     }
-    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    return await fetch_json_with_retry(session, url, params=params, json_body=body)
-
-async def procesar_csv_logic(content: bytes, internal_mode: bool):
-    # Lógica simplificada para el ejemplo (Tu lógica completa va aquí si es necesario)
+    params = {"login": store, "authtoken": token}
+    
     try:
-        df = pd.read_csv(io.BytesIO(content))
-        # ... (Tu lógica de procesamiento de CSV) ...
-        # Retorno dummy para que funcione el script básico
-        return [{"name": "Carta Test", "quantity": 1, "purchase_price": 1000, "cash_clp": 500, "mkt": 1000, "cat": "compra", "set_code": "TST", "stock_tienda": 0, "clean_name": "Carta Test"}]
-    except: return {"error": "CSV inválido"}
-
-def enviar_correo_dual(cli, items, clp, gc, content, fname):
-    pass
+        async with session.post(url, params=params, json=body, timeout=10) as resp:
+            if resp.status < 300: return await resp.json()
+            else: print(f"Error Jumpseller: {await resp.text()}")
+    except Exception as e:
+        print(f"Excepción Jumpseller: {e}")
+    return None

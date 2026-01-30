@@ -1,8 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Float
 from sqlalchemy.sql import func
 from database import Base
 
-# 1. Tabla de Usuarios (La que ya tenías)
 class GameCoinUser(Base):
     __tablename__ = "gamecoins"
     
@@ -16,5 +15,5 @@ class GameCoinUser(Base):
 class SystemConfig(Base):
     __tablename__ = "system_config"
     
-    key = Column(String, primary_key=True, index=True) 
-    value = Column(String)                            
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String)
