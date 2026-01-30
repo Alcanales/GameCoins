@@ -3,7 +3,6 @@ from typing import List
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # App Info
     APP_NAME: str = "GameQuest API"
     ENV: str = os.getenv("ENV", "production")
     
@@ -19,15 +18,15 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     TARGET_EMAIL: str = os.getenv("TARGET_EMAIL", "contacto@gamequest.cl")
     
-    # Seguridad (Auth)
-    ADMIN_USER: str = os.getenv("ADMIN_USER", "Tomas_1_2_3")
-    ADMIN_PASS: str = os.getenv("ADMIN_PASS", "GameQuest2025_1")
-    MASTER_USER: str = os.getenv("MASTER_USER", "root_master")
-    MASTER_PASS: str = os.getenv("MASTER_PASS", "GameQuest2025_1")
+    # Seguridad
+    ADMIN_USER: str = os.getenv("ADMIN_USER", "admin")
+    ADMIN_PASS: str = os.getenv("ADMIN_PASS", "change_me")
+    MASTER_USER: str = os.getenv("MASTER_USER", "master")
+    MASTER_PASS: str = os.getenv("MASTER_PASS", "change_me_now")
     
-    # --- KILL-SWITCH (MANTENIMIENTO) ---
-    # Si es True, bloquea canjes y buylists.
-    MAINTENANCE_MODE_CANJE: bool = os.getenv("MAINTENANCE_MODE_CANJE", "false").lower() == "true"
+    # --- KILL-SWITCH: MODO MANTENIMIENTO ---
+    # Si True, bloquea endpoints de canje y buylist.
+    MAINTENANCE_MODE_CANJE: bool = os.getenv("MAINTENANCE_MODE_CANJE", "False").lower() == "true"
     
     # Lógica de Negocio
     USD_TO_CLP: int = 1000
@@ -39,7 +38,6 @@ class Settings(BaseSettings):
     
     STOCK_LIMIT_DEFAULT: int = 4
     STOCK_LIMIT_HIGH_DEMAND: int = 12
-    
     HIGH_DEMAND_CARDS_LIST: str = "sol ring,arcane signet,command tower,mana crypt,the one ring,rhystic study,cyclonic rift"
 
     @property
@@ -53,5 +51,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Fix para Render PostgreSQL
 if settings.DATABASE_URL.startswith("postgres://"):
     settings.DATABASE_URL = settings.DATABASE_URL.replace("postgres://", "postgresql://", 1)
