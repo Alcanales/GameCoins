@@ -16,20 +16,26 @@ from schemas import UpdateRequest, CanjeRequest, ConfigRequest
 from models import GameCoinUser, SystemConfig
 
 Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="GameQuest API", version="Gold-Standard")
 origins = [
     "https://gamequest.cl",
     "https://www.gamequest.cl",
     "https://gamequest-cl.jumpseller.com",
     "http://localhost:8000"
 ]
-app = FastAPI(title="GameQuest API", version="Gold-Standard")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,  
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["x-admin-user", "x-admin-pass", "x-store-token", "Content-Type", "Authorization"],
+    expose_headers=["*"],
 )
+
+
+
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
     if not (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)): raise HTTPException(401)
