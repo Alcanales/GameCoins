@@ -19,7 +19,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="10.0-GOLDEN")
+app = FastAPI(title=settings.APP_NAME, version="11.0-PLATINUM")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -30,7 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- AUTO-HEALING DB ---
+# --- AUTO-HEALING DB (Nivel Platinum) ---
 @app.on_event("startup")
 def startup_db_check():
     """Verifica y repara columnas faltantes en la DB al iniciar."""
@@ -47,9 +47,9 @@ def startup_db_check():
                     print("➕ Agregando columna 'rut'")
                     conn.execute(text("ALTER TABLE users ADD COLUMN rut VARCHAR;"))
                 conn.commit()
-            print("✅ DB Saludable.")
+            print("✅ DB Saludable y Actualizada.")
     except Exception as e:
-        print(f"⚠️ Error en chequeo DB: {e}")
+        print(f"⚠️ Error no crítico en chequeo DB: {e}")
 
 # --- SECURITY ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
@@ -63,7 +63,7 @@ def check_maintenance():
 
 # --- ENDPOINTS ---
 @app.get("/")
-def health(): return {"status": "ok", "version": "10.0"}
+def health(): return {"status": "ok", "version": "11.0"}
 
 @app.get("/api/public/status")
 def status(): return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
@@ -96,6 +96,7 @@ async def send_buylist(background_tasks: BackgroundTasks, payload: str = Form(..
 def list_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
 
+# Endpoint CORREGIDO para coincidir con boveda.html
 @app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     u = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
