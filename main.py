@@ -19,7 +19,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="11.0-PLATINUM")
+app = FastAPI(title=settings.APP_NAME, version="11.1-GAMECOINS-DB")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -30,24 +30,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- AUTO-HEALING DB (Nivel Platinum) ---
+# --- AUTO-HEALING DB (Actualizado para tabla 'gamecoins') ---
 @app.on_event("startup")
 def startup_db_check():
-    """Verifica y repara columnas faltantes en la DB al iniciar."""
+    """Verifica y repara columnas faltantes en la tabla 'gamecoins'."""
     print("🏥 Verificando salud de la Base de Datos...")
     try:
         inspector = inspect(engine)
-        if inspector.has_table("users"):
-            cols = [c['name'] for c in inspector.get_columns('users')]
+        # CAMBIO: Verificamos la tabla "gamecoins"
+        if inspector.has_table("gamecoins"):
+            cols = [c['name'] for c in inspector.get_columns('gamecoins')]
             with engine.connect() as conn:
                 if 'name' not in cols:
                     print("➕ Agregando columna 'name'")
-                    conn.execute(text("ALTER TABLE users ADD COLUMN name VARCHAR;"))
+                    conn.execute(text("ALTER TABLE gamecoins ADD COLUMN name VARCHAR;"))
                 if 'rut' not in cols:
                     print("➕ Agregando columna 'rut'")
-                    conn.execute(text("ALTER TABLE users ADD COLUMN rut VARCHAR;"))
+                    conn.execute(text("ALTER TABLE gamecoins ADD COLUMN rut VARCHAR;"))
                 conn.commit()
-            print("✅ DB Saludable y Actualizada.")
+            print("✅ Tabla 'gamecoins' saludable.")
+        else:
+            print("ℹ️ La tabla 'gamecoins' se creará automáticamente por SQLAlchemy.")
     except Exception as e:
         print(f"⚠️ Error no crítico en chequeo DB: {e}")
 
@@ -63,7 +66,7 @@ def check_maintenance():
 
 # --- ENDPOINTS ---
 @app.get("/")
-def health(): return {"status": "ok", "version": "11.0"}
+def health(): return {"status": "ok", "version": "11.1"}
 
 @app.get("/api/public/status")
 def status(): return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
@@ -96,7 +99,6 @@ async def send_buylist(background_tasks: BackgroundTasks, payload: str = Form(..
 def list_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
 
-# Endpoint CORREGIDO para coincidir con boveda.html
 @app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     u = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
