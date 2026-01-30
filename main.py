@@ -176,3 +176,25 @@ async def sync_clients_endpoint(db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"Error Sync: {str(e)}")
+    
+    @app.post("/admin/sync_clients", dependencies=[Depends(verify_admin)])
+async def sync_clients_endpoint(db: Session = Depends(get_db)):
+    try:
+        js_customers = await logic.sync_jumpseller_customers_logic()
+        nuevos, actualizados = 0, 0
+        
+        for c in js_customers:
+            user = db.query(GameCoinUser).filter(GameCoinUser.email == c['email']).first()
+            if not user:
+                user = GameCoinUser(email=c['email'], name=c['name'], saldo=0)
+                db.add(user)
+                nuevos += 1
+            else:
+                if user.name != c['name']:
+                    user.name = c['name']
+                    actualizados += 1
+        db.commit()
+        return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Error Sync: {str(e)}")

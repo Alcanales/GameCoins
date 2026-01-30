@@ -215,3 +215,30 @@ async def sync_jumpseller_customers_logic():
             page += 1
             
     return all_customers    
+# ... (imports y código existente) ...
+
+async def sync_jumpseller_customers_logic():
+    """Descarga clientes de Jumpseller para llenar la Bóveda."""
+    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "limit": 50}
+    
+    all_customers = []
+    page = 1
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            params['page'] = page
+            data = await fetch_json_with_retry(session, url, params=params)
+            
+            if not data or len(data) == 0: break
+                
+            for entry in data:
+                c = entry.get('customer', {})
+                if c.get('email'):
+                    all_customers.append({
+                        "email": c.get('email'),
+                        "name": f"{c.get('name', '')} {c.get('surname', '')}".strip(),
+                    })
+            if len(data) < 50: break
+            page += 1
+    return all_customers
