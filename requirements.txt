@@ -7,3 +7,4 @@ aiohttp
 python-multipart
 pydantic
 pydantic-settings
+gunicorn
