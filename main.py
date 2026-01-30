@@ -5,7 +5,7 @@ import string
 import hmac
 import hashlib
 import aiohttp
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Depends, Header, Request
+from fastapi import FastAPI, HTTPException, Form, BackgroundTasks, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect
@@ -14,37 +14,31 @@ from config import settings
 from database import engine, Base, get_db
 import services as logic
 from schemas import BuylistSubmitRequest, UpdateRequest, CanjeRequest, ConfigRequest
-from models import GameCoinUser
+from models import GameCoinUser, SystemConfig
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="GameQuest API", version="Modal-Edition")
+app = FastAPI(title="GameQuest API", version="Secure-Edition")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["["https://gamequest.cl", "https://gamequest-cl.jumpseller.com"]"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- AUTO-HEALING DB ---
-@app.on_event("startup")
-def startup_db_check():
-    try:
-        inspector = inspect(engine)
-        if inspector.has_table("gamecoins"):
-            cols = [c['name'] for c in inspector.get_columns('gamecoins')]
-            with engine.connect() as conn:
-                if 'name' not in cols: conn.execute(text("ALTER TABLE gamecoins ADD COLUMN name VARCHAR;"))
-                conn.commit()
-    except Exception as e: print(f"DB Check: {e}")
-
-# --- SECURITY ---
+# --- SEGURIDAD ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    """Verifica credenciales maestras (Para Bóveda)"""
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
-    auth_ok = (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS))
-    if not auth_ok: raise HTTPException(401)
+    auth_ok = secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)
+    if not auth_ok: raise HTTPException(401, "Credenciales Admin Incorrectas")
+
+def verify_store_token(x_store_token: str = Header(None)):
+    """Verifica token de tienda (Para Widget Público)"""
+    if x_store_token != settings.STORE_TOKEN:
+        raise HTTPException(401, "Token de Tienda Inválido")
 
 # --- ENDPOINTS ---
 @app.get("/api/public/balance/{email}")
@@ -52,11 +46,7 @@ def get_balance(email: str, db: Session = Depends(get_db)):
     u = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
     return {"saldo": int(u.saldo if u else 0)}
 
-@app.post("/api/enviar_buylist")
-async def send_buylist(background_tasks: BackgroundTasks, payload: str = Form(...), csv_file: UploadFile = File(...)):
-    return {"status": "received"} # Lógica simplificada
-
-# --- ADMIN API ---
+# --- ADMIN API (Protegida con User/Pass) ---
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def list_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
@@ -66,83 +56,81 @@ def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     u = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
     if not u:
         u = GameCoinUser(email=req.email, rut="N/A", saldo=0); db.add(u)
-    
     if req.accion == "add": u.saldo += req.monto
     elif req.accion == "set": u.saldo = req.monto
     elif req.accion == "subtract": u.saldo = max(0, u.saldo - req.monto)
-    
     db.commit()
     return {"status": "ok", "nuevo_saldo": u.saldo}
 
-# --- CONFIGURACIÓN DINÁMICA (MODAL) ---
+# --- CONFIGURACIÓN DB ---
+def set_db_config(db: Session, key: str, value: str):
+    item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    if not item: db.add(SystemConfig(key=key, value=value))
+    else: item.value = value
+    db.commit()
+
+def get_db_config(db: Session, key: str):
+    item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    return item.value if item else ""
+
 @app.post("/admin/config", dependencies=[Depends(verify_admin)])
-def update_config(req: ConfigRequest):
-    """Actualiza las credenciales en memoria"""
-    settings.JUMPSELLER_API_TOKEN = req.api_token
-    settings.JUMPSELLER_STORE = req.store_login
-    settings.JUMPSELLER_HOOKS_TOKEN = req.hooks_token
-    return {"status": "ok", "mensaje": "Credenciales actualizadas."}
+def update_config(req: ConfigRequest, db: Session = Depends(get_db)):
+    clean_store = req.store_login.lower().replace("https://", "").replace(".jumpseller.com", "").strip()
+    set_db_config(db, "JUMPSELLER_API_TOKEN", req.api_token.strip())
+    set_db_config(db, "JUMPSELLER_STORE", clean_store)
+    set_db_config(db, "JUMPSELLER_HOOKS_TOKEN", req.hooks_token.strip())
+    return {"status": "ok"}
 
-@app.get("/admin/get_config", dependencies=[Depends(verify_admin)])
-def get_config_endpoint():
-    """Devuelve la configuración actual (opcional para ver si guardó)"""
-    return {
-        "store": settings.JUMPSELLER_STORE,
-        "has_token": bool(settings.JUMPSELLER_API_TOKEN),
-        "has_hook": bool(settings.JUMPSELLER_HOOKS_TOKEN)
-    }
-
-# --- CANJE SEGURO ---
-@app.post("/admin/canje", dependencies=[Depends(verify_admin)])
+# --- CANJE SEGURO (Protegido con Token Público) ---
+# CAMBIO CRÍTICO: Ahora usa verify_store_token en lugar de verify_admin
+@app.post("/api/canje", dependencies=[Depends(verify_store_token)])
 async def canje(req: CanjeRequest, db: Session = Depends(get_db)):
-    # 1. Verificar credenciales antes de intentar nada
-    if not settings.JUMPSELLER_API_TOKEN or not settings.JUMPSELLER_STORE:
-        raise HTTPException(500, "Error: Tienda no configurada. Ve al panel de admin y configura las llaves.")
+    # Leer credenciales Jumpseller de DB
+    token = get_db_config(db, "JUMPSELLER_API_TOKEN")
+    store = get_db_config(db, "JUMPSELLER_STORE")
 
-    # 2. Verificar Saldo
+    if not token or not store:
+        raise HTTPException(503, "Tienda no configurada. Contacta al soporte.")
+
+    # Verificar Saldo
     u = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
     if not u or u.saldo < req.monto: raise HTTPException(400, "Saldo insuficiente")
     
-    # 3. Descontar Saldo (Optimistic Locking)
+    # Descontar
     u.saldo -= req.monto
     u.historico_canjeado += req.monto
     db.commit()
     
-    # 4. Generar Cupón
+    # Crear Cupón
     suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
     code = f"GQ-{suffix}"
     
     async with aiohttp.ClientSession() as s:
         res = await logic.crear_cupon_jumpseller(s, code, req.monto, req.email)
-        
-        # 5. Fail-Safe: Si falla Jumpseller, devolvemos el dinero
         if not res or "promotion" not in res:
              u.saldo += req.monto
              u.historico_canjeado -= req.monto
              db.commit()
-             print(f"❌ Fallo al crear cupón en Jumpseller: {res}")
-             return {"status": "error", "mensaje": "Error de comunicación con Jumpseller. Saldo devuelto."}
+             return {"status": "error", "mensaje": "Error creando cupón. Saldo devuelto."}
         
         return {"status": "ok", "cupon_codigo": code}
 
-# --- WEBHOOK (Lealtad + Validación) ---
+# --- WEBHOOK ---
 @app.post("/api/jumpseller/webhook")
 async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = Header(None), db: Session = Depends(get_db)):
-    if not settings.JUMPSELLER_HOOKS_TOKEN: return {"status": "ignored_no_token"}
+    hook_token = get_db_config(db, "JUMPSELLER_HOOKS_TOKEN")
+    if not hook_token: return {"status": "ignored"}
     
     body_bytes = await request.body()
-    signature = hmac.new(settings.JUMPSELLER_HOOKS_TOKEN.encode(), body_bytes, hashlib.sha256).digest()
+    signature = hmac.new(hook_token.encode(), body_bytes, hashlib.sha256).digest()
     import base64
-    calculated = base64.b64encode(signature).decode()
-    
-    if calculated != x_jumpseller_hmac_sha256:
+    if base64.b64encode(signature).decode() != x_jumpseller_hmac_sha256:
         raise HTTPException(401, "Firma inválida")
 
     try:
         data = json.loads(body_bytes)
         order = data.get("order", {})
         if order.get("status") == "paid" and order.get("customer", {}).get("email"):
-            # Lógica: 1 QP por cada $1000
             points = int(float(order.get("total", 0)) / 1000)
             if points > 0:
                 email = order.get("customer", {}).get("email")
@@ -153,8 +141,5 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
                     db.add(user)
                 user.saldo += points
                 db.commit()
-                print(f"💰 Lealtad: {points} QP sumados a {email}")
-    except Exception as e:
-        print(f"Error Webhook: {e}")
-    
+    except: pass
     return {"status": "ok"}
