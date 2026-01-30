@@ -149,12 +149,11 @@ async def canje(req: CanjeRequest, db: Session = Depends(get_db)):
              u.saldo += req.monto; u.historico_canjeado -= req.monto; db.commit()
              return {"status": "error", "mensaje": "Fallo Jumpseller"}
         return {"status": "ok", "cupon_codigo": code}
-    # --- WEBHOOKS JUMPSELLER (Acumulación Automática) ---
 @app.post("/api/jumpseller/webhook")
 async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = Header(None), db: Session = Depends(get_db)):
     """
     Recibe notificaciones de Jumpseller.
-    Si la orden está 'paid', calcula puntos y los suma al usuario.
+    Si la orden está 'paid', suma 1 punto por cada peso gastado.
     """
     if not settings.JUMPSELLER_HOOKS_TOKEN:
         print("⚠️ Webhook recibido pero sin Token configurado. Ignorando.")
@@ -164,7 +163,6 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
     body_bytes = await request.body()
     
     # 2. Verificar Firma de Seguridad (HMAC)
-    # Jumpseller firma el mensaje usando tu token secreto.
     signature = hmac.new(
         settings.JUMPSELLER_HOOKS_TOKEN.encode(),
         body_bytes,
@@ -175,7 +173,7 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
     calculated_hmac = base64.b64encode(signature).decode()
     
     if calculated_hmac != x_jumpseller_hmac_sha256:
-        print(f"⛔ Firma inválida. Recibido: {x_jumpseller_hmac_sha256} | Calculado: {calculated_hmac}")
+        print(f"⛔ Firma inválida. Recibido: {x_jumpseller_hmac_sha256}")
         raise HTTPException(401, "Firma inválida")
 
     # 3. Procesar Datos
@@ -187,11 +185,12 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
         
         print(f"🔔 Webhook Orden #{order.get('id')} - Status: {status} - Email: {email}")
 
+        # Solo sumamos puntos si la orden está PAGADA ('paid')
         if status == "paid" and email:
             total_clp = float(order.get("total", 0))
             
-           
-            puntos_ganados = int(total_clp * 1) # 1% del total en puntos
+            # REGLA: 1 PESO = 1 PUNTO
+            puntos_ganados = int(total_clp)
             
             # Buscar usuario
             user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
@@ -201,7 +200,7 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
                 user = GameCoinUser(email=email, name=name.strip(), saldo=0)
                 db.add(user)
             
-            # Sumar puntos (evitar duplicados requeriría lógica extra de guardar IDs de orden, esto es básico)
+            # Sumar puntos
             user.saldo += puntos_ganados
             db.commit()
             print(f"✅ {puntos_ganados} Puntos sumados a {email}. Nuevo saldo: {user.saldo}")
