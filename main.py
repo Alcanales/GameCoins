@@ -1,13 +1,19 @@
-import magic
 import json
 import secrets
 import random
 import string
+import time
 import aiohttp
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
+
+# VALIDACIÓN MIME ROBUSTA
+try:
+    import magic
+except ImportError:
+    import dummy_magic as magic # Fallback si no está instalado
 
 from config import settings
 from database import engine, Base, get_db
@@ -17,7 +23,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="6.5.0")
+app = FastAPI(title=settings.APP_NAME, version="7.0.0")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -27,6 +33,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- DEPENDENCIAS DE SEGURIDAD ---
 
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
@@ -39,34 +47,64 @@ def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(No
 
     if not (auth_render or auth_master): raise HTTPException(401)
 
+def check_maintenance_mode():
+    """Kill-Switch: Bloquea endpoints críticos si está activo."""
+    if settings.MAINTENANCE_MODE_CANJE:
+        raise HTTPException(
+            status_code=503,
+            detail="Sistema en mantenimiento temporal. No se pueden procesar solicitudes en este momento."
+        )
+
+# --- ENDPOINTS ---
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "env": settings.ENV}
 
-# --- PÚBLICO (Frontend Safe) ---
+# Endpoint de Estado para Frontend (Verifica Kill-Switch)
+@app.get("/api/public/status")
+def system_status():
+    return {
+        "status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational",
+        "timestamp": time.time()
+    }
+
 @app.get("/api/public/balance/{email}")
 def get_public_balance(email: str, db: Session = Depends(get_db)):
     if not email: return {"saldo": 0, "historico_canjeado": 0}
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    # Retorno seguro: No exponer ID interno ni otros metadatos
     if not user: return {"saldo": 0, "historico_canjeado": 0}
     return {"email": user.email, "saldo": user.saldo, "historico_canjeado": user.historico_canjeado}
 
 @app.post("/api/analizar")
 async def analizar_csv(file: UploadFile = File(...), mode: str = Form("client")):
-    # Validar extensión
-    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere .csv")
-    content = await file.read()
-    if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo muy grande")
+    # 1. Validación de Extensión
+    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere archivo .csv")
     
-    # Validar integridad opcional con magic si está instalado
-    # if magic.from_buffer(content, mime=True) != 'text/csv': ...
+    # 2. Validación MIME (Magic Bytes)
+    header = await file.read(2048)
+    await file.seek(0) # Rebobinar
+    
+    try:
+        mime = magic.from_buffer(header, mime=True)
+        allowed = ["text/plain", "text/csv", "application/csv", "application/vnd.ms-excel"]
+        if mime not in allowed:
+            # 415 Unsupported Media Type
+            raise HTTPException(415, f"Tipo de archivo inválido: {mime}. Se requiere CSV real.")
+    except Exception as e:
+        # Si no es un error de HTTP, asumimos que magic falló y dejamos pasar con warning
+        if isinstance(e, HTTPException): raise e
+        print(f"Warning: Magic validation failed: {e}")
 
+    content = await file.read()
+    if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo excede 10MB")
+    
     result = await logic.procesar_csv_logic(content, internal_mode=(mode == "internal"))
     if isinstance(result, dict) and "error" in result: raise HTTPException(400, result["error"])
     return {"data": result}
 
-@app.post("/api/enviar_buylist")
+# Aplicamos Kill-Switch aquí
+@app.post("/api/enviar_buylist", dependencies=[Depends(check_maintenance_mode)])
 async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = Form(...), csv_file: UploadFile = File(...)):
     try:
         data = json.loads(payload)
@@ -77,16 +115,16 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
     background_tasks.add_task(logic.enviar_correo_dual, req.cliente.model_dump(), [c.model_dump() for c in req.cartas], req.total_clp, req.total_gc, file_content, csv_file.filename)
     return {"status": "received"}
 
-# --- PRIVADO (Admin Only) ---
+# --- ADMIN ---
+
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
 
-@app.post("/admin/canje", dependencies=[Depends(verify_admin)])
+# Aplicamos Kill-Switch aquí también
+@app.post("/admin/canje", dependencies=[Depends(verify_admin), Depends(check_maintenance_mode)])
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
-    """Canje transaccional atómico."""
     try:
-        # Bloqueo de fila
         user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
         
         if not user:
@@ -98,12 +136,10 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
             db.rollback()
             raise HTTPException(400, f"Saldo insuficiente ({user.saldo} QP)")
         
-        # Modificación de estado
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
         db.commit() 
         
-        # Generación Cupón (Externo)
         suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
         coupon_code = f"GQ-{suffix}"
         
@@ -111,7 +147,7 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
             res = await logic.crear_cupon_jumpseller(session, coupon_code, req.monto, req.email)
             
             if not res or "promotion" not in res:
-                return {"status": "warning", "mensaje": "Error API Jumpseller", "nuevo_saldo": user.saldo}
+                return {"status": "warning", "mensaje": "Error API Jumpseller (Saldo descontado)", "nuevo_saldo": user.saldo}
 
             return {"status": "ok", "nuevo_saldo": user.saldo, "cupon_codigo": coupon_code}
 

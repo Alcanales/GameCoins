@@ -8,23 +8,26 @@ import unicodedata
 import logging
 import json
 import math
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-# python-magic para validación real de archivos (opcional pero recomendado)
-# import magic 
 from config import settings
 
-logging.basicConfig(level=logging.INFO)
+# Configuración de Logging Estructurado
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("Services")
 
 STOCK_CACHE: Dict[str, tuple] = {}
 SCRYFALL_CACHE: Dict[str, tuple] = {}
 CACHE_TTL = 300
 
-# --- OPTIMIZACIÓN: REGEX PRE-COMPILADO (Ámbito Global) ---
+# Regex Globales (Compiladas una sola vez)
 REGEX_BRACKETS = re.compile(r"[\(\[].*?[\)\]]")
 FORBIDDEN_TERMS = [
     "foil", "retro", "etched", "borderless", "extended art", "showcase", 
@@ -35,20 +38,13 @@ REGEX_KEYWORDS = re.compile(r"(?i)\b(" + "|".join(FORBIDDEN_TERMS) + r")\b")
 REGEX_CLEANUP = re.compile(r"[^a-z0-9\s]")
 
 def clean_card_name(name: str) -> str:
-    """Sanitización agresiva para compatibilidad Jumpseller."""
     if not isinstance(name, str) or not name: return ""
-    
-    # 1. Eliminar metadata
     name = REGEX_BRACKETS.sub("", name)
-    # 2. Eliminar keywords
     name = REGEX_KEYWORDS.sub("", name)
-    # 3. Normalización Unicode
     name = unicodedata.normalize('NFD', name)
     name = "".join(c for c in name if unicodedata.category(c) != 'Mn')
-    # 4. Limpieza final
     name = name.lower().replace("&", "and")
     name = REGEX_CLEANUP.sub(" ", name)
-    
     return " ".join(name.split())
 
 def round_clp(val: float) -> int:
@@ -56,7 +52,6 @@ def round_clp(val: float) -> int:
     return int(round(val / 100.0) * 100)
 
 async def fetch_json_with_retry(session, url, method="GET", params=None, json_body=None, retries=3):
-    """Backoff exponencial para APIs externas."""
     for attempt in range(retries):
         try:
             async with session.request(method, url, params=params, json=json_body, timeout=15) as resp:
@@ -79,17 +74,15 @@ async def fetch_json_with_retry(session, url, method="GET", params=None, json_bo
     return None
 
 async def crear_cupon_jumpseller(session, codigo: str, descuento: int, email: str):
-    """Genera cupón con bloqueo de uso único."""
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    
     payload = {
         "promotion": {
             "name": f"Canje GQ {codigo}",
             "code": codigo,
             "discount_amount": descuento,
             "status": "active",
-            "usage_limit": 1, # Seguridad Crítica
+            "usage_limit": 1,
             "minimum_order_amount": 0,
             "begins_at": datetime.now().strftime("%Y-%m-%d")
         }
@@ -136,14 +129,12 @@ async def fetch_scryfall_metadata(ids: List[str]) -> Dict[str, Any]:
 async def get_jumpseller_stock(session, name: str) -> int:
     target = clean_card_name(name)
     if not target: return 0
-    
     now = datetime.now().timestamp()
     if target in STOCK_CACHE and (now - STOCK_CACHE[target][1] < CACHE_TTL):
         return STOCK_CACHE[target][0]
 
     params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "query": target, "limit": 50, "fields": "stock,name,variants"}
     data = await fetch_json_with_retry(session, f"{settings.JUMPSELLER_API_BASE}/products.json", params=params)
-    
     total = 0
     if data:
         for p in data:
@@ -151,11 +142,13 @@ async def get_jumpseller_stock(session, name: str) -> int:
                 base = p.get("product", {}).get("stock", 0)
                 vars_stock = sum(v.get("stock", 0) for v in p.get("product", {}).get("variants", []))
                 total += max(base, vars_stock)
-    
     STOCK_CACHE[target] = (total, now)
     return total
 
 async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
+    start_time = time.time()
+    logger.info("Iniciando procesamiento de CSV...")
+
     def parse_csv():
         try:
             df = pd.read_csv(io.BytesIO(content))
@@ -166,9 +159,10 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             }
             df.columns = [c.strip() for c in df.columns]
             df.rename(columns=cols, inplace=True)
-            if "name" not in df.columns: return None
+            if "name" not in df.columns: 
+                logger.error("CSV sin columna 'Name'")
+                return None
             
-            # Limpieza y conversión de tipos
             df["quantity"] = pd.to_numeric(df["quantity"], errors='coerce').fillna(0).astype(int)
             df["purchase_price"] = pd.to_numeric(df["purchase_price"], errors='coerce').fillna(0.0)
             
@@ -183,85 +177,94 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
             df["purchase_price"] = df.apply(lambda x: x["_v"]/x["quantity"] if x["quantity"]>0 else 0, axis=1)
             return df
         except Exception as e:
-            logger.error(f"Error parseando CSV: {e}")
+            logger.error(f"Error parseo CSV: {e}")
             return None
 
     loop = asyncio.get_event_loop()
     df = await loop.run_in_executor(None, parse_csv)
-    if df is None: return {"error": "CSV Inválido"}
+    if df is None: return {"error": "CSV con formato inválido o columnas faltantes."}
 
+    # Fetch Data en Bloque (Eficiencia)
     sf_ids = df["scryfall_id"].unique().tolist()
-    sf_meta = await fetch_scryfall_metadata(sf_ids)
-    
-    # --- RESOLUCIÓN DE NOMBRES ---
-    def resolve_name(row):
-        # 1. Meta Name
-        meta = str(row.get("meta_name", "")).strip()
-        if meta: return clean_card_name(meta)
-        # 2. Scryfall Name
-        scry_id = row.get("scryfall_id")
-        scry_name = sf_meta.get(scry_id, {}).get("canonical_name", "")
-        if scry_name: return clean_card_name(scry_name)
-        # 3. CSV Fallback
-        return clean_card_name(row.get("name", ""))
+    try:
+        sf_meta = await fetch_scryfall_metadata(sf_ids)
+    except Exception as e:
+        logger.error(f"Fallo Scryfall batch: {e}")
+        sf_meta = {}
 
-    df["clean_name"] = df.apply(resolve_name, axis=1)
+    # Pre-cálculo de nombres para Stock
+    df["clean_name"] = df.apply(lambda row: clean_card_name(row.get("meta_name") or sf_meta.get(row.get("scryfall_id"), {}).get("canonical_name") or row.get("name")), axis=1)
     unique_names = df["clean_name"].unique().tolist()
     
     stock_map = {}
     async with aiohttp.ClientSession() as sess:
         sem = asyncio.Semaphore(12)
         async def task(n):
-            async with sem: return n, await get_jumpseller_stock(sess, n)
+            try:
+                async with sem: return n, await get_jumpseller_stock(sess, n)
+            except: return n, 0
         stock_res = await asyncio.gather(*[task(n) for n in unique_names])
         stock_map = dict(stock_res)
 
+    # LÓGICA DE NEGOCIO ITERATIVA (OBSERVABILIDAD)
     def logic(df):
-        def enrich(row):
-            m = sf_meta.get(row.get("scryfall_id"), {})
-            row["name"] = row["clean_name"] # Usar nombre sanitizado
-            row["banned"] = m.get("banned", False)
-            row["edhrec"] = m.get("edhrec", 999999)
-            row["mkt"] = m.get("usd", 0.0)
-            
-            if row["purchase_price"] <= 0 and row["mkt"] > 0:
-                row["purchase_price"] = row["mkt"]
-            return row
-            
-        df = df.apply(enrich, axis=1)
+        results = []
+        errors = 0
         
-        df["cash_clp"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER).apply(round_clp)
-        df["gc_price"] = (df["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER).apply(round_clp)
-        df["stock_tienda"] = df["name"].map(stock_map).fillna(0).astype(int)
+        for idx, row in df.iterrows():
+            try:
+                # Conversión segura a dict para enriquecer
+                item = row.to_dict()
+                m = sf_meta.get(item.get("scryfall_id"), {})
+                
+                item["name"] = item["clean_name"]
+                item["banned"] = m.get("banned", False)
+                item["edhrec"] = m.get("edhrec", 999999)
+                item["mkt"] = m.get("usd", 0.0)
+                
+                # Hybrid Price Correction
+                if item["purchase_price"] <= 0 and item["mkt"] > 0:
+                    item["purchase_price"] = item["mkt"]
+                
+                item["cash_clp"] = round_clp(item["purchase_price"] * settings.USD_TO_CLP * settings.CASH_MULTIPLIER)
+                item["gc_price"] = round_clp(item["purchase_price"] * settings.USD_TO_CLP * settings.GAMECOIN_MULTIPLIER)
+                item["stock_tienda"] = int(stock_map.get(item["name"], 0))
 
-        def classify(row):
-            if row["banned"]: return "no_compra"
-            
-            clean_n = row["name"]
-            is_staple = any(clean_card_name(s) == clean_n for s in settings.high_demand_cards)
-            if row["edhrec"] < 500: is_staple = True
-            
-            limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
-            qty_sug = max(0, min(row["quantity"], limit - row["stock_tienda"]))
-            row["qty_sug"] = qty_sug
-            
-            if qty_sug == 0: return "no_compra"
-            if row["purchase_price"] < settings.MIN_PURCHASE_USD: return "no_compra"
-            
-            if str(row.get("foil","")).lower() == "foil" and row["purchase_price"] >= settings.STAKE_MIN_PRICE_FOR_STAKE:
-                if row["mkt"] > 0 and (row["purchase_price"]/row["mkt"] >= settings.STAKE_RATIO_THRESHOLD):
-                    return "estaca"
-            return "compra"
+                # Clasificador
+                cat = "compra"
+                if item["banned"]: cat = "no_compra"
+                else:
+                    is_staple = any(clean_card_name(s) == item["name"] for s in settings.high_demand_cards) or item["edhrec"] < 500
+                    limit = settings.STOCK_LIMIT_HIGH_DEMAND if is_staple else settings.STOCK_LIMIT_DEFAULT
+                    qty_sug = max(0, min(item["quantity"], limit - item["stock_tienda"]))
+                    item["qty_sug"] = qty_sug
+                    
+                    if qty_sug == 0 or item["purchase_price"] < settings.MIN_PURCHASE_USD: cat = "no_compra"
+                    elif str(item.get("foil","")).lower() == "foil" and item["purchase_price"] >= settings.STAKE_MIN_PRICE_FOR_STAKE:
+                        if item["mkt"] > 0 and (item["purchase_price"]/item["mkt"] >= settings.STAKE_RATIO_THRESHOLD):
+                            cat = "estaca"
+                
+                item["cat"] = cat
+                item["rank"] = {"estaca":0, "compra":1, "no_compra":2}[cat]
+                results.append(item)
+                
+            except Exception as e:
+                errors += 1
+                logger.warning(f"Error procesando fila {idx} (Carta: {row.get('name', '?')}): {e}")
+                # No detenemos el proceso, solo saltamos esta fila
+        
+        return sorted(results, key=lambda x: (x['rank'], -x['purchase_price']))
 
-        df["cat"] = df.apply(classify, axis=1)
-        df["rank"] = df["cat"].map({"estaca":0, "compra":1, "no_compra":2})
-        return df.sort_values(["rank", "purchase_price"], ascending=[True, False]).fillna("").to_dict(orient="records")
+    final_data = await loop.run_in_executor(None, logic, df)
+    
+    elapsed = time.time() - start_time
+    logger.info(f"Procesamiento finalizado en {elapsed:.2f}s. Exitosos: {len(final_data)}. Errores ignorados: {len(df)-len(final_data)}.")
+    
+    return final_data
 
-    return await loop.run_in_executor(None, logic, df)
-
+# ... (Mantiene enviar_correo_dual sin cambios) ...
 def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
     if not settings.SMTP_EMAIL: return
-    
     rows = "".join([f"<tr><td style='padding:8px;border-bottom:1px solid #ddd;text-align:center'>{i['quantity']}</td><td style='padding:8px;border-bottom:1px solid #ddd'>{i['name']} <small>({i['set_code']})</small></td><td style='text-align:right'>${i.get('price_total',0):,}</td></tr>" for i in items])
     
     terms = """
@@ -274,9 +277,7 @@ def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
         </ul>
     </div>
     """
-
-    html = f"""
-    <div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #ddd;border-radius:8px;">
+    html = f"""<div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #ddd;border-radius:8px;">
         <div style="background:#D32F2F;color:white;padding:15px;text-align:center"><h3>Buylist: {cli.get('nombre')}</h3></div>
         <div style="padding:20px;">
             <p><strong>RUT:</strong> {cli.get('rut')} | <strong>Pago:</strong> {cli.get('metodo_pago')}</p>
@@ -287,12 +288,10 @@ def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
             <table width="100%" cellspacing="0">{rows}</table>
             {terms}
         </div>
-    </div>
-    """
+    </div>"""
 
     try:
         s = smtplib.SMTP('smtp.gmail.com', 587); s.starttls(); s.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-        
         m1 = MIMEMultipart(); m1['Subject'] = f"🔔 Buylist: {cli.get('nombre')}"; m1['From'] = settings.SMTP_EMAIL; m1['To'] = settings.TARGET_EMAIL
         m1.attach(MIMEText(html, 'html'))
         if csv_content:
@@ -308,6 +307,5 @@ def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
             att['Content-Disposition'] = f'attachment; filename="{fname}"'
             m2.attach(att)
         s.sendmail(settings.SMTP_EMAIL, cli.get('email'), m2.as_string())
-        
         s.quit()
     except Exception as e: logger.error(f"SMTP Error: {e}")

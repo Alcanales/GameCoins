@@ -3,14 +3,14 @@ from typing import List
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    # App Config
+    # App Info
     APP_NAME: str = "GameQuest API"
-    ENV: str = "production"
+    ENV: str = os.getenv("ENV", "production")
     
     # Database
-    DATABASE_URL: str = "sqlite:///./local.db"
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./local.db")
     
-    # Integraciones (Deben venir de variables de entorno en Prod)
+    # Integraciones
     JUMPSELLER_API_TOKEN: str = os.getenv("JUMPSELLER_API_TOKEN", "")
     JUMPSELLER_STORE: str = os.getenv("JUMPSELLER_STORE", "")
     JUMPSELLER_API_BASE: str = "https://api.jumpseller.com/v1"
@@ -19,19 +19,21 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     TARGET_EMAIL: str = os.getenv("TARGET_EMAIL", "contacto@gamequest.cl")
     
-
+    # Seguridad (Auth)
     ADMIN_USER: str = os.getenv("ADMIN_USER", "Tomas_1_2_3")
     ADMIN_PASS: str = os.getenv("ADMIN_PASS", "GameQuest2025_1")
-    
-    MASTER_USER: str = os.getenv("MASTER_USER", "Tomas_1_2_3")
+    MASTER_USER: str = os.getenv("MASTER_USER", "root_master")
     MASTER_PASS: str = os.getenv("MASTER_PASS", "GameQuest2025_1")
+    
+    # --- KILL-SWITCH (MANTENIMIENTO) ---
+    # Si es True, bloquea canjes y buylists.
+    MAINTENANCE_MODE_CANJE: bool = os.getenv("MAINTENANCE_MODE_CANJE", "false").lower() == "true"
     
     # Lógica de Negocio
     USD_TO_CLP: int = 1000
     CASH_MULTIPLIER: float = 0.45
     GAMECOIN_MULTIPLIER: float = 0.55
     MIN_PURCHASE_USD: float = 3.0
-    
     STAKE_MIN_PRICE_FOR_STAKE: float = 20.0
     STAKE_RATIO_THRESHOLD: float = 2.5
     
@@ -46,7 +48,6 @@ class Settings(BaseSettings):
         return [c.strip().lower() for c in self.HIGH_DEMAND_CARDS_LIST.split(",") if c.strip()]
 
     class Config:
-        env_file = ".env"
         case_sensitive = True
         extra = "ignore"
 
