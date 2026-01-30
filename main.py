@@ -144,3 +144,35 @@ def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     
     db.commit()
     return {"status": "ok", "nuevo_saldo": user.saldo}
+# ... (otros imports) ...
+
+@app.post("/admin/sync_clients", dependencies=[Depends(verify_admin)])
+async def sync_clients_endpoint(db: Session = Depends(get_db)):
+    """Sincroniza nombres de clientes desde Jumpseller a la Bóveda."""
+    try:
+        # Llamamos a la lógica en services
+        js_customers = await logic.sync_jumpseller_customers_logic()
+        
+        nuevos = 0
+        actualizados = 0
+        
+        for c in js_customers:
+            user = db.query(GameCoinUser).filter(GameCoinUser.email == c['email']).first()
+            
+            if not user:
+                # Si tiene saldo 0, lo creamos para que exista en búsquedas
+                user = GameCoinUser(email=c['email'], name=c['name'], saldo=0, historico_canjeado=0)
+                db.add(user)
+                nuevos += 1
+            else:
+                # Actualizamos nombre si cambió
+                if user.name != c['name']:
+                    user.name = c['name']
+                    actualizados += 1
+        
+        db.commit()
+        return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "total_scan": len(js_customers)}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Error Sync: {str(e)}")

@@ -184,5 +184,34 @@ async def procesar_csv_logic(content: bytes, internal_mode: bool) -> List[Dict]:
 
 def enviar_correo_dual(cli, items, clp, gc, csv_content, fname):
     if not settings.SMTP_EMAIL: return
-    # (HTML de correo optimizado mantenido del análisis anterior)
-    # ...
+
+async def sync_jumpseller_customers_logic():
+    """Descarga todos los clientes de Jumpseller para actualizar nombres locales."""
+    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    params = {"login": settings.JUMPSELLER_STORE, "authtoken": settings.JUMPSELLER_API_TOKEN, "limit": 50}
+    
+    all_customers = []
+    page = 1
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            params['page'] = page
+            # Usamos la función retry existente
+            data = await fetch_json_with_retry(session, url, params=params)
+            
+            if not data or len(data) == 0:
+                break
+                
+            for entry in data:
+                c = entry.get('customer', {})
+                if c.get('email'):
+                    all_customers.append({
+                        "email": c.get('email'),
+                        "name": f"{c.get('name', '')} {c.get('surname', '')}".strip(),
+                        "phone": c.get('phone')
+                    })
+            
+            if len(data) < 50: break # Fin de páginas
+            page += 1
+            
+    return all_customers    
