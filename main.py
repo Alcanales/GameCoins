@@ -18,7 +18,7 @@ from models import GameCoinUser
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="7.0.0")
+app = FastAPI(title=settings.APP_NAME, version="8.0.0-STAFF")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -29,27 +29,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- SEGURIDAD & KILL-SWITCH ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
-    
-    auth_render = (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and 
-                   secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS))
-    
-    auth_master = (secrets.compare_digest(x_admin_user, settings.MASTER_USER) and 
-                   secrets.compare_digest(x_admin_pass, settings.MASTER_PASS))
-
+    auth_render = secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)
+    auth_master = secrets.compare_digest(x_admin_user, settings.MASTER_USER) and secrets.compare_digest(x_admin_pass, settings.MASTER_PASS)
     if not (auth_render or auth_master): raise HTTPException(401)
 
 def check_maintenance_mode():
     if settings.MAINTENANCE_MODE_CANJE:
-        raise HTTPException(status_code=503, detail="Sistema en mantenimiento temporal.")
+        raise HTTPException(status_code=503, detail="Sistema en Mantenimiento Temporal")
 
+# --- ENDPOINTS ---
 @app.get("/")
 def health_check(): return {"status": "ok", "env": settings.ENV}
 
 @app.get("/api/public/status")
-def system_status():
-    return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
+def system_status(): return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
 
 @app.get("/api/public/balance/{email}")
 def get_public_balance(email: str, db: Session = Depends(get_db)):
@@ -58,24 +54,23 @@ def get_public_balance(email: str, db: Session = Depends(get_db)):
     if not user: return {"saldo": 0, "historico_canjeado": 0}
     return {"email": user.email, "saldo": user.saldo, "historico_canjeado": user.historico_canjeado}
 
+# MÓDULO BUYLIST: Carga Segura
 @app.post("/api/analizar")
 async def analizar_csv(file: UploadFile = File(...), mode: str = Form("client")):
-    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere .csv")
+    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Debe ser .csv")
     
-    # MIME Check Real
-    header = await file.read(2048)
-    await file.seek(0)
+    # Validación MIME (Seguridad)
+    header = await file.read(2048); await file.seek(0)
     try:
         mime = magic.from_buffer(header, mime=True)
         if mime not in ["text/plain", "text/csv", "application/csv", "application/vnd.ms-excel"]:
-            raise HTTPException(415, f"Tipo de archivo inválido: {mime}")
+            raise HTTPException(415, f"Archivo corrupto o malicioso ({mime})")
     except Exception as e:
         if isinstance(e, HTTPException): raise e
-        # Log warning if magic fails, but proceed
-        print(f"Magic check failed: {e}")
+        print(f"Warning Magic: {e}")
 
     content = await file.read()
-    if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo excede 10MB")
+    if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo > 10MB")
     
     result = await logic.procesar_csv_logic(content, internal_mode=(mode == "internal"))
     if isinstance(result, dict) and "error" in result: raise HTTPException(400, result["error"])
@@ -86,12 +81,12 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
     try:
         data = json.loads(payload)
         req = BuylistSubmitRequest(**data)
-    except Exception: raise HTTPException(422, "JSON inválido")
-    
+    except: raise HTTPException(422, "Datos inválidos")
     file_content = await csv_file.read()
     background_tasks.add_task(logic.enviar_correo_dual, req.cliente.model_dump(), [c.model_dump() for c in req.cartas], req.total_clp, req.total_gc, file_content, csv_file.filename)
     return {"status": "received"}
 
+# MÓDULO BÓVEDA & GAMEPOINTS: Gestión Segura
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
@@ -99,6 +94,7 @@ def get_users(db: Session = Depends(get_db)):
 @app.post("/admin/canje", dependencies=[Depends(verify_admin), Depends(check_maintenance_mode)])
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     try:
+        # Race Condition Protection (Bloqueo de Fila)
         user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
         if not user:
             user = GameCoinUser(email=req.email, rut="N/A", saldo=0, historico_canjeado=0)
@@ -106,11 +102,11 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
         
         if user.saldo < req.monto:
             db.rollback()
-            raise HTTPException(400, f"Saldo insuficiente ({user.saldo} QP)")
+            raise HTTPException(400, f"Saldo insuficiente. Disponible: {user.saldo}")
         
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
-        db.commit() 
+        db.commit()
         
         suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
         coupon_code = f"GQ-{suffix}"
@@ -118,14 +114,12 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
         async with aiohttp.ClientSession() as session:
             res = await logic.crear_cupon_jumpseller(session, coupon_code, req.monto, req.email)
             if not res or "promotion" not in res:
-                return {"status": "warning", "mensaje": "Error API Jumpseller (Saldo descontado)", "nuevo_saldo": user.saldo}
-
+                return {"status": "warning", "mensaje": "Error Jumpseller (Saldo descontado)", "nuevo_saldo": user.saldo}
             return {"status": "ok", "nuevo_saldo": user.saldo, "cupon_codigo": coupon_code}
-
     except HTTPException as he: raise he
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, f"Error: {str(e)}")
+        raise HTTPException(500, f"Error Interno: {str(e)}")
 
 @app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
@@ -137,6 +131,5 @@ def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     if req.accion == "add": user.saldo += req.monto
     elif req.accion == "set": user.saldo = req.monto
     elif req.accion == "subtract": user.saldo = max(0, user.saldo - req.monto)
-    
     db.commit()
     return {"status": "ok", "nuevo_saldo": user.saldo}
