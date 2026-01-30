@@ -16,9 +16,10 @@ import services as logic
 from schemas import BuylistSubmitRequest, UpdateRequest, CanjeRequest
 from models import GameCoinUser
 
+# Crear tablas
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.APP_NAME, version="9.0.0-VIRTUOSO")
+app = FastAPI(title=settings.APP_NAME, version="8.5.0-MANABOX")
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
@@ -32,53 +33,58 @@ app.add_middleware(
 # --- SEGURIDAD ---
 def verify_admin(x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
     if not (x_admin_user and x_admin_pass): raise HTTPException(401)
-    auth_render = secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS)
-    auth_master = secrets.compare_digest(x_admin_user, settings.MASTER_USER) and secrets.compare_digest(x_admin_pass, settings.MASTER_PASS)
+    
+    auth_render = (secrets.compare_digest(x_admin_user, settings.ADMIN_USER) and 
+                   secrets.compare_digest(x_admin_pass, settings.ADMIN_PASS))
+    
+    auth_master = (secrets.compare_digest(x_admin_user, settings.MASTER_USER) and 
+                   secrets.compare_digest(x_admin_pass, settings.MASTER_PASS))
+
     if not (auth_render or auth_master): raise HTTPException(401)
 
 def check_maintenance_mode():
     if settings.MAINTENANCE_MODE_CANJE:
-        raise HTTPException(status_code=503, detail="Sistema en Mantenimiento Temporal")
+        raise HTTPException(503, "Sistema en mantenimiento temporal.")
 
 # --- ENDPOINTS PÚBLICOS ---
 @app.get("/")
 def health_check(): return {"status": "ok", "env": settings.ENV}
 
 @app.get("/api/public/status")
-def system_status(): return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
+def system_status():
+    return {"status": "maintenance" if settings.MAINTENANCE_MODE_CANJE else "operational"}
 
 @app.get("/api/public/balance/{email}")
 def get_public_balance(email: str, db: Session = Depends(get_db)):
-    # FIX CRÍTICO: Garantizar respuesta numérica sólida
     if not email: return {"saldo": 0, "historico_canjeado": 0}
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    
     if not user: return {"saldo": 0, "historico_canjeado": 0}
-    
-    # Sanitización de nulos de BD
+    # Forzar int para evitar errores de frontend
     return {
-        "email": user.email,
-        "saldo": int(user.saldo if user.saldo is not None else 0),
-        "historico_canjeado": int(user.historico_canjeado if user.historico_canjeado is not None else 0)
+        "email": user.email, 
+        "saldo": int(user.saldo or 0), 
+        "historico_canjeado": int(user.historico_canjeado or 0)
     }
 
 @app.post("/api/analizar")
 async def analizar_csv(file: UploadFile = File(...), mode: str = Form("client")):
-    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere .csv")
+    if not file.filename.lower().endswith('.csv'): raise HTTPException(400, "Requiere archivo .csv")
     
-    # Validación MIME Real (Anti-Malware)
-    header = await file.read(2048); await file.seek(0)
+    # Validación Magic Bytes
+    header = await file.read(2048)
+    await file.seek(0)
     try:
         mime = magic.from_buffer(header, mime=True)
         if mime not in ["text/plain", "text/csv", "application/csv", "application/vnd.ms-excel"]:
-            raise HTTPException(415, f"Archivo inválido: {mime}")
+            raise HTTPException(415, f"Tipo inválido: {mime}")
     except Exception as e:
         if isinstance(e, HTTPException): raise e
-        print(f"Warning Magic: {e}") # Log y continuar si falla la librería magic
+        print(f"Warning Magic: {e}")
 
     content = await file.read()
     if len(content) > 10*1024*1024: raise HTTPException(413, "Archivo excede 10MB")
     
+    # Procesar
     result = await logic.procesar_csv_logic(content, internal_mode=(mode == "internal"))
     if isinstance(result, dict) and "error" in result: raise HTTPException(400, result["error"])
     return {"data": result}
@@ -90,11 +96,12 @@ async def enviar_solicitud(background_tasks: BackgroundTasks, payload: str = For
         req = BuylistSubmitRequest(**data)
     except: raise HTTPException(422, "JSON inválido")
     
-    file_content = await csv_file.read()
-    background_tasks.add_task(logic.enviar_correo_dual, req.cliente.model_dump(), [c.model_dump() for c in req.cartas], req.total_clp, req.total_gc, file_content, csv_file.filename)
+    content = await csv_file.read()
+    background_tasks.add_task(logic.enviar_correo_dual, req.cliente.model_dump(), [c.model_dump() for c in req.cartas], req.total_clp, req.total_gc, content, csv_file.filename)
     return {"status": "received"}
 
-# --- ENDPOINTS PROTEGIDOS ---
+# --- ADMIN ENDPOINTS (Corregidos) ---
+
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     return db.query(GameCoinUser).all()
@@ -102,34 +109,30 @@ def get_users(db: Session = Depends(get_db)):
 @app.post("/admin/canje", dependencies=[Depends(verify_admin), Depends(check_maintenance_mode)])
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     try:
-        # Transacción Atómica con Bloqueo de Fila (Anti Race-Condition)
         user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email).with_for_update().first()
-        
         if not user:
             user = GameCoinUser(email=req.email, rut="N/A", saldo=0, historico_canjeado=0)
             db.add(user); db.flush()
         
         if user.saldo < req.monto:
             db.rollback()
-            raise HTTPException(400, f"Saldo insuficiente. Tienes: {user.saldo}")
+            raise HTTPException(400, "Saldo insuficiente")
         
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
         db.commit()
         
         suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-        coupon_code = f"GQ-{suffix}"
+        code = f"GQ-{suffix}"
         
         async with aiohttp.ClientSession() as session:
-            res = await logic.crear_cupon_jumpseller(session, coupon_code, req.monto, req.email)
+            res = await logic.crear_cupon_jumpseller(session, code, req.monto, req.email)
             if not res or "promotion" not in res:
-                return {"status": "warning", "mensaje": "Saldo descontado pero falló Jumpseller", "nuevo_saldo": user.saldo}
-            return {"status": "ok", "nuevo_saldo": user.saldo, "cupon_codigo": coupon_code}
-
-    except HTTPException as he: raise he
+                return {"status": "warning", "mensaje": "Error API Jumpseller", "nuevo_saldo": user.saldo}
+            return {"status": "ok", "nuevo_saldo": user.saldo, "cupon_codigo": code}
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, f"Error Crítico: {str(e)}")
+        raise HTTPException(500, str(e))
 
 @app.post("/admin/update_saldo", dependencies=[Depends(verify_admin)])
 def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
@@ -144,40 +147,9 @@ def update_saldo(req: UpdateRequest, db: Session = Depends(get_db)):
     
     db.commit()
     return {"status": "ok", "nuevo_saldo": user.saldo}
-# ... (otros imports) ...
 
+# [CORRECCIÓN] Endpoint Sync correctamente indentado
 @app.post("/admin/sync_clients", dependencies=[Depends(verify_admin)])
-async def sync_clients_endpoint(db: Session = Depends(get_db)):
-    """Sincroniza nombres de clientes desde Jumpseller a la Bóveda."""
-    try:
-        # Llamamos a la lógica en services
-        js_customers = await logic.sync_jumpseller_customers_logic()
-        
-        nuevos = 0
-        actualizados = 0
-        
-        for c in js_customers:
-            user = db.query(GameCoinUser).filter(GameCoinUser.email == c['email']).first()
-            
-            if not user:
-                # Si tiene saldo 0, lo creamos para que exista en búsquedas
-                user = GameCoinUser(email=c['email'], name=c['name'], saldo=0, historico_canjeado=0)
-                db.add(user)
-                nuevos += 1
-            else:
-                # Actualizamos nombre si cambió
-                if user.name != c['name']:
-                    user.name = c['name']
-                    actualizados += 1
-        
-        db.commit()
-        return {"status": "ok", "nuevos": nuevos, "actualizados": actualizados, "total_scan": len(js_customers)}
-        
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Error Sync: {str(e)}")
-    
-    @app.post("/admin/sync_clients", dependencies=[Depends(verify_admin)])
 async def sync_clients_endpoint(db: Session = Depends(get_db)):
     try:
         js_customers = await logic.sync_jumpseller_customers_logic()
@@ -186,7 +158,7 @@ async def sync_clients_endpoint(db: Session = Depends(get_db)):
         for c in js_customers:
             user = db.query(GameCoinUser).filter(GameCoinUser.email == c['email']).first()
             if not user:
-                user = GameCoinUser(email=c['email'], name=c['name'], saldo=0)
+                user = GameCoinUser(email=c['email'], name=c['name'], saldo=0, historico_canjeado=0)
                 db.add(user)
                 nuevos += 1
             else:
