@@ -6,23 +6,23 @@ class Settings(BaseSettings):
     APP_NAME: str = "GameQuest API"
     ENV: str = os.getenv("ENV", "production")
     
-    # --- BASE DE DATOS (Actualizada a 'gamecoins') ---
+    # --- BASE DE DATOS (NO TOCAR - YA ESTÁ LISTA) ---
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", 
-        # Se cambió el final de la URL de /db_gamequest a /gamecoins
         "postgresql://db_gamequest_user:0xewyvxGcc0KfRqdSV8JOTweQ3lxje0X@dpg-d4ti8u3uibrs73annjfg-a/gamecoins"
     )
     
-    # --- INTEGRACIONES ---
-    JUMPSELLER_API_TOKEN: str = os.getenv("JUMPSELLER_API_TOKEN", "")
-    JUMPSELLER_STORE: str = os.getenv("JUMPSELLER_STORE", "")
+    # --- CREDENCIALES JUMPSELLER (AQUÍ ESTÁ EL ERROR) ---
+
+    JUMPSELLER_API_TOKEN: str = "c168d3283e923c35215b3467357fe5d6"  
+    JUMPSELLER_STORE: str = "032aa60af252c7f3eb99c65191799bdb"        
     JUMPSELLER_API_BASE: str = "https://api.jumpseller.com/v1"
     
+    # --- RESTO DE CONFIGURACIÓN (NO TOCAR) ---
     SMTP_EMAIL: str = os.getenv("SMTP_EMAIL", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     TARGET_EMAIL: str = os.getenv("TARGET_EMAIL", "contacto@gamequest.cl")
     
-    # --- SEGURIDAD ---
     ADMIN_USER: str = os.getenv("ADMIN_USER", "Tomas_1_2_3")
     ADMIN_PASS: str = os.getenv("ADMIN_PASS", "GameQuest2025_1")
     MASTER_USER: str = os.getenv("MASTER_USER", "Master_1_2_3")
@@ -30,14 +30,12 @@ class Settings(BaseSettings):
     
     MAINTENANCE_MODE_CANJE: bool = os.getenv("MAINTENANCE_MODE_CANJE", "False").lower() == "true"
     
-    # --- LÓGICA ---
     USD_TO_CLP: int = 1000
     CASH_MULTIPLIER: float = 0.45
     GAMECOIN_MULTIPLIER: float = 0.55
     MIN_PURCHASE_USD: float = 3.0
     STAKE_MIN_PRICE_FOR_STAKE: float = 20.0
     STAKE_RATIO_THRESHOLD: float = 2.5
-    
     STOCK_LIMIT_DEFAULT: int = 4
     STOCK_LIMIT_HIGH_DEMAND: int = 12
     HIGH_DEMAND_CARDS_LIST: str = "sol ring,arcane signet,command tower,mana crypt,the one ring,rhystic study,cyclonic rift"
