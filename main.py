@@ -22,7 +22,7 @@ app = FastAPI(title="GameQuest API", version="Secure-Edition")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["["https://gamequest.cl", "https://gamequest-cl.jumpseller.com"]"],
+    allow_origins=["https://gamequest.cl", "https://gamequest-cl.jumpseller.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
