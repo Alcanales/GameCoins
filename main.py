@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import secrets
-from .database import engine, Base, get_db
-from .models import GameCoinUser, SystemConfig
-from .config import settings
-from . import services as logic
-from . import tcg_logic
-from .schemas import CanjeRequest, ConfigRequest
+from database import engine, Base, get_db
+from models import GameCoinUser
+from config import settings
+import services as logic
+import tcg_logic
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
