@@ -1,0 +1,60 @@
+{% if customer %}
+<div class="gc-account-card" style="background:#fff; border:1px solid #e5e7eb; padding:20px; border-radius:12px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+    <div style="display:flex; align-items:center; gap:15px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/266/266286.png" width="40">
+        <div>
+            <div style="font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase;">Tus QuestPoints</div>
+            <div id="gc-dashboard-balance" style="font-size:24px; font-weight:800; color:#111;">Cargando...</div>
+        </div>
+    </div>
+    <button id="gc-btn-redeem" onclick="gqCanjear()" class="btn btn-primary" style="background:#000; color:#fff; border:none; border-radius:8px; padding:10px 20px;">Canjear Todo</button>
+</div>
+<script>
+    const GQ_API = "https://gamecoins.onrender.com";
+    const GQ_EMAIL = "{{ customer.email | downcase | strip }}";
+    const GQ_TOKEN = "gq_public_key_2025_secure";
+    let saldoGlobal = 0;
+
+    async function gqSync() {
+        if(!GQ_EMAIL) return;
+        try {
+            const r = await fetch(`${GQ_API}/api/public/balance/${GQ_EMAIL}`);
+            if(!r.ok) throw new Error("404");
+            const d = await r.json();
+            saldoGlobal = d.saldo;
+            document.getElementById('gc-dashboard-balance').innerText = "$" + d.saldo.toLocaleString('es-CL');
+            if(d.saldo < 1000) {
+                const b = document.getElementById('gc-btn-redeem');
+                b.disabled = true;
+                b.innerText = "Saldo Insuficiente";
+                b.style.opacity = 0.5;
+            }
+        } catch(e) {
+            document.getElementById('gc-dashboard-balance').innerText = "$0";
+        }
+    }
+
+    async function gqCanjear() {
+        if(!confirm(`¿Canjear $${saldoGlobal} en puntos?`)) return;
+        const btn = document.getElementById('gc-btn-redeem');
+        btn.innerText = "Procesando..."; btn.disabled = true;
+        
+        try {
+            const r = await fetch(`${GQ_API}/api/canje`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'x-store-token': GQ_TOKEN},
+                body: JSON.stringify({email: GQ_EMAIL, monto: saldoGlobal})
+            });
+            const d = await r.json();
+            if(d.status === 'ok') {
+                alert(`¡Éxito! Cupón: ${d.cupon_codigo}`);
+                location.reload();
+            } else {
+                alert(d.detail || "Error al canjear.");
+                btn.innerText = "Reintentar"; btn.disabled = false;
+            }
+        } catch(e) { alert("Error de conexión"); btn.disabled = false; }
+    }
+    document.addEventListener("DOMContentLoaded", gqSync);
+</script>
+{% endif %}
