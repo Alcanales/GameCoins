@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Integer
-from .database import Base
+from sqlalchemy import Column, String, Integer, Float, Boolean
+from database import Base  
 
 class GameCoinUser(Base):
     __tablename__ = "gamecoin_users"
