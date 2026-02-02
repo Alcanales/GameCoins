@@ -1,41 +1,13 @@
 import aiohttp
-import asyncio
 from datetime import datetime
-from sqlalchemy.orm import Session
-from models import SystemConfig
-from config import settings
+from .models import SystemConfig
 
-def get_db_config(db: Session, key: str) -> str:
-    """Obtiene configuración persistente de la DB"""
-    item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
-    return item.value if item else ""
-
-async def crear_cupon_jumpseller(session, codigo, descuento, email, db: Session):
-    token = get_db_config(db, "JUMPSELLER_API_TOKEN")
-    store = get_db_config(db, "JUMPSELLER_STORE")
-    
-    if not token or not store:
-        return None
-        
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    body = {
-        "promotion": {
-            "name": f"Canje GQ {codigo}",
-            "code": codigo,
-            "discount_amount": descuento,
-            "status": "active",
-            "usage_limit": 1,
-            "minimum_order_amount": 0,
-            "begins_at": datetime.now().strftime("%Y-%m-%d"),
-            "customer_emails": [email]
-        }
-    }
-    params = {"login": store, "authtoken": token}
-    
-    try:
-        async with session.post(url, params=params, json=body, timeout=10) as resp:
-            if resp.status < 300: return await resp.json()
-            else: print(f"Error Jumpseller: {await resp.text()}")
-    except Exception as e:
-        print(f"Excepción Jumpseller: {e}")
-    return None
+async def crear_cupon_jumpseller(codigo, monto, email, db):
+    token = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_API_TOKEN").first()
+    store = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_STORE").first()
+    if not token or not store: return None
+    url = f"https://api.jumpseller.com/v1/promotions.json"
+    payload = {"promotion": {"name": f"GQ {codigo}", "code": codigo, "discount_amount": monto, "status": "active", "usage_limit": 1, "customer_emails": [email]}}
+    async with aiohttp.ClientSession() as s:
+        async with s.post(url, params={"login": store.value, "authtoken": token.value}, json=payload) as r:
+            return await r.json() if r.status == 201 else None
