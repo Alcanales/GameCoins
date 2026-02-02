@@ -1,8 +1,12 @@
 fastapi
 uvicorn
+gunicorn
 sqlalchemy
 psycopg2-binary
 pandas
 aiohttp
-python-magic
+python-multipart
+pydantic
 pydantic-settings
+python-magic
+requests
