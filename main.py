@@ -14,6 +14,8 @@ from database import engine, Base, get_db
 import services as logic
 from schemas import UpdateRequest, CanjeRequest, ConfigRequest
 from models import GameCoinUser, SystemConfig
+from fastapi import UploadFile, File
+import tcg_logic # Importamos el módulo nuevo
 
 Base.metadata.create_all(bind=engine)
 
@@ -119,3 +121,31 @@ async def jumpseller_webhook(request: Request, x_jumpseller_hmac_sha256: str = H
                 u.saldo += points; db.commit()
     except: pass
     return {"status": "ok"}
+
+@app.post("/admin/analyze_csv", dependencies=[Depends(verify_admin)])
+async def analyze_inventory(file: UploadFile = File(...)):
+    """
+    Endpoint para subir CSV de Scryfall y detectar Estacas.
+    """
+    # Validación simple de extensión (python-magic es más robusto pero esto cumple por ahora)
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(400, "Solo se permiten archivos CSV")
+    
+    content = await file.read()
+    
+    # Procesamiento Lógico
+    df_result = tcg_logic.analizar_csv_estacas(content)
+    
+    if isinstance(df_result, dict) and "error" in df_result:
+        raise HTTPException(500, f"Error procesando CSV: {df_result['error']}")
+    
+    # Cálculo de métricas
+    total = len(df_result)
+    estacas = len(df_result[df_result['status'].astype(str).str.contains("RECHAZADO")])
+    
+    return {
+        "status": "ok",
+        "total_analizado": total,
+        "estacas_detectadas": estacas,
+        "detalle": df_result.to_dict(orient="records")
+    }
