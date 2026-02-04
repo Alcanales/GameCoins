@@ -75,3 +75,176 @@
 
 <!-- Asegúrate de que {{coupon_form}} esté después para el input de cupón -->
 {{ coupon_form }}
+
+
+
+{{ index_for_top_components }}
+
+{% render 'theme_breadcrumbs' %}
+
+{% if customer %}
+<style>
+    /* ESTILOS DEL WIDGET FLOTANTE (Mantenemos tu diseño bonito) */
+    :root { --gc-p: #111827; --gc-a: #10B981; --gc-bg: #FFF; --gc-bord: #E5E7EB; }
+    
+    /* Widget Flotante (Escondido en móviles si prefieres usar el header) */
+    .gc-dashboard-wrapper { padding:0 4%; margin:20px 0 30px; font-family:system-ui,-apple-system,sans-serif; }
+    .gc-status-bar { display:flex; align-items:center; background:var(--gc-bg); border:1px solid var(--gc-bord); border-radius:16px; padding:15px 25px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); gap:20px; flex-wrap:wrap; cursor:pointer; transition:0.2s; }
+    .gc-status-bar:hover { transform:translateY(-2px); box-shadow:0 10px 15px -3px rgba(0,0,0,0.1); }
+    .gc-info-section { display:flex; align-items:center; gap:15px; flex-grow:1; min-width:200px; }
+    .gc-coin-icon { width:48px; height:48px; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.1)); }
+    .gc-text-group { display:flex; flex-direction:column; }
+    .gc-label-mini { font-size:11px; text-transform:uppercase; color:#6B7280; font-weight:700; }
+    .gc-balance-hero { font-size:26px; font-weight:800; color:var(--gc-p); line-height:1; }
+    .gc-loading { animation:pulse 1.5s infinite; color:#9CA3AF; }
+    @keyframes pulse { 0%{opacity:1} 50%{opacity:0.5} 100%{opacity:1} }
+    .gc-actions-section { display:flex; gap:8px; flex-wrap:wrap; }
+    .gc-btn-quick { background:#F3F4F6; border:1px solid #E5E7EB; color:#374151; padding:8px 14px; border-radius:8px; font-weight:600; cursor:pointer; transition:0.2s; }
+    .gc-btn-quick:hover:not(:disabled) { background:#E5E7EB; color:000; }
+    .gc-btn-quick.primary { background:var(--gc-p); color:white; border-color:var(--gc-p); }
+
+    /* MODAL */
+    #gc-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:90%; max-width:380px; background:white; border-radius:20px; box-shadow:0 25px 50px rgba(0,0,0,0.25); z-index:999999; text-align:center; overflow:hidden; }
+    #gc-backdrop { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999998; backdrop-filter:blur(3px); }
+    .gc-modal-header { background:var(--gc-p); padding:20px; color:white; }
+    .gc-modal-body { padding:25px; }
+    .gc-input-manual { width:100%; padding:12px; font-size:18px; text-align:center; border:2px solid #E5E7EB; border-radius:10px; margin-bottom:15px; font-weight:bold; }
+</style>
+
+<div class="gc-dashboard-wrapper">
+    <div class="gc-status-bar" onclick="toggleGameCoinsModal()">
+        <div class="gc-info-section">
+            <img class="gc-coin-icon" src='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="24" fill="%23FFF8E1"/><path d="M14 26C14 23.79 18.47 22 24 22C29.52 22 34 23.79 34 26V31C34 33.2 29.52 35 24 35C18.47 35 14 33.2 14 31V26Z" fill="%23FFC107"/><path d="M14 26C14 23.79 18.47 22 24 22C29.52 22 34 23.79 34 26" stroke="%23FFA000" stroke-width="2"/><path d="M14 19C14 16.79 18.47 15 24 15C29.52 15 34 16.79 34 19V24C34 26.2 29.52 28 24 28C18.47 28 14 26.2 14 24V19Z" fill="%23FFD54F" stroke="%23FFA000" stroke-width="2"/><path d="M24 20C27.31 20 30 19.1 30 18C30 16.89 27.31 16 24 16C20.68 16 18 16.89 18 18C18 19.1 20.68 20 24 20Z" fill="%23FFF3E0"/></svg>'>
+            <div class="gc-text-group">
+                <span class="gc-label-mini">Tus QuestPoints</span>
+                <span id="gc-widget-saldo" class="gc-balance-hero gc-loading">...</span>
+            </div>
+        </div>
+        <div class="gc-actions-section">
+            <button onclick="event.stopPropagation(); canjearDirecto(5000)" class="gc-btn-quick">⚡ 5k</button>
+            <button onclick="event.stopPropagation(); canjearDirecto(10000)" class="gc-btn-quick">⚡ 10k</button>
+            <button onclick="event.stopPropagation(); canjearDirecto('max')" class="gc-btn-quick primary">Canjear Todo</button>
+        </div>
+    </div>
+</div>
+
+<div id="gc-backdrop" onclick="toggleGameCoinsModal()"></div>
+<div id="gc-modal">
+    <div class="gc-modal-header">
+        <h4 style="margin:0; opacity:0.9; font-size:14px; letter-spacing:1px;">BILLETERA VIRTUAL</h4>
+        <div style="font-size: 32px; font-weight: 800; color: #34D399;">$<span id="gc-modal-saldo">0</span></div>
+    </div>
+    <div class="gc-modal-body">
+        <div id="gc-paso-1">
+            <p style="color:#666;">Ingresa monto manual:</p>
+            <input type="number" id="gc-input-monto" class="gc-input-manual" placeholder="$ 0">
+            <button onclick="canjearManual()" id="gc-btn-action" style="width:100%; background:#111; color:white; padding:12px; border:none; border-radius:10px; font-weight:bold; cursor:pointer;">GENERAR CUPÓN</button>
+            <div id="gc-msg-error" style="color:red; margin-top:10px; font-size:13px; display:none;"></div>
+        </div>
+        <div id="gc-paso-2" style="display:none;">
+            <div style="background:#ECFDF5; color:#065F46; padding:15px; border-radius:10px; border:1px dashed #10B981; margin:15px 0;">
+                <p style="margin:0; font-size:10px; font-weight:bold;">CÓDIGO:</p>
+                <h2 id="gc-codigo-final" style="margin:5px 0; font-family:monospace; font-size:24px;">---</h2>
+            </div>
+            <p style="font-size:12px; color:#666;">Cópialo y úsalo al pagar.</p>
+            <button onclick="toggleGameCoinsModal()" style="background:none; border:none; text-decoration:underline; cursor:pointer; color:#666;">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // === CONFIGURACIÓN ===
+    const GC_API = "https://gamecoins.onrender.com";
+    const GC_EMAIL = "{{ customer.email | downcase }}";
+    const GC_HEADERS = { 'x-store-token': 'gq_public_key_2025_secure' };
+    let gc_saldo = 0;
+
+    document.addEventListener("DOMContentLoaded", () => {
+        if(GC_EMAIL) syncSaldo();
+    });
+
+    // FUNCIÓN INTELIGENTE: Actualiza Widget, Header y Carrito al mismo tiempo
+    async function syncSaldo() {
+        try {
+            const res = await fetch(`${GC_API}/api/public/balance/${GC_EMAIL}`);
+            if(res.ok) {
+                const d = await res.json();
+                gc_saldo = d.saldo;
+                const fmt = new Intl.NumberFormat('es-CL', {style:'currency', currency:'CLP'}).format(gc_saldo);
+                
+                // 1. Actualizar Widget Principal
+                const w = document.getElementById('gc-widget-saldo');
+                if(w) { w.innerText = fmt; w.classList.remove('gc-loading'); }
+                
+                // 2. Actualizar Modal
+                const m = document.getElementById('gc-modal-saldo');
+                if(m) m.innerText = gc_saldo;
+
+                // 3. Actualizar HEADER (layout.liquid) - Lógica de visibilidad
+                const hBadge = document.getElementById('gc-header-badge');
+                const hAmt = document.getElementById('gc-header-amount');
+                if(hBadge && hAmt) {
+                    hAmt.innerText = gc_saldo; // Muestra solo el número
+                    // Solo mostramos si tiene saldo mayor a 0 (Como pediste)
+                    if(gc_saldo > 0) {
+                        hBadge.style.display = 'inline-flex';
+                    } else {
+                        hBadge.style.display = 'none';
+                    }
+                }
+
+                // 4. Actualizar CARRITO (cart.liquid)
+                const cBal = document.getElementById('gc-cart-balance');
+                if(cBal) cBal.innerText = fmt;
+            }
+        } catch(e) { console.error("GC Error:", e); }
+    }
+
+    // Funciones de UI
+    function toggleGameCoinsModal() {
+        const m = document.getElementById('gc-modal');
+        const b = document.getElementById('gc-backdrop');
+        const show = m.style.display==='none' || m.style.display==='';
+        m.style.display = show?'block':'none';
+        b.style.display = show?'block':'none';
+        if(show) {
+            document.getElementById('gc-paso-1').style.display='block';
+            document.getElementById('gc-paso-2').style.display='none';
+            document.getElementById('gc-msg-error').style.display='none';
+            document.getElementById('gc-input-monto').value='';
+        }
+    }
+
+    async function doCanje(monto, btn) {
+        if(!monto || monto<1) return alert("Monto inválido");
+        if(monto > gc_saldo) return alert("Saldo insuficiente");
+        if(!confirm(`¿Canjear $${monto}?`)) return;
+
+        let txt = "";
+        if(btn) { txt=btn.innerText; btn.innerText="⏳"; btn.disabled=true; }
+
+        try {
+            const res = await fetch(`${GC_API}/api/canje`, {
+                method:'POST', headers:{...GC_HEADERS, 'Content-Type':'application/json'},
+                body:JSON.stringify({email:GC_EMAIL, monto:monto})
+            });
+            const d = await res.json();
+            if(d.status==='ok') {
+                document.getElementById('gc-codigo-final').innerText = d.cupon_codigo;
+                toggleGameCoinsModal(); // Asegura que el modal esté visible
+                document.getElementById('gc-paso-1').style.display='none';
+                document.getElementById('gc-paso-2').style.display='block';
+                syncSaldo(); // Actualizar todos los contadores
+            } else {
+                alert(d.mensaje || "Error al canjear");
+            }
+        } catch(e) { alert("Error de conexión"); }
+        finally { if(btn) { btn.innerText=txt; btn.disabled=false; } }
+    }
+
+    function canjearDirecto(v) { doCanje(v==='max'?gc_saldo:parseInt(v), event.currentTarget); }
+    function canjearManual() { doCanje(parseInt(document.getElementById('gc-input-monto').value), document.getElementById('gc-btn-action')); }
+</script>
+{% endif %}
+
+{{ index_for_components }}

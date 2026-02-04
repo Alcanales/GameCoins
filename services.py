@@ -72,6 +72,7 @@ async def procesar_canje_atomico(email: str, monto: int, db: Session):
         logging.error(f"Error en transacción de canje: {str(e)}")
         return {"status": "error", "detail": str(e)}
 
+# ... imports previos ...
 
 async def fetch_scryfall_prices(scryfall_id: str):
     """Fetch precios de Scryfall API usando ID."""
@@ -93,7 +94,9 @@ async def fetch_scryfall_prices(scryfall_id: str):
             logging.error(f"Excepción al fetch Scryfall: {str(e)}")
             return {'price_normal': 0.0, 'price_foil': 0.0}
 
-def analizar_csv_estacas(file_content: bytes):
+
+# ¡Aquí está el fix! Cambia def → async def
+async def analizar_csv_estacas(file_content: bytes):
     import pandas as pd
     from io import BytesIO
     import os
@@ -101,11 +104,12 @@ def analizar_csv_estacas(file_content: bytes):
         df = pd.read_csv(BytesIO(file_content))
         df.columns = [str(c).lower().strip() for c in df.columns]
         
-        required_cols = ['name', 'scryfall id']  # Cambiado: Scryfall ID es clave para fetch
+        required_cols = ['name', 'scryfall id']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
-            raise ValueError(f"Columnas faltantes en CSV: {', '.join(missing_cols)}")
+            raise ValueError(f"Columnas faltantes: {', '.join(missing_cols)}")
         
+        # Límites de .env
         stock_default = int(os.getenv('STOCK_LIMIT_DEFAULT', 8))
         stock_high = int(os.getenv('STOCK_LIMIT_HIGH_DEMAND', 20))
         min_spread = float(os.getenv('MIN_STAKE_SPREAD', 10.0))
@@ -118,34 +122,31 @@ def analizar_csv_estacas(file_content: bytes):
             scryfall_id = str(row.get('scryfall id', ''))
             purchase_price = float(row.get('purchase price', 0))
             
+            # Fetch o fallback
             if 'price_normal' in row and 'price_foil' in row:
                 try:
                     pn = float(row['price_normal'])
                     pf = float(row['price_foil'])
                 except ValueError:
-                    pn, pf = 0.0, 0.0
+                    pn = pf = 0.0
             else:
                 if scryfall_id:
-                    prices = await fetch_scryfall_prices(scryfall_id)
+                    prices = await fetch_scryfall_prices(scryfall_id)   # ← await OK ahora
                     pn = prices['price_normal']
                     pf = prices['price_foil']
-                    logging.info(f"Precios fetched para {nombre}: normal={pn}, foil={pf}")
                 else:
-                    pn = purchase_price
-                    pf = purchase_price  # Asumir mismo para foil, o ajusta lógica
-                    logging.warning(f"No Scryfall ID para {nombre}; usando purchase_price={pn}")
+                    pn = pf = purchase_price
             
-            current_stock = int(row.get('quantity', 0))  # Usa 'quantity' como stock actual si aplica
+            current_stock = int(row.get('quantity', 0))
             
             status, razon = "APROBADO", "OK"
             stock_limit = stock_high if pn >= 20.0 else stock_default
             
-            # Checks adicionales de spreads y ratios (sin cambios)
             spread = abs(pf - pn)
             if spread < min_spread:
                 status, razon = "RECHAZADO (SPREAD BAJO)", f"Spread {spread:.1f} < {min_spread}"
             elif spread < stake_min_spread and pn < 20.0:
-                status, razon = "RECHAZADO (STAKE SPREAD)", f"Spread {spread:.1f} < {stake_min_spread} para low-end"
+                status, razon = "RECHAZADO (STAKE SPREAD)", f"Spread {spread:.1f} < {stake_min_spread}"
             
             if pf >= 20.0 and pn < 20.0:
                 ratio = pf / pn if pn > 0 else 999
@@ -155,20 +156,19 @@ def analizar_csv_estacas(file_content: bytes):
             elif pn >= 20.0:
                 status, razon = "HIGH END", "Staple Seguro"
             
-            # Check stock actual vs límite
             if current_stock >= stock_limit:
-                status, razon = "RECHAZADO (STOCK FULL)", f"Stock {current_stock} >= límite {stock_limit}"
+                status, razon = "RECHAZADO (STOCK FULL)", f"Stock {current_stock} >= {stock_limit}"
             
             resultados.append({
-                "name": nombre, 
-                "price_normal": pn, 
-                "price_foil": pf, 
+                "name": nombre,
+                "price_normal": pn,
+                "price_foil": pf,
                 "current_stock": current_stock,
                 "stock_limit": stock_limit,
-                "status": status, 
+                "status": status,
                 "razon": razon
             })
         return pd.DataFrame(resultados)
-    except Exception as e: 
+    except Exception as e:
         logging.error(f"Error procesando CSV: {str(e)}")
-        return {"error": f"Error procesando CSV: {str(e)}"}
+        return {"error": str(e)}
