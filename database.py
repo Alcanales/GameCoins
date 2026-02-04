@@ -3,7 +3,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from config import settings
 
-# Configuración de Pooling: Previene errores de "Too many connections"
 engine = create_engine(
     settings.DATABASE_URL, 
     pool_size=5, 

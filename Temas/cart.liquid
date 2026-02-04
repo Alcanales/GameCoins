@@ -1,0 +1,77 @@
+{% if customer %}
+<div class="gc-cart-points" style="background:#fff; border:1px solid #e5e7eb; padding:15px; border-radius:8px; margin:20px 0; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+    <h3>Tus QuestPoints en el Carrito</h3>
+    <p>Saldo disponible: <span id="gc-cart-balance">Cargando...</span></p>
+    <button id="gc-cart-redeem" onclick="gqCanjearEnCart()" class="btn btn-secondary" style="background:#007bff; color:#fff; border:none; border-radius:6px; padding:8px 16px;">Canjear Puntos en Este Pedido</button>
+</div>
+<script>
+    const GQ_API = "https://gamecoins.onrender.com";
+    const GQ_EMAIL = "{{ customer.email | downcase | strip }}";
+    const GQ_TOKEN = "gq_public_key_2025_secure";
+    let saldoCart = 0;
+    const MIN_CANJE = 3;
+
+    async function gqSyncCart() {
+        if (!GQ_EMAIL) return;
+        try {
+            const r = await fetch(`${GQ_API}/api/public/balance/${GQ_EMAIL}`);
+            if (!r.ok) throw new Error("Error al cargar saldo");
+            const d = await r.json();
+            saldoCart = d.saldo;
+            document.getElementById('gc-cart-balance').innerText = "$" + d.saldo.toLocaleString('es-CL');
+            const b = document.getElementById('gc-cart-redeem');
+            if (d.saldo < MIN_CANJE) {
+                b.disabled = true;
+                b.innerText = "Saldo Insuficiente";
+                b.style.opacity = 0.5;
+            }
+        } catch (e) {
+            document.getElementById('gc-cart-balance').innerText = "$0";
+            console.error("Error cargando saldo en cart:", e);
+        }
+    }
+
+    async function gqCanjearEnCart() {
+        if (!confirm(`¿Canjear $${saldoCart} y aplicar al carrito?`)) return;
+        const btn = document.getElementById('gc-cart-redeem');
+        btn.innerText = "Procesando..."; btn.disabled = true;
+        
+        try {
+            const r = await fetch(`${GQ_API}/api/canje`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'x-store-token': GQ_TOKEN},
+                body: JSON.stringify({email: GQ_EMAIL, monto: saldoCart})
+            });
+            if (!r.ok) throw new Error(`Error ${r.status}`);
+            const d = await r.json();
+            if (d.status === 'ok') {
+                // Auto-aplicar cupón: Insertar en input de coupon_form y submit
+                const couponInput = document.querySelector('input[name="coupon"]');  // Asume input name="coupon" en {{coupon_form}}
+                if (couponInput) {
+                    couponInput.value = d.cupon_codigo;
+                    const couponForm = couponInput.closest('form');
+                    if (couponForm) {
+                        couponForm.submit();  // Submit para aplicar cupón y refrescar cart
+                    } else {
+                        alert(`Cupón creado: ${d.cupon_codigo}. Aplícalo manualmente.`);
+                    }
+                } else {
+                    alert(`Cupón creado: ${d.cupon_codigo}. Aplícalo en el form de cupones.`);
+                }
+                location.reload();
+            } else {
+                alert(d.detail || "Error al canjear.");
+                btn.innerText = "Reintentar"; btn.disabled = false;
+            }
+        } catch (e) { 
+            alert("Error de conexión: " + e.message); 
+            btn.innerText = "Reintentar"; 
+            btn.disabled = false; 
+        }
+    }
+    document.addEventListener("DOMContentLoaded", gqSyncCart);
+</script>
+{% endif %}
+
+<!-- Asegúrate de que {{coupon_form}} esté después para el input de cupón -->
+{{ coupon_form }}
