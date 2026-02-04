@@ -2,36 +2,55 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Buylist Pública - GameQuest</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .upload-form { margin-bottom: 20px; }
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 20px; background-color: #f4f6f9; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 20px; }
+        header h1 { font-size: 2em; color: #007bff; }
+        .upload-form { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; }
+        .upload-form input[type="file"] { padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .upload-form button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background 0.3s; }
+        .upload-form button:hover { background: #0056b3; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #f1f1f1; }
+        #loading { display: none; text-align: center; margin: 20px; font-style: italic; color: #666; }
+        footer { text-align: center; margin-top: 30px; font-size: 0.8em; color: #888; }
     </style>
 </head>
 <body>
-    <h1>Buylist Pública: Cartas que Compramos</h1>
-    <p>Sube tu CSV de cartas (con columnas: name, price_normal, price_foil, optional: current_stock) para ver qué podemos comprar ajustado a stock.</p>
-    
-    <div class="upload-form">
-        <input type="file" id="csvFile" accept=".csv">
-        <button onclick="analyzePublic()">Analizar Buylist</button>
+    <div class="container">
+        <header>
+            <h1>Buylist Pública: Cartas que Compramos</h1>
+            <p>Sube tu CSV de cartas para ver qué podemos comprar, ajustado a stock y precios actuales.</p>
+        </header>
+        
+        <div class="upload-form">
+            <input type="file" id="csvFile" accept=".csv">
+            <button onclick="analyzePublic()">Analizar Buylist</button>
+        </div>
+        
+        <div id="loading">Cargando análisis...</div>
+        
+        <table id="buylistTable">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Precio Normal</th>
+                    <th>Precio Foil</th>
+                    <th>Stock Disponible</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        
+        <footer>© 2026 GameQuest - Todos los derechos reservados.</footer>
     </div>
-    
-    <table id="buylistTable">
-        <thead>
-            <tr>
-                <th>Nombre</th>
-                <th>Precio Normal</th>
-                <th>Precio Foil</th>
-                <th>Stock Disponible</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
 
     <script>
         const GQ_API = "https://gamecoins.onrender.com";
@@ -42,6 +61,8 @@
                 alert("Sube un CSV primero.");
                 return;
             }
+            
+            document.getElementById('loading').style.display = 'block';
             
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
@@ -74,6 +95,8 @@
                 }
             } catch (e) {
                 alert("Error: " + e.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
             }
         }
     </script>

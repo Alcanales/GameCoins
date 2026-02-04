@@ -1,4 +1,3 @@
-import aiohttp
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -9,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 logging.basicConfig(level=logging.ERROR)
 
 async def crear_cupon_jumpseller(codigo: str, monto: int, email: str, db: Session):
-    # 1. Recuperar credenciales de La Bóveda
     token = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_API_TOKEN").first()
     store = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_STORE").first()
     
@@ -19,7 +17,6 @@ async def crear_cupon_jumpseller(codigo: str, monto: int, email: str, db: Sessio
     
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     
-    # 2. Payload del Cupón (Reglas de Negocio)
     payload = {
         "promotion": {
             "name": f"Canje GQ {codigo}",
@@ -32,7 +29,6 @@ async def crear_cupon_jumpseller(codigo: str, monto: int, email: str, db: Sessio
         }
     }
     
-    # 3. Llamada HTTP Asíncrona
     async with aiohttp.ClientSession() as s:
         try:
             params = {"login": store.value, "authtoken": token.value}
@@ -76,22 +72,40 @@ async def procesar_canje_atomico(email: str, monto: int, db: Session):
         logging.error(f"Error en transacción de canje: {str(e)}")
         return {"status": "error", "detail": str(e)}
 
+
+async def fetch_scryfall_prices(scryfall_id: str):
+    """Fetch precios de Scryfall API usando ID."""
+    url = f"https://api.scryfall.com/cards/{scryfall_id}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    prices = data.get('prices', {})
+                    return {
+                        'price_normal': float(prices.get('usd', 0)) or 0.0,
+                        'price_foil': float(prices.get('usd_foil', 0)) or 0.0
+                    }
+                else:
+                    logging.error(f"Error Scryfall API ({response.status}) para ID {scryfall_id}")
+                    return {'price_normal': 0.0, 'price_foil': 0.0}
+        except Exception as e:
+            logging.error(f"Excepción al fetch Scryfall: {str(e)}")
+            return {'price_normal': 0.0, 'price_foil': 0.0}
+
 def analizar_csv_estacas(file_content: bytes):
     import pandas as pd
     from io import BytesIO
     import os
     try:
         df = pd.read_csv(BytesIO(file_content))
-        # Normalización de cabeceras (Clean Code)
         df.columns = [str(c).lower().strip() for c in df.columns]
         
-        # Verificar columnas requeridas
-        required_cols = ['name', 'price_normal', 'price_foil']
+        required_cols = ['name', 'scryfall id']  # Cambiado: Scryfall ID es clave para fetch
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Columnas faltantes en CSV: {', '.join(missing_cols)}")
         
-        # Cargar límites de .env (lógica de negocio)
         stock_default = int(os.getenv('STOCK_LIMIT_DEFAULT', 8))
         stock_high = int(os.getenv('STOCK_LIMIT_HIGH_DEMAND', 20))
         min_spread = float(os.getenv('MIN_STAKE_SPREAD', 10.0))
@@ -101,19 +115,32 @@ def analizar_csv_estacas(file_content: bytes):
         resultados = []
         for _, row in df.iterrows():
             nombre = str(row.get('name', 'Desconocido'))
-            try:
-                pn = float(row['price_normal'])
-                pf = float(row['price_foil'])
-            except (KeyError, ValueError):
-                pn, pf = 0.0, 0.0
-                logging.error(f"Valores no numéricos en precios para {nombre}")
+            scryfall_id = str(row.get('scryfall id', ''))
+            purchase_price = float(row.get('purchase price', 0))
             
-            current_stock = int(row.get('current_stock', 0))  # Opcional en CSV
+            if 'price_normal' in row and 'price_foil' in row:
+                try:
+                    pn = float(row['price_normal'])
+                    pf = float(row['price_foil'])
+                except ValueError:
+                    pn, pf = 0.0, 0.0
+            else:
+                if scryfall_id:
+                    prices = await fetch_scryfall_prices(scryfall_id)
+                    pn = prices['price_normal']
+                    pf = prices['price_foil']
+                    logging.info(f"Precios fetched para {nombre}: normal={pn}, foil={pf}")
+                else:
+                    pn = purchase_price
+                    pf = purchase_price  # Asumir mismo para foil, o ajusta lógica
+                    logging.warning(f"No Scryfall ID para {nombre}; usando purchase_price={pn}")
+            
+            current_stock = int(row.get('quantity', 0))  # Usa 'quantity' como stock actual si aplica
             
             status, razon = "APROBADO", "OK"
             stock_limit = stock_high if pn >= 20.0 else stock_default
             
-            # Checks adicionales de spreads y ratios
+            # Checks adicionales de spreads y ratios (sin cambios)
             spread = abs(pf - pn)
             if spread < min_spread:
                 status, razon = "RECHAZADO (SPREAD BAJO)", f"Spread {spread:.1f} < {min_spread}"
