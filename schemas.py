@@ -1,8 +1,8 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 class CanjeRequest(BaseModel):
     email: EmailStr
-    monto: int
+    monto: int = Field(gt=0)  # Validación >0
 
 class ConfigRequest(BaseModel):
     api_token: str

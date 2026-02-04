@@ -17,5 +17,9 @@ class Settings(BaseSettings):
     
     # Constantes
     JUMPSELLER_API_BASE: str = "https://api.jumpseller.com/v1"
+    
+    # Agregadas para completitud (de .env)
+    GAMECOIN_MULTIPLIER: float = float(os.getenv("GAMECOIN_MULTIPLIER", 0.55))
+    MIN_PURCHASE_USD: int = int(os.getenv("MIN_PURCHASE_USD", 3))
 
 settings = Settings()

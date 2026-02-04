@@ -6,7 +6,7 @@ class GameCoinUser(Base):
     
     email = Column(String, primary_key=True, index=True)
     name = Column(String, nullable=True)
-    saldo = Column(Integer, default=0)
+    saldo = Column(Integer, default=0, index=True)  # Index para queries rápidas
     historico_canjeado = Column(Integer, default=0)
 
 class SystemConfig(Base):

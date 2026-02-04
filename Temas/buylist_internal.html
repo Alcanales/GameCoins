@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Buylist Interna - GameQuest Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .rejected { background-color: #ffdddd; }
+        .upload-form { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Buylist Interna: Análisis Completo</h1>
+    <p>Sube CSV para análisis ajustado a stock/límites. Usa creds admin en headers.</p>
+    
+    <div class="upload-form">
+        <input type="file" id="csvFile" accept=".csv">
+        <button onclick="analyzeInternal()">Analizar Buylist</button>
+    </div>
+    
+    <table id="buylistTable">
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Precio Normal</th>
+                <th>Precio Foil</th>
+                <th>Stock Actual</th>
+                <th>Límite Stock</th>
+                <th>Status</th>
+                <th>Razón</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        const GQ_API = "https://gamecoins.onrender.com";
+        const ADMIN_USER = prompt("Admin User:");  // No hardcode
+        const ADMIN_PASS = prompt("Admin Pass:");
+
+        async function analyzeInternal() {
+            const fileInput = document.getElementById('csvFile');
+            if (!fileInput.files.length) {
+                alert("Sube un CSV primero.");
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            try {
+                const r = await fetch(`${GQ_API}/admin/analyze_csv`, {
+                    method: 'POST',
+                    headers: {
+                        'x-admin-user': ADMIN_USER,
+                        'x-admin-pass': ADMIN_PASS
+                    },
+                    body: formData
+                });
+                if (!r.ok) throw new Error("Error en análisis o acceso denegado");
+                const data = await r.json();
+                
+                const tbody = document.querySelector('#buylistTable tbody');
+                tbody.innerHTML = '';  // Limpiar
+                data.forEach(item => {
+                    const row = document.createElement('tr');
+                    if (item.status.startsWith('RECHAZADO')) {
+                        row.classList.add('rejected');
+                    }
+                    row.innerHTML = `
+                        <td>${item.name}</td>
+                        <td>$${item.price_normal.toFixed(2)}</td>
+                        <td>$${item.price_foil.toFixed(2)}</td>
+                        <td>${item.current_stock}</td>
+                        <td>${item.stock_limit}</td>
+                        <td>${item.status}</td>
+                        <td>${item.razon}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (e) {
+                alert("Error: " + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

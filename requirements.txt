@@ -8,6 +8,7 @@ aiohttp
 python-multipart
 pydantic
 pydantic-settings
+pydantic[email] 
 python-magic
 requests
 email-validator

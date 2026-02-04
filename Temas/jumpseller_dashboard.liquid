@@ -14,6 +14,7 @@
     const GQ_EMAIL = "{{ customer.email | downcase | strip }}";
     const GQ_TOKEN = "gq_public_key_2025_secure";
     let saldoGlobal = 0;
+    const MIN_CANJE = 3;  // Sincronizado con MIN_PURCHASE_USD
 
     async function gqSync() {
         if(!GQ_EMAIL) return;
@@ -23,8 +24,8 @@
             const d = await r.json();
             saldoGlobal = d.saldo;
             document.getElementById('gc-dashboard-balance').innerText = "$" + d.saldo.toLocaleString('es-CL');
-            if(d.saldo < 1000) {
-                const b = document.getElementById('gc-btn-redeem');
+            const b = document.getElementById('gc-btn-redeem');
+            if(d.saldo < MIN_CANJE) {
                 b.disabled = true;
                 b.innerText = "Saldo Insuficiente";
                 b.style.opacity = 0.5;
@@ -45,6 +46,7 @@
                 headers: {'Content-Type': 'application/json', 'x-store-token': GQ_TOKEN},
                 body: JSON.stringify({email: GQ_EMAIL, monto: saldoGlobal})
             });
+            if (!r.ok) throw new Error(`Error ${r.status}`);
             const d = await r.json();
             if(d.status === 'ok') {
                 alert(`¡Éxito! Cupón: ${d.cupon_codigo}`);
@@ -53,7 +55,11 @@
                 alert(d.detail || "Error al canjear.");
                 btn.innerText = "Reintentar"; btn.disabled = false;
             }
-        } catch(e) { alert("Error de conexión"); btn.disabled = false; }
+        } catch(e) { 
+            alert("Error de conexión: " + e.message); 
+            btn.innerText = "Reintentar"; 
+            btn.disabled = false; 
+        }
     }
     document.addEventListener("DOMContentLoaded", gqSync);
 </script>
