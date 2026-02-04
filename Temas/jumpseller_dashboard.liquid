@@ -17,26 +17,27 @@
     const MIN_CANJE = 3;  // Sincronizado con MIN_PURCHASE_USD
 
     async function gqSync() {
-        if(!GQ_EMAIL) return;
+        if (!GQ_EMAIL) return;
         try {
             const r = await fetch(`${GQ_API}/api/public/balance/${GQ_EMAIL}`);
-            if(!r.ok) throw new Error("404");
+            if (!r.ok) throw new Error("Error al cargar saldo");
             const d = await r.json();
             saldoGlobal = d.saldo;
             document.getElementById('gc-dashboard-balance').innerText = "$" + d.saldo.toLocaleString('es-CL');
             const b = document.getElementById('gc-btn-redeem');
-            if(d.saldo < MIN_CANJE) {
+            if (d.saldo < MIN_CANJE) {
                 b.disabled = true;
                 b.innerText = "Saldo Insuficiente";
                 b.style.opacity = 0.5;
             }
-        } catch(e) {
+        } catch (e) {
             document.getElementById('gc-dashboard-balance').innerText = "$0";
+            console.error("Error cargando saldo:", e);
         }
     }
 
     async function gqCanjear() {
-        if(!confirm(`¿Canjear $${saldoGlobal} en puntos?`)) return;
+        if (!confirm(`¿Canjear $${saldoGlobal} en puntos?`)) return;
         const btn = document.getElementById('gc-btn-redeem');
         btn.innerText = "Procesando..."; btn.disabled = true;
         
@@ -48,14 +49,14 @@
             });
             if (!r.ok) throw new Error(`Error ${r.status}`);
             const d = await r.json();
-            if(d.status === 'ok') {
-                alert(`¡Éxito! Cupón: ${d.cupon_codigo}`);
+            if (d.status === 'ok') {
+                alert(`¡Éxito! Cupón: ${d.cupon_codigo}. Úsalo en el checkout.`);
                 location.reload();
             } else {
                 alert(d.detail || "Error al canjear.");
                 btn.innerText = "Reintentar"; btn.disabled = false;
             }
-        } catch(e) { 
+        } catch (e) { 
             alert("Error de conexión: " + e.message); 
             btn.innerText = "Reintentar"; 
             btn.disabled = false; 
