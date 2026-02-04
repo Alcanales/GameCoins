@@ -92,7 +92,7 @@ async def jumpseller_webhook(payload: dict, x_hooks_token: str = Header(None), d
 # --- ENDPOINTS ADMINISTRATIVOS ---
 
 @app.post("/admin/analyze_csv")
-async def admin_analyze_csv(
+async def admin_analyze_csv(  # ← async def aquí
     file: UploadFile = File(...), 
     x_admin_user: str = Header(None), 
     x_admin_pass: str = Header(None)
@@ -102,8 +102,9 @@ async def admin_analyze_csv(
         logging.error(f"Intento de acceso admin denegado: user={x_admin_user}")
         raise HTTPException(status_code=401, detail="Acceso denegado")
     
-    content = await file.read()
-    res = services.analizar_csv_estacas(content)
+    content = await file.read()  # ← await porque read() es async en UploadFile
+    
+    res = await services.analizar_csv_estacas(content)
     
     if isinstance(res, dict) and "error" in res:
         logging.error(f"Error en análisis admin: {res['error']}")
