@@ -217,3 +217,32 @@ def admin_config(
     db.commit()
     logging.info("Bóveda actualizada manualmente vía Admin API")
     return {"status": "ok", "mensaje": "Bóveda actualizada"}
+
+@app.get("/admin/users")
+def admin_get_users(
+    db: Session = Depends(get_db), 
+    x_admin_user: str = Header(None), 
+    x_admin_pass: str = Header(None)
+):
+    """
+    Lista todos los usuarios con su nombre, email y saldo.
+    Protegido con credenciales de Admin.
+    """
+    # 1. Validación de seguridad
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        logging.error(f"Acceso denegado a lista de usuarios: {x_admin_user}")
+        raise HTTPException(status_code=401, detail="Acceso denegado")
+    
+    # 2. Consultar todos los usuarios
+    users = db.query(GameCoinUser).all()
+    
+    # 3. Retornar datos completos (Incluyendo el nombre)
+    return [
+        {
+            "name": u.name if u.name else "Sin Nombre", # Manejo de casos vacíos
+            "email": u.email,
+            "saldo": u.saldo,
+            "historico_canjeado": u.historico_canjeado
+        }
+        for u in users
+    ]
