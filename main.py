@@ -246,3 +246,48 @@ def admin_get_users(
         }
         for u in users
     ]
+class BalanceAdjustment(BaseModel):
+    email: str
+    amount: int
+    operation: str  # "add" o "subtract"
+
+@app.post("/admin/adjust_balance")
+def admin_adjust_balance(
+    req: BalanceAdjustment, 
+    db: Session = Depends(get_db),
+    x_admin_user: str = Header(None), 
+    x_admin_pass: str = Header(None)
+):
+    """Permite al admin sumar o restar puntos manualmente."""
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="Acceso denegado")
+    
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email.lower().strip()).first()
+    if not user:
+        # Si el usuario no existe, lo creamos al vuelo si es una suma
+        if req.operation == "add":
+            user = GameCoinUser(email=req.email.lower().strip())
+            db.add(user)
+        else:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if req.operation == "add":
+        user.saldo += req.amount
+    elif req.operation == "subtract":
+        user.saldo = max(0, user.saldo - req.amount) # Evitar saldos negativos
+        
+    db.commit()
+    return {"status": "ok", "new_balance": user.saldo}
+
+@app.post("/admin/sync_customers")
+async def admin_sync_customers(
+    db: Session = Depends(get_db), 
+    x_admin_user: str = Header(None), 
+    x_admin_pass: str = Header(None)
+):
+    """Botón Sync: Trae clientes de Jumpseller a la DB."""
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="Acceso denegado")
+    
+    # Llamamos al servicio (asegúrate de que services tenga la función nueva)
+    return await services.sincronizar_clientes_jumpseller(db)

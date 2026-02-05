@@ -200,3 +200,69 @@ async def analizar_csv_estacas(file_content: bytes):
     except Exception as e:
         logging.error(f"Error procesando CSV: {str(e)}")
         return {"error": f"Excepción interna: {str(e)}"}
+    
+async def sincronizar_clientes_jumpseller(db: Session):
+    """
+    Descarga todos los clientes de Jumpseller y crea/actualiza la DB local.
+    """
+    # 1. Obtener credenciales de la Bóveda
+    token = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_API_TOKEN").first()
+    store = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_STORE").first() # O JUMPSELLER_LOGIN si usas email
+    
+    if not token or not store:
+        return {"status": "error", "detail": "Credenciales no configuradas"}
+
+    # 2. Iterar páginas de Jumpseller (para traer TODOS, no solo los primeros 50)
+    base_url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    page = 1
+    total_synced = 0
+    nuevos = 0
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            params = {
+                "login": store.value, 
+                "authtoken": token.value,
+                "page": page,
+                "limit": 50 # Máximo permitido por Jumpseller
+            }
+            
+            try:
+                async with session.get(base_url, params=params) as r:
+                    if r.status != 200:
+                        logging.error(f"Error Jumpseller Sync: {r.status}")
+                        break
+                        
+                    data = await r.json()
+                    if not data: # Si la lista está vacía, terminamos
+                        break
+                    
+                    # 3. Procesar clientes
+                    for customer in data:
+                        email = customer.get('email', '').strip().lower()
+                        fullname = f"{customer.get('name', '')} {customer.get('surname', '')}".strip()
+                        
+                        if email:
+                            # Buscar si ya existe
+                            user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+                            if not user:
+                                # Crear nuevo
+                                user = GameCoinUser(email=email, name=fullname, saldo=0)
+                                db.add(user)
+                                nuevos += 1
+                            else:
+                                # Actualizar nombre si cambió
+                                if not user.name and fullname:
+                                    user.name = fullname
+                            
+                            total_synced += 1
+                    
+                    # Guardar lote
+                    db.commit()
+                    page += 1
+                    
+            except Exception as e:
+                logging.error(f"Error de red en sync: {e}")
+                break
+
+    return {"status": "ok", "total": total_synced, "nuevos": nuevos}    
