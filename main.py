@@ -238,14 +238,14 @@ def admin_get_users(
     users = db.query(GameCoinUser).all()
     return [
         {
-            "name": u.name if u.name else "Sin Nombre", 
+            # CAMBIO: Juntamos nombre y apellido para mostrarlo en la web
+            "name": f"{u.name or ''} {u.surname or ''}".strip() or "Sin Nombre",
             "email": u.email, 
             "saldo": u.saldo, 
             "historico_canjeado": u.historico_canjeado
         } 
         for u in users
     ]
-
 # --- SYNC JUMPSELLER ---
 @app.post("/admin/sync_customers")
 async def admin_sync_customers(
