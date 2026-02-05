@@ -226,6 +226,7 @@ def admin_config(
     return {"status": "ok"}
 
 @app.get("/admin/users")
+@app.get("/admin/users")
 def admin_get_users(
     db: Session = Depends(get_db), 
     x_admin_user: str = Header(None), 
@@ -234,18 +235,20 @@ def admin_get_users(
     if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
         raise HTTPException(status_code=401, detail="Acceso denegado")
     
-    users = db.query(GameCoinUser).all()
+    users = db.query(GameCoinUser).order_by(
+        GameCoinUser.saldo.desc(), 
+        GameCoinUser.name.asc()
+    ).all()
+    
     return [
         {
-            # CAMBIO: Juntamos nombre y apellido para mostrarlo en la web
-            "name": f"{u.name or ''} {u.surname or ''}".strip() or "Sin Nombre",
+            "name": u.name if u.name else "Sin Nombre", 
             "email": u.email, 
             "saldo": u.saldo, 
             "historico_canjeado": u.historico_canjeado
         } 
         for u in users
     ]
-# --- SYNC JUMPSELLER ---
 @app.post("/admin/sync_customers")
 async def admin_sync_customers(
     db: Session = Depends(get_db), 
