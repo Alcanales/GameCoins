@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-# --- CORRECCIÓN CRÍTICA: Importar BaseModel ---
 from pydantic import BaseModel 
 
 # Imports locales
