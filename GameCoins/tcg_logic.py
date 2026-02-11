@@ -5,7 +5,7 @@ from io import BytesIO
 from .config import settings
 
 async def fetch_scryfall_prices(session, scryfall_id):
-    """Obtiene precios de referencia de Scryfall."""
+    """Consulta precio normal y foil a Scryfall."""
     if not scryfall_id or pd.isna(scryfall_id):
         return 0.0, 0.0
     url = f"https://api.scryfall.com/cards/{scryfall_id}"
@@ -22,7 +22,7 @@ async def fetch_scryfall_prices(session, scryfall_id):
 async def analizar_csv_simple(file_content: bytes):
     try:
         df = pd.read_csv(BytesIO(file_content))
-        # Normalizar columnas (Purchase price -> purchase_price)
+        # Normalizar columnas
         df.columns = [str(c).lower().strip().replace(' ', '_') for c in df.columns]
         
         # Detectar columnas clave
@@ -31,6 +31,7 @@ async def analizar_csv_simple(file_content: bytes):
         
         res = []
         
+        # 1. Obtener Precios de Referencia (Scryfall)
         async with aiohttp.ClientSession() as session:
             tasks = []
             if has_scryfall:
@@ -38,40 +39,40 @@ async def analizar_csv_simple(file_content: bytes):
                     tasks.append(fetch_scryfall_prices(session, row.get('scryfall_id')))
                 scryfall_data = await asyncio.gather(*tasks)
             else:
-                # Si no hay ID de Scryfall, asumimos ceros
                 scryfall_data = [(0.0, 0.0)] * len(df)
 
+        # 2. Análisis Fila por Fila
         for i, (_, row) in enumerate(df.iterrows()):
-            # 1. Precios de Referencia (Scryfall)
+            # Referencias de Scryfall (Base de comparación)
             sf_pn, sf_pf = scryfall_data[i]
             
-            # 2. Precio del CSV (Prioridad del Usuario)
+            # Precio del Usuario (CSV)
             csv_price = float(row.get('purchase_price', 0)) if has_csv_price else 0.0
             
-            # 3. Determinar acabado de la carta física
+            # ¿Es Foil la carta física?
             is_foil = str(row.get('foil', '')).lower() == 'foil'
             
-            # 4. ASIGNACIÓN DE PRECIOS (Lógica de Prioridad)
+            # --- LÓGICA DE PRIORIDAD DE PRECIOS ---
+            # Si el usuario puso precio en el CSV, ese MANDA. Si no, Scryfall.
             if is_foil:
-                # Si es foil, el precio del CSV es el precio Foil
                 pf = csv_price if csv_price > 0 else sf_pf
-                pn = sf_pn # Siempre usamos Scryfall para la normal (referencia)
+                pn = sf_pn # La normal siempre es referencia Scryfall
             else:
-                # Si es normal, el precio del CSV es el precio Normal
                 pn = csv_price if csv_price > 0 else sf_pn
                 pf = sf_pf
             
-            # 5. Análisis de Riesgo (Estaca)
+            # --- ANÁLISIS DE ESTACAS (Riesgo) ---
             status = "APROBADO"
             
             if is_foil:
-                # Comparamos PF (que puede venir del CSV) vs PN (de Scryfall)
+                # Comparamos el Precio Foil Real (PF) vs Precio Normal Referencia (PN)
+                # Guía Maestra: Ratio > 2.5 y Diferencia > $10 USD
                 if pf >= 20.0 and pn < 20.0:
                     ratio = pf / pn if pn > 0 else 999
                     if ratio > settings.STAKE_RATIO_THRESHOLD and (pf - pn) > settings.STAKE_DIFF_THRESHOLD:
                         status = "RECHAZADO (ESTACA)"
                 
-                # Excepción High End: Si la base (Scryfall) vale más de $20, se aprueba
+                # Excepción High End: Si la normal vale > $20, se aprueba siempre
                 if pn >= 20.0:
                     status = "HIGH END"
 
@@ -83,13 +84,11 @@ async def analizar_csv_simple(file_content: bytes):
                 "gc_normal": round(pn * settings.GAMECOIN_MULTIPLIER * settings.USD_TO_CLP),
                 "cash_foil": round(pf * settings.CASH_MULTIPLIER * settings.USD_TO_CLP),
                 "gc_foil": round(pf * settings.GAMECOIN_MULTIPLIER * settings.USD_TO_CLP),
-                "status": status,
-                # Metadata para debug o comparativa visual si se requiere
-                "source_price": "CSV" if csv_price > 0 else "Scryfall",
-                "scryfall_ref": sf_pf if is_foil else sf_pn
+                "status": status
             })
             
         df_res = pd.DataFrame(res)
+        # Ordenar: High End primero, luego Aprobados, al final Rechazados
         df_res['rank'] = df_res['status'].apply(lambda s: 0 if "HIGH" in s else (1 if "APRO" in s else 2))
         return df_res.sort_values('rank').drop(columns=['rank'])
     except Exception as e:

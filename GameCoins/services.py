@@ -36,6 +36,7 @@ async def fetch_scryfall_prices(session, scryfall_id):
 
 async def analizar_csv_con_stock_real(content, db):
     try:
+        # Credenciales desde la Bóveda (DB)
         t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
         s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first()
         creds = (s.value, t.value) if t and s else None
@@ -80,7 +81,7 @@ async def analizar_csv_con_stock_real(content, db):
             if stock >= limit: 
                 status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
             elif is_foil:
-                # Lógica Estaca Híbrida (Precio CSV vs Scryfall Normal)
+                # Estaca Check
                 if pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn>0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
                     status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
                 elif pn >= 20.0:
@@ -99,7 +100,6 @@ async def analizar_csv_con_stock_real(content, db):
         return df_res.sort_values('rank').drop(columns=['rank'])
     except Exception as e: return {"error": str(e)}
 
-# (La función enviar_correo_cotizacion sigue igual)
 def enviar_correo_cotizacion(data):
     try:
         msg = MIMEMultipart()
