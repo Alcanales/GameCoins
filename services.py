@@ -1,256 +1,145 @@
-import logging
 import asyncio
-import os
 import aiohttp
+import smtplib
 import pandas as pd
-from io import BytesIO
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from io import BytesIO, StringIO
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from models import SystemConfig, GameCoinUser
 from config import settings
 
-logging.basicConfig(level=logging.ERROR)
+async def fetch_scryfall_prices(session, scryfall_id):
+    if not scryfall_id or str(scryfall_id) == 'nan': return {'price_normal':0.0, 'price_foil':0.0}
+    try:
+        async with session.get(f"https://api.scryfall.com/cards/{scryfall_id}") as r:
+            if r.status == 200:
+                d = await r.json()
+                return {'price_normal': float(d.get('prices',{}).get('usd') or 0), 'price_foil': float(d.get('prices',{}).get('usd_foil') or 0)}
+    except: pass
+    return {'price_normal':0.0, 'price_foil':0.0}
 
-# --- JUMPSELLER SERVICES ---
+async def get_jumpseller_stock(session, name, login, token):
+    if not name: return 0
+    try:
+        async with session.get(f"{settings.JUMPSELLER_API_BASE}/products/search.json", params={'login':login, 'authtoken':token, 'query':name, 'fields':'stock'}) as r:
+            if r.status == 200:
+                data = await r.json()
+                return sum(p.get('stock', 0) for p in data)
+    except: pass
+    return 0
 
-async def crear_cupon_jumpseller(codigo: str, monto: int, email: str, db: Session):
-    token = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_API_TOKEN").first()
-    store = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_STORE").first()
-    
-    if not token or not store:
-        logging.error("ERROR CRÍTICO: Credenciales Jumpseller no configuradas en Bóveda.")
-        return None
-    
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    
-    payload = {
-        "promotion": {
-            "name": f"Canje GQ {codigo}",
-            "code": codigo,
-            "discount_amount": monto,
-            "status": "active",
-            "usage_limit": 1,
-            "customer_emails": [email],
-            "begins_at": datetime.now().strftime("%Y-%m-%d")
-        }
-    }
-    
-    async with aiohttp.ClientSession() as s:
-        try:
-            headers = {"Content-Type": "application/json"}
-            params = {"login": store.value, "authtoken": token.value}
+async def analizar_csv_con_stock_real(content, db):
+    try:
+        t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
+        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first()
+        creds = (s.value, t.value) if t and s else None
+        
+        df = pd.read_csv(BytesIO(content))
+        df.columns = [str(c).lower().strip() for c in df.columns]
+        
+        async with aiohttp.ClientSession() as sess:
+            tasks = []
+            for _, row in df.iterrows():
+                tasks.append(fetch_scryfall_prices(sess, row.get('scryfall id')))
+                tasks.append(get_jumpseller_stock(sess, row.get('name'), *creds) if creds else asyncio.sleep(0))
+            results = await asyncio.gather(*tasks)
+
+        processed = []
+        for i, (_, row) in enumerate(df.iterrows()):
+            p_data, s_data = results[i*2], results[i*2+1]
+            pn, pf = p_data.get('price_normal',0), p_data.get('price_foil',0)
+            stock = int(s_data) if creds else 0
             
-            async with s.post(url, params=params, json=payload, headers=headers, timeout=10) as r:
-                if r.status == 201:
-                    return await r.json()
-                else:
-                    error_text = await r.text()
-                    logging.error(f"Error Jumpseller ({r.status}): {error_text}")
-                    return None
-        except Exception as e:
-            logging.error(f"Excepción de red Jumpseller: {str(e)}")
-            return None
+            status, razon = "APROBADO", "OK"
+            limit = settings.STOCK_LIMIT_HIGH_DEMAND if pn >= 20.0 else settings.STOCK_LIMIT_DEFAULT
+            
+            if stock >= limit: status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
+            elif pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn > 0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
+                status, razon = "RECHAZADO (ESTACA)", "Posible Estaca"
+            elif pn >= 20.0: status, razon = "HIGH END", "Alta Demanda"
 
-async def procesar_canje_atomico(email: str, monto: int, db: Session):
-    if settings.MAINTENANCE_MODE_CANJE:
-        return {"status": "error", "detail": "Modo mantenimiento activado"}
-    
-    # 1. Verificación de Saldo
+            processed.append({
+                "name": row.get('name','Unknown'),
+                "price_normal": pn, "price_foil": pf,
+                "cash_normal": round(pn * settings.CASH_MULTIPLIER),
+                "gc_normal": round(pn * settings.GAMECOIN_MULTIPLIER),
+                "cash_foil": round(pf * settings.CASH_MULTIPLIER),
+                "gc_foil": round(pf * settings.GAMECOIN_MULTIPLIER),
+                "current_stock": stock, "stock_limit": limit,
+                "status": status, "razon": razon
+            })
+            
+        df_res = pd.DataFrame(processed)
+        df_res['rank'] = df_res['status'].apply(lambda s: 0 if "HIGH" in s else (1 if "APRO" in s else 2))
+        return df_res.sort_values('rank').drop(columns=['rank'])
+    except Exception as e: return {"error": str(e)}
+
+async def procesar_canje_atomico(email, monto, db):
+    if settings.MAINTENANCE_MODE_CANJE: return {"status":"error", "detail":"Mantenimiento"}
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    if not user or user.saldo < monto:
-        return {"status": "error", "detail": "Saldo insuficiente"}
+    if not user or user.saldo < monto: return {"status":"error", "detail":"Saldo insuficiente"}
     
     try:
         codigo = f"GQ-{email.split('@')[0]}-{monto}"
-    except IndexError:
-        return {"status": "error", "detail": "Email inválido"}
-
-    # 2. Bloqueo Optimista
-    try:
         user.saldo -= monto
         user.historico_canjeado += monto
         db.flush()
-
-        # 3. Llamada API Externa
-        cupon = await crear_cupon_jumpseller(codigo, monto, email, db)
         
-        if not cupon:
-            db.rollback()
-            return {"status": "error", "detail": "Fallo en Jumpseller, puntos devueltos"}
+        t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
+        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first()
         
-        # 4. Confirmación final
+        url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+        payload = {"promotion":{"name":f"Canje {code}","code":code,"discount_amount":monto,"status":"active","usage_limit":1,"customer_emails":[email],"begins_at":datetime.now().strftime("%Y-%m-%d")}}
+        
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(url, params={'login':s.value,'authtoken':t.value}, json=payload) as r:
+                if r.status != 201: raise Exception(await r.text())
+        
         db.commit()
-        return {"status": "ok", "cupon_codigo": codigo}
-
-    except Exception as e:
+        return {"status":"ok", "cupon_codigo":code}
+    except:
         db.rollback()
-        logging.error(f"Error transacción canje: {str(e)}")
-        return {"status": "error", "detail": "Error interno del servidor"}
+        return {"status":"error", "detail":"Error generando cupón"}
 
-# --- MTG / SCRYFALL SERVICES ---
-
-async def fetch_scryfall_prices(session, scryfall_id: str):
-    if not scryfall_id or str(scryfall_id).lower() == 'nan':
-         return {'price_normal': 0.0, 'price_foil': 0.0}
-
-    url = f"https://api.scryfall.com/cards/{scryfall_id}"
+def enviar_correo_cotizacion(data):
     try:
-        async with session.get(url) as response:
-            if response.status == 200:
-                data = await response.json()
-                prices = data.get('prices', {})
-                return {
-                    'price_normal': float(prices.get('usd', 0) or 0.0),
-                    'price_foil': float(prices.get('usd_foil', 0) or 0.0)
-                }
-            return {'price_normal': 0.0, 'price_foil': 0.0}
-    except Exception:
-        return {'price_normal': 0.0, 'price_foil': 0.0}
-
-async def analizar_csv_estacas(file_content: bytes):
-    try:
-        df = pd.read_csv(BytesIO(file_content))
-        df.columns = [str(c).lower().strip() for c in df.columns]
-
-        # Validaciones
-        required = ['name', 'scryfall id']
-        if not all(col in df.columns for col in required):
-            missing = [c for c in required if c not in df.columns]
-            return {"error": f"Faltan columnas: {', '.join(missing)}"}
-
-        # Fetch Asíncrono de Scryfall
-        rows_to_fetch = []
-        for idx, row in df.iterrows():
-            if 'price_normal' not in row or 'price_foil' not in row:
-                rows_to_fetch.append((idx, row.get('scryfall id')))
+        msg = MIMEMultipart()
+        msg['From'] = settings.SMTP_USER
+        msg['To'] = f"{settings.TARGET_EMAIL}, {data['email']}"
+        msg['Subject'] = f"Nueva Cotización Buylist - {data['rut']}"
         
-        if rows_to_fetch:
-            async with aiohttp.ClientSession() as session:
-                tasks = [fetch_scryfall_prices(session, rid) for _, rid in rows_to_fetch]
-                results = await asyncio.gather(*tasks)
-            
-            for (idx, _), prices in zip(rows_to_fetch, results):
-                df.at[idx, 'price_normal'] = prices['price_normal']
-                df.at[idx, 'price_foil'] = prices['price_foil']
-        else:
-            df['price_normal'] = df.get('price_normal', 0.0).fillna(0.0)
-            df['price_foil'] = df.get('price_foil', 0.0).fillna(0.0)
-
-        # Lógica de Negocio
-        resultados = []
-        for _, row in df.iterrows():
-            pn = float(row['price_normal'])
-            pf = float(row['price_foil'])
-            current_stock = int(row.get('quantity', 0))
-            nombre = row.get('name', 'Unknown')
-
-            # --- LÓGICA CORREGIDA (Akroma's Will Fix) ---
-            status, razon = "APROBADO", "Compra Estándar"
-            
-            # 1. Reglas de Stock
-            stock_limit = int(os.getenv('STOCK_LIMIT_HIGH_DEMAND', 20)) if pn >= 20.0 else int(os.getenv('STOCK_LIMIT_DEFAULT', 8))
-            
-            if current_stock >= stock_limit:
-                 status, razon = "RECHAZADO (STOCK FULL)", f"Stock {current_stock} >= {stock_limit}"
-            
-            # 2. Reglas de Precio / Estaca
-            elif pf >= 20.0 and pn < 20.0:
-                ratio = pf / pn if pn > 0 else 999
-                if ratio > 2.5 and (pf - pn) > 10.0:
-                    status, razon = "RECHAZADO (ESTACA)", f"Ratio {ratio:.1f}x sospechoso"
-            
-            elif pn >= 20.0:
-                status, razon = "HIGH END", "Alta Demanda"
-
-            # --- CÁLCULO DE OFERTAS ---
-            cash_normal = round(pn * settings.CASH_MULTIPLIER)
-            gc_normal = round(pn * settings.GAMECOIN_MULTIPLIER)
-            cash_foil = round(pf * settings.CASH_MULTIPLIER)
-            gc_foil = round(pf * settings.GAMECOIN_MULTIPLIER)
-
-            resultados.append({
-                "name": nombre,
-                "price_normal": pn,
-                "price_foil": pf,
-                "current_stock": current_stock,
-                "stock_limit": stock_limit,
-                "status": status,
-                "razon": razon,
-                "cash_normal": cash_normal,
-                "gc_normal": gc_normal,
-                "cash_foil": cash_foil,
-                "gc_foil": gc_foil
-            })
-
-        df_res = pd.DataFrame(resultados)
-
-        # --- ORDENAMIENTO (Fix de Orden) ---
-        def get_rank(s):
-            if "HIGH END" in s: return 0
-            if "APROBADO" in s: return 1
-            if "ESTACA" in s: return 3 # Estacas al final o separadas
-            if "RECHAZADO" in s: return 4
-            return 2
-            
-        df_res['rank'] = df_res['status'].apply(get_rank)
-        df_res = df_res.sort_values(by='rank').drop(columns=['rank'])
-
-        return df_res
-
+        body = f"""
+        Nueva solicitud de venta:
+        Nombre: {data['nombre']} {data['apellido']}
+        RUT: {data['rut']}
+        Teléfono: {data['telefono']}
+        Pago Preferido: {data['pago']}
+        
+        Se adjunta el detalle de las cartas seleccionadas.
+        """
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Generar CSV
+        df = pd.DataFrame(data['cartas'])
+        csv_buffer = StringIO()
+        df.to_csv(csv_buffer, index=False)
+        
+        part = MIMEBase('application', "octet-stream")
+        part.set_payload(csv_buffer.getvalue().encode("utf-8"))
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="cotizacion_{data["rut"]}.csv"')
+        msg.attach(part)
+        
+        server = smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT)
+        server.starttls()
+        server.login(settings.SMTP_USER, settings.SMTP_PASS)
+        server.send_message(msg)
+        server.quit()
+        return True
     except Exception as e:
-        logging.error(f"Error procesando CSV: {str(e)}")
-        return {"error": f"Excepción interna: {str(e)}"}
-
-async def sincronizar_clientes_jumpseller(db: Session):
-    token = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_API_TOKEN").first()
-    store = db.query(SystemConfig).filter(SystemConfig.key == "JUMPSELLER_STORE").first()
-    
-    if not token or not store:
-        return {"status": "error", "detail": "Credenciales no configuradas"}
-
-    base_url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
-    page = 1
-    total_synced = 0
-    nuevos = 0
-    
-    async with aiohttp.ClientSession() as session:
-        while True:
-            params = {
-                "login": store.value, 
-                "authtoken": token.value,
-                "page": page,
-                "limit": 50
-            }
-            try:
-                async with session.get(base_url, params=params) as r:
-                    if r.status != 200:
-                        logging.error(f"Error Jumpseller Sync: {r.status}")
-                        break     
-                    data = await r.json()
-                    if not data: break
-                    
-                    for customer in data:
-                        email = customer.get('email', '').strip().lower()
-                        fname = customer.get('name', '').strip()
-                        lname = customer.get('surname', '').strip()
-                        
-                        if email:
-                            user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-                            if not user:
-                                user = GameCoinUser(email=email, name=fname, surname=lname, saldo=0)
-                                db.add(user)
-                                nuevos += 1
-                            else:
-                                user.name = fname
-                                user.surname = lname
-                            
-                            total_synced += 1
-                    
-                    db.commit()
-                    page += 1
-            except Exception as e:
-                logging.error(f"Error Sync: {e}")
-                break
-
-    return {"status": "ok", "total": total_synced, "nuevos": nuevos}
+        print(f"Error mail: {e}")
+        return False
