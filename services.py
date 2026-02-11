@@ -7,25 +7,15 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from io import BytesIO, StringIO
-from datetime import datetime
 from sqlalchemy.orm import Session
 from models import SystemConfig, GameCoinUser
 from config import settings
 
-async def fetch_scryfall_prices(session, scryfall_id):
-    if not scryfall_id or str(scryfall_id) == 'nan': return {'price_normal':0.0, 'price_foil':0.0}
-    try:
-        async with session.get(f"https://api.scryfall.com/cards/{scryfall_id}") as r:
-            if r.status == 200:
-                d = await r.json()
-                return {'price_normal': float(d.get('prices',{}).get('usd') or 0), 'price_foil': float(d.get('prices',{}).get('usd_foil') or 0)}
-    except: pass
-    return {'price_normal':0.0, 'price_foil':0.0}
-
 async def get_jumpseller_stock(session, name, login, token):
     if not name: return 0
     try:
-        async with session.get(f"{settings.JUMPSELLER_API_BASE}/products/search.json", params={'login':login, 'authtoken':token, 'query':name, 'fields':'stock'}) as r:
+        url = f"{settings.JUMPSELLER_API_BASE}/products/search.json"
+        async with session.get(url, params={'login':login, 'authtoken':token, 'query':name, 'fields':'stock'}) as r:
             if r.status == 200:
                 data = await r.json()
                 return sum(p.get('stock', 0) for p in data)
@@ -44,22 +34,20 @@ async def analizar_csv_con_stock_real(content, db):
         async with aiohttp.ClientSession() as sess:
             tasks = []
             for _, row in df.iterrows():
-                tasks.append(fetch_scryfall_prices(sess, row.get('scryfall id')))
                 tasks.append(get_jumpseller_stock(sess, row.get('name'), *creds) if creds else asyncio.sleep(0))
             results = await asyncio.gather(*tasks)
 
         processed = []
         for i, (_, row) in enumerate(df.iterrows()):
-            p_data, s_data = results[i*2], results[i*2+1]
-            pn, pf = p_data.get('price_normal',0), p_data.get('price_foil',0)
-            stock = int(s_data) if creds else 0
+            stock = int(results[i]) if creds else 0
+            pn, pf = float(row.get('price_normal', 0)), float(row.get('price_foil', 0))
             
             status, razon = "APROBADO", "OK"
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if pn >= 20.0 else settings.STOCK_LIMIT_DEFAULT
             
             if stock >= limit: status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
             elif pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn > 0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
-                status, razon = "RECHAZADO (ESTACA)", "Posible Estaca"
+                status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
             elif pn >= 20.0: status, razon = "HIGH END", "Alta Demanda"
 
             processed.append({
@@ -78,68 +66,29 @@ async def analizar_csv_con_stock_real(content, db):
         return df_res.sort_values('rank').drop(columns=['rank'])
     except Exception as e: return {"error": str(e)}
 
-async def procesar_canje_atomico(email, monto, db):
-    if settings.MAINTENANCE_MODE_CANJE: return {"status":"error", "detail":"Mantenimiento"}
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    if not user or user.saldo < monto: return {"status":"error", "detail":"Saldo insuficiente"}
-    
-    try:
-        codigo = f"GQ-{email.split('@')[0]}-{monto}"
-        user.saldo -= monto
-        user.historico_canjeado += monto
-        db.flush()
-        
-        t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
-        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first()
-        
-        url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-        payload = {"promotion":{"name":f"Canje {code}","code":code,"discount_amount":monto,"status":"active","usage_limit":1,"customer_emails":[email],"begins_at":datetime.now().strftime("%Y-%m-%d")}}
-        
-        async with aiohttp.ClientSession() as sess:
-            async with sess.post(url, params={'login':s.value,'authtoken':t.value}, json=payload) as r:
-                if r.status != 201: raise Exception(await r.text())
-        
-        db.commit()
-        return {"status":"ok", "cupon_codigo":code}
-    except:
-        db.rollback()
-        return {"status":"error", "detail":"Error generando cupón"}
-
 def enviar_correo_cotizacion(data):
     try:
         msg = MIMEMultipart()
         msg['From'] = settings.SMTP_USER
         msg['To'] = f"{settings.TARGET_EMAIL}, {data['email']}"
-        msg['Subject'] = f"Nueva Cotización Buylist - {data['rut']}"
+        msg['Subject'] = f"Nueva Cotización GameQuest - {data['rut']}"
         
-        body = f"""
-        Nueva solicitud de venta:
-        Nombre: {data['nombre']} {data['apellido']}
-        RUT: {data['rut']}
-        Teléfono: {data['telefono']}
-        Pago Preferido: {data['pago']}
-        
-        Se adjunta el detalle de las cartas seleccionadas.
-        """
+        body = f"Solicitud de: {data['nombre']} {data['apellido']}\nRUT: {data['rut']}\nTel: {data['telefono']}\nPago: {data['pago']}"
         msg.attach(MIMEText(body, 'plain'))
         
-        # Generar CSV
         df = pd.DataFrame(data['cartas'])
-        csv_buffer = StringIO()
-        df.to_csv(csv_buffer, index=False)
+        csv_out = StringIO()
+        df.to_csv(csv_out, index=False)
         
         part = MIMEBase('application', "octet-stream")
-        part.set_payload(csv_buffer.getvalue().encode("utf-8"))
+        part.set_payload(csv_out.getvalue().encode("utf-8"))
         encoders.encode_base64(part)
         part.add_header('Content-Disposition', f'attachment; filename="cotizacion_{data["rut"]}.csv"')
         msg.attach(part)
         
-        server = smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT)
-        server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASS)
-        server.send_message(msg)
-        server.quit()
+        with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as srv:
+            srv.starttls()
+            srv.login(settings.SMTP_USER, settings.SMTP_PASS)
+            srv.send_message(msg)
         return True
-    except Exception as e:
-        print(f"Error mail: {e}")
-        return False
+    except: return False
