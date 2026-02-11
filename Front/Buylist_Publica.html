@@ -27,6 +27,7 @@
             background: #111; color: white; border: none; padding: 12px 30px; 
             border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 16px;
         }
+        .btn-main:disabled { background: #ccc; cursor: not-allowed; }
         
         /* Table */
         .results-area { display: none; margin-top: 40px; }
@@ -46,6 +47,37 @@
         .input-group label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; color: #374151; }
         .gq-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
         
+        /* Terms Box - Compacto sin Scroll */
+        .terms-box {
+            margin-top: 30px;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+        .terms-content {
+            font-size: 12px;
+            color: #555;
+            line-height: 1.4;
+            margin-bottom: 15px;
+        }
+        .terms-content h4 { margin: 0 0 8px 0; color: #111; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+        .terms-content p { margin: 0 0 8px 0; }
+        .terms-content ul { padding-left: 15px; margin: 0; }
+        .terms-content li { margin-bottom: 4px; }
+        
+        .terms-check { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            font-size: 13px; 
+            font-weight: 600; 
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+            color: #111;
+        }
+        .terms-check input { cursor: pointer; width: 16px; height: 16px; }
+
         .summary-bar {
             background: #111; color: white; padding: 20px; border-radius: 12px;
             display: flex; justify-content: space-between; align-items: center; margin-top: 30px;
@@ -96,10 +128,28 @@
                 </div>
             </div>
 
+            <div class="terms-box">
+                <div class="terms-content">
+                    <h4>Términos y Condiciones del Servicio</h4>
+                    <ul>
+                        <li><strong>Vigencia:</strong> El archivo CSV debe ser del mismo día. Revisamos manualmente los precios.</li>
+                        <li><strong>Cotización:</strong> Es una guía visual, no obliga a la compra total de la lista.</li>
+                        <li><strong>Presupuesto:</strong> Operamos con cupo mensual; al llenarse, se pausa la compra hasta el próximo mes.</li>
+                        <li><strong>Orden:</strong> Las ofertas se procesan estrictamente por orden de llegada.</li>
+                        <li><strong>Precios:</strong> Los multiplicadores pueden cambiar sin previo aviso por eventos o políticas internas.</li>
+                        <li><strong>Pago:</strong> Especifica tu preferencia (dinero/crédito) para una oferta personalizada.</li>
+                    </ul>
+                </div>
+                <div class="terms-check">
+                    <input type="checkbox" id="termsCheck" onchange="toggleSubmit()">
+                    <label for="termsCheck">He leído y acepto los términos y condiciones del servicio</label>
+                </div>
+            </div>
+
             <div class="summary-bar">
                 <div class="total-item"><small>Total Efectivo</small><div id="tCash">$0</div></div>
                 <div class="total-item"><small>Total Crédito</small><div id="tQP">$0</div></div>
-                <button class="btn-main" style="background: white; color: black;" onclick="submitBuylist()">ENVIAR SOLICITUD</button>
+                <button class="btn-main" id="btnSubmit" style="background: white; color: black;" onclick="submitBuylist()" disabled>ENVIAR SOLICITUD</button>
             </div>
         </div>
     </div>
@@ -166,7 +216,24 @@
             rutBox.value = val.slice(0, -1) + "-" + val.slice(-1).toUpperCase();
         }
 
+        function toggleSubmit() {
+            const chk = document.getElementById('termsCheck');
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = !chk.checked;
+            if(chk.checked) {
+                btn.style.background = "white";
+                btn.style.color = "black";
+                btn.style.cursor = "pointer";
+            } else {
+                btn.style.background = "#555";
+                btn.style.color = "#888";
+                btn.style.cursor = "not-allowed";
+            }
+        }
+
         async function submitBuylist() {
+            if(!document.getElementById('termsCheck').checked) return alert("Debes aceptar los términos y condiciones");
+
             const selected = [];
             document.querySelectorAll('.sel:checked').forEach(el => selected.push(rawData[el.dataset.idx]));
             

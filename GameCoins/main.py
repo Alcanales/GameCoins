@@ -32,6 +32,10 @@ inicializar_boveda()
 
 app = FastAPI(title="GameQuest API Final")
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
