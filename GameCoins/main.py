@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 
 from database import engine, Base, get_db, SessionLocal
 from models import GameCoinUser, SystemConfig
-from config import settings
+from GameCoins.config import settings
 import services
 import tcg_logic
 
@@ -76,3 +76,51 @@ async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = He
 @app.post("/api/public/analyze_buylist")
 async def public_analyze_buylist(file: UploadFile = File(...)):
     return tcg_logic.analizar_csv_simple(await file.read()).to_dict(orient="records")
+# --- NUEVO ENDPOINT PARA FIDELIZACIÓN (Jumpseller Webhook) ---
+@app.post("/api/webhooks/order_paid")
+async def handle_order_paid(payload: Dict[str, Any], db: Session = Depends(get_db), x_jumpseller_signature: str = Header(None)):
+    """
+    Recibe notificación de Jumpseller cuando una orden es Pagada.
+    Suma puntos basados en LOYALTY_ACCUMULATION_RATE (1%).
+    """
+    try:
+        # 1. Verificar estado de la orden
+        status = payload.get("status") # Jumpseller envía 'paid'
+        order_data = payload.get("order", payload) # A veces viene anidado, a veces directo
+        
+        # Solo procesamos si está pagada
+        current_status = order_data.get("status", "").lower()
+        if current_status != "paid":
+            return {"status": "ignored", "reason": f"Order status is {current_status}"}
+
+        # 2. Obtener datos del cliente
+        customer = order_data.get("customer", {})
+        email = customer.get("email", "").strip().lower()
+        
+        if not email:
+            return {"status": "error", "reason": "No email provided"}
+
+        # 3. Calcular puntos (Total de la orden * 0.01)
+        # Usamos el total final (incluyendo descuentos/envío si aplica, o subtotal según prefieras)
+        total_value = float(order_data.get("total", 0))
+        puntos_a_sumar = int(total_value * settings.LOYALTY_ACCUMULATION_RATE)
+
+        if puntos_a_sumar <= 0:
+            return {"status": "ignored", "reason": "Zero points calculated"}
+
+        # 4. Actualizar o Crear Usuario en DB
+        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+        if not user:
+            user = GameCoinUser(email=email, saldo=0, name=customer.get("name", ""), surname=customer.get("surname", ""))
+            db.add(user)
+        
+        user.saldo += puntos_a_sumar
+        db.commit()
+        
+        logging.info(f"Fidelización: {email} ganó {puntos_a_sumar} puntos por orden #{order_data.get('id')}")
+        return {"status": "success", "added_points": puntos_a_sumar}
+
+    except Exception as e:
+        logging.error(f"Error processing webhook: {str(e)}")
+        # Retornamos 200 para que Jumpseller no reintente infinitamente si es un error lógico nuestro
+        return {"status": "error", "detail": str(e)}

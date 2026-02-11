@@ -1,6 +1,6 @@
 import pandas as pd
 from io import BytesIO
-from config import settings
+from GameCoins.config import settings
 
 def analizar_csv_simple(file_content: bytes):
     """Análisis rápido para Buylist Pública con filtros de seguridad."""
