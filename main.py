@@ -11,18 +11,22 @@ from database import engine, Base, get_db, SessionLocal
 from models import GameCoinUser, SystemConfig
 from config import settings
 import services
+import tcg_logic
 
 logging.basicConfig(level=logging.INFO)
 Base.metadata.create_all(bind=engine)
 
 def inicializar_boveda():
     db = SessionLocal()
-    keys = ["JUMPSELLER_API_TOKEN", "JUMPSELLER_STORE", "JUMPSELLER_HOOKS_TOKEN"]
-    for k in keys:
-        if os.getenv(k) and not db.query(SystemConfig).filter(SystemConfig.key == k).first():
-            db.add(SystemConfig(key=k, value=os.getenv(k)))
-    db.commit()
-    db.close()
+    try:
+        keys = ["JUMPSELLER_API_TOKEN", "JUMPSELLER_STORE", "JUMPSELLER_HOOKS_TOKEN"]
+        for k in keys:
+            val = os.getenv(k)
+            if val and not db.query(SystemConfig).filter(SystemConfig.key == k).first():
+                db.add(SystemConfig(key=k, value=val))
+        db.commit()
+    finally:
+        db.close()
 
 inicializar_boveda()
 
@@ -48,8 +52,7 @@ def get_balance(email: str, db: Session = Depends(get_db)):
 @app.post("/api/canje")
 async def request_canje(req: Any, db: Session = Depends(get_db), x_store_token: str = Header(None)):
     if x_store_token != settings.STORE_TOKEN: raise HTTPException(401)
-    # Lógica de canje atómico...
-    return {"status": "ok"} # Simplificado para espacio
+    return await services.procesar_canje_atomico(req.email.lower().strip(), req.monto, db)
 
 @app.post("/admin/analyze_csv")
 async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):

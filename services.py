@@ -71,24 +71,20 @@ def enviar_correo_cotizacion(data):
         msg = MIMEMultipart()
         msg['From'] = settings.SMTP_USER
         msg['To'] = f"{settings.TARGET_EMAIL}, {data['email']}"
-        msg['Subject'] = f"Nueva Cotización GameQuest - {data['rut']}"
-        
-        body = f"Solicitud de: {data['nombre']} {data['apellido']}\nRUT: {data['rut']}\nTel: {data['telefono']}\nPago: {data['pago']}"
+        msg['Subject'] = f"Venta GameQuest - {data['rut']}"
+        body = f"Nueva solicitud:\nNombre: {data['nombre']} {data['apellido']}\nRUT: {data['rut']}\nTel: {data['telefono']}\nPago: {data['pago']}"
         msg.attach(MIMEText(body, 'plain'))
-        
         df = pd.DataFrame(data['cartas'])
         csv_out = StringIO()
         df.to_csv(csv_out, index=False)
-        
         part = MIMEBase('application', "octet-stream")
         part.set_payload(csv_out.getvalue().encode("utf-8"))
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename="cotizacion_{data["rut"]}.csv"')
+        part.add_header('Content-Disposition', f'attachment; filename="oferta_{data["rut"]}.csv"')
         msg.attach(part)
-        
-        with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as srv:
-            srv.starttls()
-            srv.login(settings.SMTP_USER, settings.SMTP_PASS)
-            srv.send_message(msg)
+        with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASS)
+            server.send_message(msg)
         return True
     except: return False
