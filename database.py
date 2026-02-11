@@ -2,7 +2,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from config import settings
 
-# FIX: pool_recycle evita errores de "server has gone away" en Render
 engine = create_engine(
     settings.DATABASE_URL, 
     pool_size=5, 
