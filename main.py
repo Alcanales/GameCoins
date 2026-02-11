@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 Base.metadata.create_all(bind=engine)
 
 def inicializar_boveda():
+    """Inicializa credenciales desde el entorno si la DB está vacía."""
     db = SessionLocal()
     try:
         keys = ["JUMPSELLER_API_TOKEN", "JUMPSELLER_STORE", "JUMPSELLER_HOOKS_TOKEN"]
@@ -41,7 +42,12 @@ app.add_middleware(
 )
 
 class BuylistSubmission(BaseModel):
-    nombre: str; apellido: str; rut: str; telefono: str; email: str; pago: str
+    nombre: str
+    apellido: str
+    rut: str
+    telefono: str
+    email: str
+    pago: str
     cartas: List[Dict[str, Any]]
 
 @app.get("/api/public/balance/{email}")
@@ -51,15 +57,22 @@ def get_balance(email: str, db: Session = Depends(get_db)):
 
 @app.post("/api/canje")
 async def request_canje(req: Any, db: Session = Depends(get_db), x_store_token: str = Header(None)):
-    if x_store_token != settings.STORE_TOKEN: raise HTTPException(401)
+    if x_store_token != settings.STORE_TOKEN:
+        raise HTTPException(status_code=401, detail="Token inválido")
     return await services.procesar_canje_atomico(req.email.lower().strip(), req.monto, db)
-
-@app.post("/admin/analyze_csv")
-async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS: raise HTTPException(401)
-    return (await services.analizar_csv_con_stock_real(await file.read(), db)).to_dict(orient="records")
 
 @app.post("/api/public/submit_buylist")
 async def submit_buylist(data: BuylistSubmission):
-    if services.enviar_correo_cotizacion(data.dict()): return {"status": "ok"}
-    raise HTTPException(500)
+    if services.enviar_correo_cotizacion(data.dict()):
+        return {"status": "ok"}
+    raise HTTPException(status_code=500, detail="Error de envío")
+
+@app.post("/admin/analyze_csv")
+async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    return (await services.analizar_csv_con_stock_real(await file.read(), db)).to_dict(orient="records")
+
+@app.post("/api/public/analyze_buylist")
+async def public_analyze_buylist(file: UploadFile = File(...)):
+    return tcg_logic.analizar_csv_simple(await file.read()).to_dict(orient="records")
