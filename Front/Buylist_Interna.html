@@ -2,172 +2,77 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin GameQuest</title>
-    <link rel="icon" type="image/png" href="https://gamequest.cl/favicon.png">
+    <title>Panel Administrativo - GameQuest</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: system-ui, sans-serif; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); min-height: 100vh; padding: 20px; color: #333; }
-        .container { max-width: 1600px; margin: 0 auto; }
-
-        /* Login Styles */
-        .gq-login { max-width: 400px; margin: 10vh auto; background: white; border-radius: 16px; padding: 40px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-        .login-logo { width: 60px; height: 60px; background: #dc3545; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; }
-        .inp { width: 100%; padding: 12px; margin-bottom: 10px; border: 2px solid #eee; border-radius: 8px; }
-        .btn { width: 100%; padding: 12px; background: #dc3545; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn:hover { background: #b02a37; }
-        
-        /* App Styles (Hidden by default) */
-        .gq-app { display: none; }
-        .gq-app.active { display: block; }
-        
-        .header { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .stats-bar { display: flex; gap: 15px; }
-        .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; color: white; }
-        .bg-green { background: #198754; }
-        .bg-red { background: #dc3545; }
-
-        /* Table */
-        .table-box { background: white; border-radius: 12px; padding: 20px; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 10px; background: #f8f9fa; font-size: 12px; text-transform: uppercase; }
-        td { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }
-        
-        tr.rejected { background: #fff5f5; opacity: 0.7; }
-        tr.high-end { background: #ecfdf5; border-left: 4px solid #10b981; }
-        
-        .loader { display: none; text-align: center; color: white; margin-top: 20px; }
+        :root { --bg-page: #f2f2f2; --panel-header: #f8dbdb; --table-header: #e9f0eb; --text-dark: #3e5048; }
+        body { font-family: system-ui, sans-serif; background-color: var(--bg-page); margin: 0; padding: 20px; padding-bottom: 100px; color: var(--text-dark); }
+        .admin-header { background-color: var(--panel-header); border-radius: 15px; padding: 30px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #e5c5c5; margin-bottom: 20px; }
+        .btn-admin-file { background: white; border: 1px solid #ccc; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; color: #4a665a; }
+        .main-table { width: 100%; background: white; border-radius: 12px; border-collapse: collapse; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        th { background-color: var(--table-header); padding: 15px; text-align: left; font-size: 11px; color: #6a8377; border-bottom: 2px solid #dae5de; }
+        td { padding: 15px; border-bottom: 1px solid #f0f0f0; }
+        .qty-scroll { max-height: 60px; overflow-y: auto; border: 1px solid #dae5de; border-radius: 4px; width: 60px; }
+        .qty-select { width: 100%; border: none; background: #e9f0eb; padding: 5px; font-weight: bold; }
+        .footer-summary { position: fixed; bottom: 0; left: 0; width: 100%; background: white; padding: 20px 60px; display: flex; gap: 60px; border-top: 1px solid #eee; box-shadow: 0 -5px 20px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <div id="loginView" class="gq-login">
-        <div class="login-logo">🔒</div>
-        <h2>Acceso Interno</h2>
-        <p style="color:#666; margin-bottom:20px; font-size:14px;">Ingresa credenciales de administrador</p>
-        <form onsubmit="event.preventDefault(); tryLogin()">
-            <input type="text" id="u" class="inp" placeholder="Usuario">
-            <input type="password" id="p" class="inp" placeholder="Contraseña">
-            <button class="btn">Entrar</button>
-        </form>
+    <div class="admin-header">
+        <h2 style="margin:0; color:#4a665a;">Panel de Análisis Interno</h2>
+        <button class="btn-admin-file" onclick="document.getElementById('fileIn').click()">📂 Cargar CSV Interno</button>
+        <input type="file" id="fileIn" style="display:none" accept=".csv" onchange="handleAdminFile(this)">
     </div>
-
-    <div id="appView" class="gq-app">
-        <div class="header">
-            <div>
-                <h2 style="color:#111">Buylist Admin</h2>
-                <small style="color:#666">Análisis con Stock en Tiempo Real</small>
-            </div>
-            <div>
-                <input type="file" id="adminCsv" accept=".csv" style="display:none" onchange="runAnalysis()">
-                <button class="btn" onclick="document.getElementById('adminCsv').click()">📂 Cargar CSV</button>
-                <button class="btn" style="background:#333; margin-left:10px" onclick="location.reload()">Salir</button>
-            </div>
-        </div>
-
-        <div class="loader" id="loader">⏳ Analizando precios y stock en Jumpseller...</div>
-
-        <div class="table-box">
-            <div style="margin-bottom:15px" class="stats-bar">
-                <span class="badge bg-green" id="st-ok">0 Aprobados</span>
-                <span class="badge bg-red" id="st-no">0 Rechazados</span>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Carta</th>
-                        <th>Normal</th>
-                        <th>Foil</th>
-                        <th>Stock Actual</th>
-                        <th>Límite</th>
-                        <th>Estado</th>
-                        <th>Razón</th>
-                    </tr>
-                </thead>
-                <tbody id="adminBody"></tbody>
-            </table>
-        </div>
+    <table class="main-table" id="resultsTable" style="display:none">
+        <thead>
+            <tr>
+                <th width="40"><input type="checkbox" id="checkAll" checked onclick="toggleAll(this)"></th>
+                <th>CARTA</th><th>STOCK / LÍMITE</th><th width="80">CANTIDAD</th><th>ESTADO</th><th>OFERTA CASH</th>
+            </tr>
+        </thead>
+        <tbody id="adminBody"></tbody>
+    </table>
+    <div class="footer-summary" id="footerBar" style="display:none">
+        <div><small>TOTAL COMPRA</small><div id="totalAdmin" style="font-size:24px; font-weight:800; color:#4a665a;">$0</div></div>
     </div>
-</div>
-
-<script>
-    const API = "https://gamecoins.onrender.com";
-    let CREDS = { u: '', p: '' };
-
-    function tryLogin() {
-        const u = document.getElementById('u').value;
-        const p = document.getElementById('p').value;
-        if(u && p) {
-            CREDS.u = u; 
-            CREDS.p = p;
-            document.getElementById('loginView').style.display = 'none';
-            document.getElementById('appView').classList.add('active');
-        } else {
-            alert("Faltan datos");
+    <script>
+        const API = "https://gamecoins.onrender.com";
+        let rawData = [];
+        async function handleAdminFile(input) {
+            const file = input.files[0]; if (!file) return;
+            const fd = new FormData(); fd.append('file', file);
+            try {
+                const res = await fetch(`${API}/admin/analyze_csv`, {
+                    method: 'POST', headers: { 'x-admin-user': 'Tomas_1_2_3', 'x-admin-pass': 'GameQuest2025_1' }, body: fd
+                });
+                rawData = await res.json(); renderAdmin();
+            } catch (e) { alert("Error en el servidor"); }
         }
-    }
-
-    async function runAnalysis() {
-        const file = document.getElementById('adminCsv').files[0];
-        if(!file) return;
-
-        document.getElementById('loader').style.display = 'block';
-        const fd = new FormData(); fd.append('file', file);
-
-        try {
-            const res = await fetch(`${API}/admin/analyze_csv`, {
-                method: 'POST',
-                headers: {
-                    'x-admin-user': CREDS.u,
-                    'x-admin-pass': CREDS.p
-                },
-                body: fd
+        function renderAdmin() {
+            const t = document.getElementById('adminBody');
+            t.innerHTML = rawData.map((c, i) => `
+                <tr>
+                    <td><input type="checkbox" class="sel" data-idx="${i}" checked onchange="calc()"></td>
+                    <td><b>${c.name}</b></td><td>${c.current_stock} / ${c.stock_limit}</td>
+                    <td><div class="qty-scroll"><select class="qty-select" data-idx="${i}" onchange="calc()">
+                        ${Array.from({length: 10}, (_, k) => `<option value="${k+1}">${k+1}</option>`).join('')}
+                    </select></div></td>
+                    <td><span style="background:#b7ceb9; padding:4px 12px; border-radius:15px; font-size:11px;">${c.status}</span></td>
+                    <td style="font-weight:800;">$${(c.valor_compra_efectivo || 0).toLocaleString()}</td>
+                </tr>`).join('');
+            document.getElementById('resultsTable').style.display = 'table';
+            document.getElementById('footerBar').style.display = 'flex';
+            calc();
+        }
+        function calc() {
+            let cash = 0;
+            document.querySelectorAll('.sel:checked').forEach(el => {
+                const idx = el.dataset.idx;
+                const qty = parseInt(document.querySelector(`.qty-select[data-idx="${idx}"]`).value);
+                cash += (rawData[idx].valor_compra_efectivo || 0) * qty;
             });
-
-            if(res.status === 401) {
-                alert("Contraseña incorrecta");
-                location.reload();
-                return;
-            }
-
-            const data = await res.json();
-            renderAdmin(data);
-        } catch(e) {
-            alert("Error de conexión");
-        } finally {
-            document.getElementById('loader').style.display = 'none';
+            document.getElementById('totalAdmin').innerText = "$" + cash.toLocaleString();
         }
-    }
-
-    function renderAdmin(list) {
-        const t = document.getElementById('adminBody');
-        let ok = 0, no = 0;
-        
-        t.innerHTML = list.map(c => {
-            const isRej = c.status.includes("RECHAZADO");
-            const isHigh = c.status.includes("HIGH");
-            if(isRej) no++; else ok++;
-            
-            const rowClass = isRej ? 'rejected' : (isHigh ? 'high-end' : '');
-            
-            return `
-                <tr class="${rowClass}">
-                    <td style="font-weight:bold">${c.name}</td>
-                    <td>$${c.price_normal}</td>
-                    <td>$${c.price_foil}</td>
-                    <td style="font-weight:bold">${c.current_stock}</td>
-                    <td>${c.stock_limit}</td>
-                    <td>${c.status}</td>
-                    <td style="font-size:11px; color:#555">${c.razon}</td>
-                </tr>
-            `;
-        }).join('');
-
-        document.getElementById('st-ok').innerText = `${ok} Aprobados`;
-        document.getElementById('st-no').innerText = `${no} Rechazados`;
-    }
-</script>
-
+        function toggleAll(src) { document.querySelectorAll('.sel').forEach(x => x.checked = src.checked); calc(); }
+    </script>
 </body>
 </html>

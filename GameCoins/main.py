@@ -125,3 +125,59 @@ async def handle_order_paid(payload: Dict[str, Any], db: Session = Depends(get_d
         return {"status": "success", "added": puntos}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+    
+# --- ENDPOINTS ADMINISTRATIVOS PARA LA BÓVEDA ---
+
+@app.get("/admin/users")
+def list_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    # Verificación de seguridad
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="No autorizado")
+    
+    users = db.query(GameCoinUser).all()
+    total_points = sum(u.saldo for u in users)
+    
+    return {
+        "users": users,
+        "totalUsers": len(users),
+        "totalPoints": total_points
+    }
+
+@app.post("/admin/update_points")
+def update_points(email: str, nuevo_saldo: int, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    user.saldo = nuevo_saldo
+    db.commit()
+    return {"status": "ok", "nuevo_saldo": user.saldo}
+
+# --- ENDPOINTS PARA LA BÓVEDA ---
+
+@app.get("/admin/users") # Ruta que te daba error 404
+def get_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    return db.query(GameCoinUser).all()
+
+@app.post("/admin/adjust_balance") # Ruta para sumar/restar puntos
+def adjust(req: BalanceAdjustment, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email.lower()).first()
+    if not user:
+        user = GameCoinUser(email=req.email.lower(), saldo=0)
+        db.add(user)
+    
+    if req.operation == 'add':
+        user.saldo += req.amount
+    else:
+        user.saldo = max(0, user.saldo - req.amount)
+    
+    db.commit()
+    return {"status": "success"}
