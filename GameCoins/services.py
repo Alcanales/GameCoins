@@ -9,7 +9,6 @@ from email import encoders
 from io import BytesIO, StringIO
 from datetime import datetime
 
-# Imports relativos corregidos
 from .models import SystemConfig
 from .config import settings
 
@@ -24,6 +23,17 @@ async def get_jumpseller_stock(session, name, login, token):
     except: pass
     return 0
 
+async def fetch_scryfall_prices(session, scryfall_id):
+    if not scryfall_id or pd.isna(scryfall_id): return 0.0, 0.0
+    try:
+        async with session.get(f"https://api.scryfall.com/cards/{scryfall_id}") as r:
+            if r.status == 200:
+                d = await r.json()
+                p = d.get('prices', {})
+                return float(p.get('usd') or 0), float(p.get('usd_foil') or 0)
+    except: pass
+    return 0.0, 0.0
+
 async def analizar_csv_con_stock_real(content, db):
     try:
         t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
@@ -31,36 +41,57 @@ async def analizar_csv_con_stock_real(content, db):
         creds = (s.value, t.value) if t and s else None
         
         df = pd.read_csv(BytesIO(content))
-        df.columns = [str(c).lower().strip() for c in df.columns]
+        df.columns = [str(c).lower().strip().replace(' ', '_') for c in df.columns]
+        
+        has_csv_price = 'purchase_price' in df.columns
+        use_scryfall = 'scryfall_id' in df.columns
         
         async with aiohttp.ClientSession() as sess:
-            tasks = []
+            tasks_stock = []
+            tasks_prices = []
+            
             for _, row in df.iterrows():
-                tasks.append(get_jumpseller_stock(sess, row.get('name'), *creds) if creds else asyncio.sleep(0))
-            results = await asyncio.gather(*tasks)
+                tasks_stock.append(get_jumpseller_stock(sess, row.get('name'), *creds) if creds else asyncio.sleep(0))
+                if use_scryfall:
+                    tasks_prices.append(fetch_scryfall_prices(sess, row.get('scryfall_id')))
+            
+            results_stock = await asyncio.gather(*tasks_stock)
+            results_prices = await asyncio.gather(*tasks_prices) if use_scryfall else [(0.0, 0.0)] * len(df)
 
         processed = []
         for i, (_, row) in enumerate(df.iterrows()):
-            stock = int(results[i]) if creds else 0
-            pn, pf = float(row.get('price_normal', 0)), float(row.get('price_foil', 0))
+            stock = int(results_stock[i]) if creds else 0
+            sf_pn, sf_pf = results_prices[i]
+            
+            csv_price = float(row.get('purchase_price', 0)) if has_csv_price else 0.0
+            is_foil = str(row.get('foil', '')).lower() == 'foil'
+            
+            # Prioridad CSV
+            if is_foil:
+                pf = csv_price if csv_price > 0 else sf_pf
+                pn = sf_pn
+            else:
+                pn = csv_price if csv_price > 0 else sf_pn
+                pf = sf_pf
             
             status, razon = "APROBADO", "OK"
             limit = settings.STOCK_LIMIT_HIGH_DEMAND if pn >= 20.0 else settings.STOCK_LIMIT_DEFAULT
             
-            if stock >= limit: status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
-            elif pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn > 0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
-                status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
-            elif pn >= 20.0: status, razon = "HIGH END", "Alta Demanda"
+            if stock >= limit: 
+                status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
+            elif is_foil:
+                # Lógica Estaca Híbrida (Precio CSV vs Scryfall Normal)
+                if pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn>0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
+                    status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
+                elif pn >= 20.0:
+                    status, razon = "HIGH END", "Alta Demanda"
 
             processed.append({
                 "name": row.get('name','Unknown'),
                 "price_normal": pn, "price_foil": pf,
-                "cash_normal": round(pn * settings.CASH_MULTIPLIER),
-                "gc_normal": round(pn * settings.GAMECOIN_MULTIPLIER),
-                "cash_foil": round(pf * settings.CASH_MULTIPLIER),
-                "gc_foil": round(pf * settings.GAMECOIN_MULTIPLIER),
                 "current_stock": stock, "stock_limit": limit,
-                "status": status, "razon": razon
+                "status": status, "razon": razon,
+                "valor_compra_efectivo": round((pf if is_foil else pn) * settings.CASH_MULTIPLIER * settings.USD_TO_CLP)
             })
             
         df_res = pd.DataFrame(processed)
@@ -68,6 +99,7 @@ async def analizar_csv_con_stock_real(content, db):
         return df_res.sort_values('rank').drop(columns=['rank'])
     except Exception as e: return {"error": str(e)}
 
+# (La función enviar_correo_cotizacion sigue igual)
 def enviar_correo_cotizacion(data):
     try:
         msg = MIMEMultipart()
