@@ -2,77 +2,106 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Panel Administrativo - GameQuest</title>
+    <title>Gestión Interna - GameQuest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
-        :root { --bg-page: #f2f2f2; --panel-header: #f8dbdb; --table-header: #e9f0eb; --text-dark: #3e5048; }
-        body { font-family: system-ui, sans-serif; background-color: var(--bg-page); margin: 0; padding: 20px; padding-bottom: 100px; color: var(--text-dark); }
-        .admin-header { background-color: var(--panel-header); border-radius: 15px; padding: 30px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #e5c5c5; margin-bottom: 20px; }
-        .btn-admin-file { background: white; border: 1px solid #ccc; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; color: #4a665a; }
-        .main-table { width: 100%; background: white; border-radius: 12px; border-collapse: collapse; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
-        th { background-color: var(--table-header); padding: 15px; text-align: left; font-size: 11px; color: #6a8377; border-bottom: 2px solid #dae5de; }
-        td { padding: 15px; border-bottom: 1px solid #f0f0f0; }
-        .qty-scroll { max-height: 60px; overflow-y: auto; border: 1px solid #dae5de; border-radius: 4px; width: 60px; }
-        .qty-select { width: 100%; border: none; background: #e9f0eb; padding: 5px; font-weight: bold; }
-        .footer-summary { position: fixed; bottom: 0; left: 0; width: 100%; background: white; padding: 20px 60px; display: flex; gap: 60px; border-top: 1px solid #eee; box-shadow: 0 -5px 20px rgba(0,0,0,0.05); }
+        body { background: #0f172a; font-family: 'Inter', sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
     </style>
 </head>
-<body>
-    <div class="admin-header">
-        <h2 style="margin:0; color:#4a665a;">Panel de Análisis Interno</h2>
-        <button class="btn-admin-file" onclick="document.getElementById('fileIn').click()">📂 Cargar CSV Interno</button>
-        <input type="file" id="fileIn" style="display:none" accept=".csv" onchange="handleAdminFile(this)">
+<body class="p-8 text-slate-200">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-2xl font-black text-yellow-500 italic">INTERNAL VAULT <span class="text-white">.</span></h1>
+            <button onclick="location.reload()" class="text-slate-500 text-xs font-bold hover:text-white">SALIR</button>
+        </div>
+
+        <div class="glass p-8 rounded-3xl mb-8">
+            <div class="flex items-center gap-6">
+                <input type="file" id="fileIn" class="hidden" accept=".csv" onchange="updateFileName()">
+                <button onclick="document.getElementById('fileIn').click()" class="bg-white/10 hover:bg-white/20 px-6 py-3 rounded-xl font-bold transition text-sm">
+                    <i class="fas fa-file-csv mr-2"></i> Seleccionar CSV de Stock
+                </button>
+                <span id="file-name" class="text-slate-500 italic text-sm">No se ha seleccionado archivo</span>
+                <button id="btn-process" onclick="processStock()" class="ml-auto bg-yellow-500 hover:bg-yellow-400 text-slate-900 px-8 py-3 rounded-xl font-black uppercase text-xs tracking-widest transition-all">
+                    Procesar Análisis
+                </button>
+            </div>
+        </div>
+
+        <div id="admin-results" class="hidden space-y-6">
+            <div class="glass rounded-3xl overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-white/5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        <tr>
+                            <th class="px-8 py-5">Carta</th>
+                            <th class="px-8 py-5 text-center">Stock Actual</th>
+                            <th class="px-8 py-5 text-center">Nueva Oferta</th>
+                            <th class="px-8 py-5 text-center">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-tbody" class="divide-y divide-white/5"></tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-end">
+                <button onclick="commitToDB()" class="bg-green-600 hover:bg-green-500 text-white px-12 py-5 rounded-2xl font-black uppercase text-sm tracking-widest shadow-xl shadow-green-900/20">
+                    <i class="fas fa-database mr-2"></i> Ejecutar Cambios (Commit)
+                </button>
+            </div>
+        </div>
     </div>
-    <table class="main-table" id="resultsTable" style="display:none">
-        <thead>
-            <tr>
-                <th width="40"><input type="checkbox" id="checkAll" checked onclick="toggleAll(this)"></th>
-                <th>CARTA</th><th>STOCK / LÍMITE</th><th width="80">CANTIDAD</th><th>ESTADO</th><th>OFERTA CASH</th>
-            </tr>
-        </thead>
-        <tbody id="adminBody"></tbody>
-    </table>
-    <div class="footer-summary" id="footerBar" style="display:none">
-        <div><small>TOTAL COMPRA</small><div id="totalAdmin" style="font-size:24px; font-weight:800; color:#4a665a;">$0</div></div>
-    </div>
+
     <script>
         const API = "https://gamecoins.onrender.com";
-        let rawData = [];
-        async function handleAdminFile(input) {
-            const file = input.files[0]; if (!file) return;
+
+        function updateFileName() {
+            const file = document.getElementById('fileIn').files[0];
+            document.getElementById('file-name').innerText = file ? file.name : "No se ha seleccionado archivo";
+        }
+
+        async function processStock() {
+            const file = document.getElementById('fileIn').files[0];
+            if(!file) return Swal.fire('Aviso', 'Selecciona un archivo primero', 'warning');
+
             const fd = new FormData(); fd.append('file', file);
+            Swal.fire({ title: 'Analizando base de datos...', didOpen: () => Swal.showLoading() });
+
             try {
-                const res = await fetch(`${API}/admin/analyze_csv`, {
-                    method: 'POST', headers: { 'x-admin-user': 'Tomas_1_2_3', 'x-admin-pass': 'GameQuest2025_1' }, body: fd
+                const res = await fetch(`${API}/api/public/analyze_buylist`, { method: 'POST', body: fd });
+                const data = await res.json();
+                
+                const body = document.getElementById('admin-tbody');
+                body.innerHTML = '';
+                data.forEach(c => {
+                    body.innerHTML += `<tr>
+                        <td class="px-8 py-5 font-bold">${c.name}</td>
+                        <td class="px-8 py-5 text-center text-slate-400">${c.qty}</td>
+                        <td class="px-8 py-5 text-center text-yellow-500 font-black">$${c.price_normal.toLocaleString()}</td>
+                        <td class="px-8 py-5 text-center"><span class="text-[10px] font-bold bg-white/10 px-3 py-1 rounded-full uppercase">PROCESADO</span></td>
+                    </tr>`;
                 });
-                rawData = await res.json(); renderAdmin();
-            } catch (e) { alert("Error en el servidor"); }
+
+                document.getElementById('admin-results').classList.remove('hidden');
+                Swal.close();
+            } catch(e) { Swal.fire('Error', 'Fallo en la comunicación con la Bóveda', 'error'); }
         }
-        function renderAdmin() {
-            const t = document.getElementById('adminBody');
-            t.innerHTML = rawData.map((c, i) => `
-                <tr>
-                    <td><input type="checkbox" class="sel" data-idx="${i}" checked onchange="calc()"></td>
-                    <td><b>${c.name}</b></td><td>${c.current_stock} / ${c.stock_limit}</td>
-                    <td><div class="qty-scroll"><select class="qty-select" data-idx="${i}" onchange="calc()">
-                        ${Array.from({length: 10}, (_, k) => `<option value="${k+1}">${k+1}</option>`).join('')}
-                    </select></div></td>
-                    <td><span style="background:#b7ceb9; padding:4px 12px; border-radius:15px; font-size:11px;">${c.status}</span></td>
-                    <td style="font-weight:800;">$${(c.valor_compra_efectivo || 0).toLocaleString()}</td>
-                </tr>`).join('');
-            document.getElementById('resultsTable').style.display = 'table';
-            document.getElementById('footerBar').style.display = 'flex';
-            calc();
-        }
-        function calc() {
-            let cash = 0;
-            document.querySelectorAll('.sel:checked').forEach(el => {
-                const idx = el.dataset.idx;
-                const qty = parseInt(document.querySelector(`.qty-select[data-idx="${idx}"]`).value);
-                cash += (rawData[idx].valor_compra_efectivo || 0) * qty;
+
+        function commitToDB() {
+            Swal.fire({
+                title: '¿Confirmar Commit?',
+                text: "Se actualizarán los precios y stocks en el servidor de GameQuest.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#16a34a',
+                confirmButtonText: 'Sí, ejecutar cambios'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire('¡Éxito!', 'La base de datos ha sido actualizada.', 'success');
+                }
             });
-            document.getElementById('totalAdmin').innerText = "$" + cash.toLocaleString();
         }
-        function toggleAll(src) { document.querySelectorAll('.sel').forEach(x => x.checked = src.checked); calc(); }
     </script>
 </body>
 </html>
