@@ -89,14 +89,31 @@ async def request_canje(req: CanjeRequest, db: Session = Depends(get_db), x_stor
     return await services.procesar_canje_atomico(email_clean, req.monto, db)
 
 @app.post("/api/public/analyze_buylist")
-async def public_analyze_csv(file: UploadFile = File(...)):
-    content = await file.read()
-    res = await services.analizar_csv_estacas(content)
-    
-    if isinstance(res, dict) and "error" in res:
-        raise HTTPException(status_code=400, detail=res["error"])
-    
-    return res.to_dict(orient="records")
+async def public_analyze_buylist(file: UploadFile = File(...)):
+    """
+    Endpoint PÚBLICO para clientes.
+    Permite cotizar cartas sin necesidad de contraseña de administrador.
+    """
+    # Validación básica de archivo
+    if not file.filename.lower().endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Solo se permiten archivos .csv")
+
+    try:
+        content = await file.read()
+        
+        # Reutilizamos la lógica central (DRY)
+        df_res = tcg_logic.analizar_csv_estacas(content)
+        
+        if isinstance(df_res, dict) and "error" in df_res:
+             raise HTTPException(status_code=400, detail=df_res["error"])
+        
+        # Devolvemos el resultado completo (Frontend decidirá qué mostrar)
+        return df_res.to_dict(orient="records")
+        
+    except Exception as e:
+        print(f"Error Buylist Pública: {e}")
+        raise HTTPException(status_code=500, detail="Error interno analizando el archivo.")
+
 
 # --- EL HOOK (SISTEMA DE FIDELIDAD) ---
 @app.post("/api/webhook")
