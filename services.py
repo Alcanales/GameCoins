@@ -7,9 +7,11 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from io import BytesIO, StringIO
-from sqlalchemy.orm import Session
-from models import SystemConfig, GameCoinUser
-from GameCoins.config import settings
+from datetime import datetime
+
+# Imports relativos corregidos
+from .models import SystemConfig
+from .config import settings
 
 async def get_jumpseller_stock(session, name, login, token):
     if not name: return 0

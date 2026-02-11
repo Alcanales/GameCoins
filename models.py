@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer
-from database import Base
+from .database import Base  # Import relativo corregido
 
 class GameCoinUser(Base):
     __tablename__ = "gamecoins"
@@ -10,7 +10,6 @@ class GameCoinUser(Base):
     historico_canjeado = Column(Integer, default=0)
 
 class SystemConfig(Base):
-    """Tabla de configuración (Bóveda) para credenciales Jumpseller."""
     __tablename__ = "system_config"
     key = Column(String, primary_key=True, index=True)
     value = Column(String)
