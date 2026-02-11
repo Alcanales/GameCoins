@@ -119,13 +119,6 @@ async def analizar_csv_estacas(file_content: bytes):
             missing = [c for c in required if c not in df.columns]
             return {"error": f"Faltan columnas: {', '.join(missing)}"}
 
-        # Configuración ENV
-        stock_default = int(os.getenv('STOCK_LIMIT_DEFAULT', 8))
-        stock_high = int(os.getenv('STOCK_LIMIT_HIGH_DEMAND', 20))
-        min_spread = float(os.getenv('MIN_STAKE_SPREAD', 10.0))
-        stake_min_spread = float(os.getenv('STAKE_MIN_SPREAD', 25.0))
-        ratio_threshold = float(os.getenv('STAKE_RATIO_THRESHOLD', 2.5))
-
         # Fetch Asíncrono de Scryfall
         rows_to_fetch = []
         for idx, row in df.iterrows():
@@ -152,30 +145,29 @@ async def analizar_csv_estacas(file_content: bytes):
             current_stock = int(row.get('quantity', 0))
             nombre = row.get('name', 'Unknown')
 
-            status, razon = "APROBADO", "OK"
+            # --- LÓGICA CORREGIDA (Akroma's Will Fix) ---
+            status, razon = "APROBADO", "Compra Estándar"
             
-            stock_limit = stock_high if pn >= 20.0 else stock_default
-            spread = abs(pf - pn)
-            
-            if spread < min_spread:
-                status, razon = "RECHAZADO (SPREAD BAJO)", f"Spread {spread:.2f} < {min_spread}"
-            elif pn < 20.0 and spread < stake_min_spread:
-                 status, razon = "RECHAZADO (STAKE SPREAD)", f"Spread bajo para carta barata"
-            
-            if pf >= 20.0 and pn < 20.0:
-                ratio = pf / pn if pn > 0 else 999
-                if ratio > ratio_threshold and spread > min_spread:
-                    status, razon = "RECHAZADO (ESTACA)", f"Ratio {ratio:.1f}x sospechoso"
+            # 1. Reglas de Stock
+            stock_limit = int(os.getenv('STOCK_LIMIT_HIGH_DEMAND', 20)) if pn >= 20.0 else int(os.getenv('STOCK_LIMIT_DEFAULT', 8))
             
             if current_stock >= stock_limit:
                  status, razon = "RECHAZADO (STOCK FULL)", f"Stock {current_stock} >= {stock_limit}"
+            
+            # 2. Reglas de Precio / Estaca
+            elif pf >= 20.0 and pn < 20.0:
+                ratio = pf / pn if pn > 0 else 999
+                if ratio > 2.5 and (pf - pn) > 10.0:
+                    status, razon = "RECHAZADO (ESTACA)", f"Ratio {ratio:.1f}x sospechoso"
+            
+            elif pn >= 20.0:
+                status, razon = "HIGH END", "Alta Demanda"
 
-            # --- CÁLCULO DE OFERTAS (AGREGADO) ---
+            # --- CÁLCULO DE OFERTAS ---
             cash_normal = round(pn * settings.CASH_MULTIPLIER)
             gc_normal = round(pn * settings.GAMECOIN_MULTIPLIER)
             cash_foil = round(pf * settings.CASH_MULTIPLIER)
             gc_foil = round(pf * settings.GAMECOIN_MULTIPLIER)
-            # -------------------------------------
 
             resultados.append({
                 "name": nombre,
@@ -191,7 +183,20 @@ async def analizar_csv_estacas(file_content: bytes):
                 "gc_foil": gc_foil
             })
 
-        return pd.DataFrame(resultados)
+        df_res = pd.DataFrame(resultados)
+
+        # --- ORDENAMIENTO (Fix de Orden) ---
+        def get_rank(s):
+            if "HIGH END" in s: return 0
+            if "APROBADO" in s: return 1
+            if "ESTACA" in s: return 3 # Estacas al final o separadas
+            if "RECHAZADO" in s: return 4
+            return 2
+            
+        df_res['rank'] = df_res['status'].apply(get_rank)
+        df_res = df_res.sort_values(by='rank').drop(columns=['rank'])
+
+        return df_res
 
     except Exception as e:
         logging.error(f"Error procesando CSV: {str(e)}")
