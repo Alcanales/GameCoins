@@ -16,7 +16,27 @@ from . import tcg_logic
 logging.basicConfig(level=logging.INFO)
 Base.metadata.create_all(bind=engine)
 
-# --- BÓVEDA ---
+# --- MODELOS DE DATOS (Deben ir antes de los Endpoints) ---
+
+class BalanceAdjustment(BaseModel):
+    email: str
+    amount: int
+    operation: str  # 'add' o 'subtract'
+
+class BuylistSubmission(BaseModel):
+    nombre: str
+    apellido: str
+    rut: str
+    telefono: str
+    email: str
+    pago: str
+    cartas: List[Dict[str, Any]]
+
+class CanjeRequest(BaseModel):
+    email: str
+    monto: int
+
+# --- INICIALIZACIÓN BÓVEDA ---
 def inicializar_boveda():
     db = SessionLocal()
     try:
@@ -40,11 +60,6 @@ inicializar_boveda()
 
 app = FastAPI(title="GameQuest API Final")
 
-# Health Check
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,21 +68,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODELOS DE DATOS ---
-class BuylistSubmission(BaseModel):
-    nombre: str
-    apellido: str
-    rut: str
-    telefono: str
-    email: str
-    pago: str
-    cartas: List[Dict[str, Any]]
+# --- ENDPOINTS PÚBLICOS ---
 
-class CanjeRequest(BaseModel):
-    email: str
-    monto: int
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
-# --- ENDPOINTS ---
 @app.get("/api/public/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
     u = db.query(GameCoinUser).filter(GameCoinUser.email == email.lower().strip()).first()
@@ -85,13 +91,6 @@ async def submit_buylist(data: BuylistSubmission):
         return {"status": "ok"}
     raise HTTPException(status_code=500, detail="Error enviando correo")
 
-@app.post("/admin/analyze_csv")
-async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401)
-    content = await file.read()
-    return (await services.analizar_csv_con_stock_real(content, db)).to_dict(orient="records")
-
 @app.post("/api/public/analyze_buylist")
 async def public_analyze_buylist(file: UploadFile = File(...)):
     content = await file.read()
@@ -99,6 +98,49 @@ async def public_analyze_buylist(file: UploadFile = File(...)):
     if isinstance(result, dict) and "error" in result:
         return result
     return result.to_dict(orient="records")
+
+# --- ENDPOINTS ADMINISTRATIVOS ---
+
+@app.get("/admin/users")
+def list_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401, detail="No autorizado")
+    
+    users = db.query(GameCoinUser).all()
+    total_points = sum(u.saldo for u in users)
+    
+    return {
+        "users": users,
+        "totalUsers": len(users),
+        "totalPoints": total_points
+    }
+
+@app.post("/admin/adjust_balance")
+def adjust(req: BalanceAdjustment, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email.lower().strip()).first()
+    if not user:
+        user = GameCoinUser(email=req.email.lower().strip(), saldo=0)
+        db.add(user)
+    
+    if req.operation == 'add':
+        user.saldo += req.amount
+    else:
+        user.saldo = max(0, user.saldo - req.amount)
+    
+    db.commit()
+    return {"status": "success", "nuevo_saldo": user.saldo}
+
+@app.post("/admin/analyze_csv")
+async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
+        raise HTTPException(status_code=401)
+    content = await file.read()
+    return (await services.analizar_csv_con_stock_real(content, db)).to_dict(orient="records")
+
+# --- WEBHOOKS ---
 
 @app.post("/api/webhooks/order_paid")
 async def handle_order_paid(payload: Dict[str, Any], db: Session = Depends(get_db)):
@@ -125,59 +167,3 @@ async def handle_order_paid(payload: Dict[str, Any], db: Session = Depends(get_d
         return {"status": "success", "added": puntos}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
-    
-# --- ENDPOINTS ADMINISTRATIVOS PARA LA BÓVEDA ---
-
-@app.get("/admin/users")
-def list_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    # Verificación de seguridad
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    
-    users = db.query(GameCoinUser).all()
-    total_points = sum(u.saldo for u in users)
-    
-    return {
-        "users": users,
-        "totalUsers": len(users),
-        "totalPoints": total_points
-    }
-
-@app.post("/admin/update_points")
-def update_points(email: str, nuevo_saldo: int, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401)
-    
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    user.saldo = nuevo_saldo
-    db.commit()
-    return {"status": "ok", "nuevo_saldo": user.saldo}
-
-# --- ENDPOINTS PARA LA BÓVEDA ---
-
-@app.get("/admin/users") # Ruta que te daba error 404
-def get_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401)
-    return db.query(GameCoinUser).all()
-
-@app.post("/admin/adjust_balance") # Ruta para sumar/restar puntos
-def adjust(req: BalanceAdjustment, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401)
-    
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email.lower()).first()
-    if not user:
-        user = GameCoinUser(email=req.email.lower(), saldo=0)
-        db.add(user)
-    
-    if req.operation == 'add':
-        user.saldo += req.amount
-    else:
-        user.saldo = max(0, user.saldo - req.amount)
-    
-    db.commit()
-    return {"status": "success"}
