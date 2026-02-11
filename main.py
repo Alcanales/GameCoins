@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel
+from typing import List, Dict, Any
 from database import engine, Base, get_db, SessionLocal
 from models import GameCoinUser, SystemConfig
 from config import settings
@@ -13,14 +15,12 @@ import tcg_logic
 logging.basicConfig(level=logging.INFO)
 Base.metadata.create_all(bind=engine)
 
-# Inicializar Bóveda desde ENV si existen
 def init_vault():
     db = SessionLocal()
     keys = ["JUMPSELLER_API_TOKEN", "JUMPSELLER_STORE", "JUMPSELLER_HOOKS_TOKEN"]
     for k in keys:
-        val = os.getenv(k)
-        if val and not db.query(SystemConfig).filter(SystemConfig.key==k).first():
-            db.add(SystemConfig(key=k, value=val))
+        if os.getenv(k) and not db.query(SystemConfig).filter(SystemConfig.key==k).first():
+            db.add(SystemConfig(key=k, value=os.getenv(k)))
     db.commit()
     db.close()
 
@@ -35,6 +35,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class BuylistSubmission(BaseModel):
+    nombre: str
+    apellido: str
+    rut: str
+    telefono: str
+    email: str
+    pago: str
+    cartas: List[Dict[str, Any]]
 
 @app.get("/api/public/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
@@ -56,6 +65,17 @@ async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = He
 @app.post("/api/public/analyze_buylist")
 async def public_analyze_buylist(file: UploadFile = File(...)):
     return tcg_logic.analizar_csv_simple(await file.read()).to_dict(orient="records")
+
+@app.post("/api/public/submit_buylist")
+def submit_buylist(data: BuylistSubmission):
+    if services.enviar_correo_cotizacion(data.dict()):
+        return {"status": "ok", "message": "Cotización enviada exitosamente"}
+    raise HTTPException(500, "Error enviando correo")
+
+@app.post("/admin/config")
+def admin_config(req: ConfigRequest, db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
+    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS: raise HTTPException(401)
+    return {"status": "ok"}
 
 @app.get("/")
 def health(): return {"status": "online"}
