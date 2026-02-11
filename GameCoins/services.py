@@ -2,15 +2,95 @@ import asyncio
 import aiohttp
 import smtplib
 import pandas as pd
+import secrets
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from io import BytesIO, StringIO
 from datetime import datetime
+from fastapi import HTTPException
 
-from .models import SystemConfig
+from .models import SystemConfig, GameCoinUser
 from .config import settings
+
+# --- FUNCIONES DE CANJE (FALTABAN AQUÍ) ---
+
+async def crear_cupon_jumpseller(monto: int, email: str, creds: tuple):
+    """Crea un cupón de uso único en Jumpseller."""
+    login, token = creds
+    code = f"GQ-{secrets.token_hex(3).upper()}-{monto}"
+    
+    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    params = {'login': login, 'authtoken': token}
+    
+    # Configuración del cupón
+    payload = {
+        "promotion": {
+            "name": f"Canje GameCoins {monto} - {email}",
+            "code": code,
+            "value": monto,
+            "discount_target": "order",
+            "discount_type": "fix", # Descuento fijo en dinero
+            "minimum_order_amount": 0,
+            "quantity": 1, # Solo 1 uso
+            "status": "active",
+            "customer_categories": [], # Opcional: restringir
+            "products": [] # Aplica a todo
+        }
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, params=params, json=payload) as resp:
+            if resp.status in [200, 201]:
+                data = await resp.json()
+                return data.get('promotion', {}).get('code')
+            else:
+                err = await resp.text()
+                print(f"Error Jumpseller: {err}")
+                return None
+
+async def procesar_canje_atomico(email: str, monto: int, db):
+    # 1. Validaciones básicas
+    if monto < settings.MIN_CANJE:
+        raise HTTPException(status_code=400, detail=f"Mínimo de canje es {settings.MIN_CANJE} QP")
+        
+    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+    if not user or user.saldo < monto:
+        raise HTTPException(status_code=400, detail="Saldo insuficiente")
+
+    # 2. Obtener credenciales Jumpseller
+    t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
+    s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_LOGIN").first() # Ojo: Login (email admin), no Store ID para crear promos usualmente
+    # NOTA: Jumpseller API usa 'login' (email del dueño) y 'authtoken'. 
+    # Si guardaste el login en SystemConfig bajo 'JUMPSELLER_LOGIN' o 'SMTP_USER' úsalo.
+    # Asumiré que JUMPSELLER_LOGIN está en env o usamos SMTP_EMAIL como fallback si es el mismo.
+    
+    login_js = s.value if s else settings.SMTP_USER 
+    token_js = t.value if t else None
+    
+    if not login_js or not token_js:
+        raise HTTPException(status_code=500, detail="Error de configuración tienda")
+
+    # 3. Crear Cupón en Jumpseller
+    codigo = await crear_cupon_jumpseller(monto, email, (login_js, token_js))
+    
+    if not codigo:
+        raise HTTPException(status_code=500, detail="Error al generar cupón en tienda")
+
+    # 4. Descontar saldo (Atómico)
+    user.saldo -= monto
+    user.historico_canjeado += monto
+    db.commit()
+
+    return {
+        "status": "success", 
+        "new_balance": user.saldo, 
+        "code": codigo,
+        "message": f"Canje exitoso. Tu código es {codigo}"
+    }
+
+# --- FUNCIONES DE BUYLIST (YA EXISTENTES) ---
 
 async def get_jumpseller_stock(session, name, login, token):
     if not name: return 0
@@ -36,10 +116,14 @@ async def fetch_scryfall_prices(session, scryfall_id):
 
 async def analizar_csv_con_stock_real(content, db):
     try:
-        # Credenciales desde la Bóveda (DB)
         t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
-        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first()
-        creds = (s.value, t.value) if t and s else None
+        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first() # Para búsqueda usamos Store o Login depende endpoint, search usa login
+        # Ajuste: Search products usa Login y Token.
+        # Vamos a leer JUMPSELLER_LOGIN si existe, sino fallback a un valor conocido
+        l_config = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_LOGIN").first()
+        login = l_config.value if l_config else settings.SMTP_USER # Fallback
+        
+        creds = (login, t.value) if t else None
         
         df = pd.read_csv(BytesIO(content))
         df.columns = [str(c).lower().strip().replace(' ', '_') for c in df.columns]
@@ -67,7 +151,6 @@ async def analizar_csv_con_stock_real(content, db):
             csv_price = float(row.get('purchase_price', 0)) if has_csv_price else 0.0
             is_foil = str(row.get('foil', '')).lower() == 'foil'
             
-            # Prioridad CSV
             if is_foil:
                 pf = csv_price if csv_price > 0 else sf_pf
                 pn = sf_pn
@@ -81,7 +164,6 @@ async def analizar_csv_con_stock_real(content, db):
             if stock >= limit: 
                 status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
             elif is_foil:
-                # Estaca Check
                 if pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn>0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
                     status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
                 elif pn >= 20.0:

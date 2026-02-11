@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Dict, Any
 
-# IMPORTS RELATIVOS CORRECTOS
+# IMPORTS
 from .database import engine, Base, get_db, SessionLocal
 from .models import GameCoinUser, SystemConfig
 from .config import settings
@@ -16,35 +16,23 @@ from . import tcg_logic
 logging.basicConfig(level=logging.INFO)
 Base.metadata.create_all(bind=engine)
 
-# --- BÓVEDA INTELIGENTE (SOLUCIÓN DEFINITIVA) ---
+# --- BÓVEDA ---
 def inicializar_boveda():
-    """Sincroniza credenciales de Render a la DB al inicio."""
     db = SessionLocal()
     try:
         keys = ["JUMPSELLER_API_TOKEN", "JUMPSELLER_STORE", "JUMPSELLER_HOOKS_TOKEN"]
-        cambios = 0
-        logging.info("🔐 Bóveda: Verificando credenciales...")
-
         for key in keys:
             env_val = os.getenv(key)
-            if not env_val:
-                logging.warning(f"⚠️ Variable {key} no encontrada en Render.")
-                continue
-
-            db_item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
-            if db_item:
-                if db_item.value != env_val:
-                    db_item.value = env_val # Actualizar valor viejo
-                    cambios += 1
-            else:
-                db.add(SystemConfig(key=key, value=env_val)) # Crear nuevo
-                cambios += 1
-        
-        if cambios > 0:
-            db.commit()
-            logging.info(f"✅ Bóveda: Actualizada ({cambios} cambios).")
+            if env_val:
+                db_item = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+                if db_item:
+                    if db_item.value != env_val:
+                        db_item.value = env_val
+                else:
+                    db.add(SystemConfig(key=key, value=env_val))
+        db.commit()
     except Exception as e:
-        logging.error(f"❌ Error Bóveda: {e}")
+        logging.error(f"Error Bóveda: {e}")
     finally:
         db.close()
 
@@ -52,10 +40,10 @@ inicializar_boveda()
 
 app = FastAPI(title="GameQuest API Final")
 
-# --- HEALTH CHECK (VITAL PARA RENDER) ---
+# Health Check
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "msg": "GameQuest Live"}
+    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,6 +53,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- MODELOS DE DATOS ---
 class BuylistSubmission(BaseModel):
     nombre: str
     apellido: str
@@ -74,6 +63,10 @@ class BuylistSubmission(BaseModel):
     pago: str
     cartas: List[Dict[str, Any]]
 
+class CanjeRequest(BaseModel):
+    email: str
+    monto: int
+
 # --- ENDPOINTS ---
 @app.get("/api/public/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
@@ -81,7 +74,7 @@ def get_balance(email: str, db: Session = Depends(get_db)):
     return {"saldo": int(u.saldo if u else 0)}
 
 @app.post("/api/canje")
-async def request_canje(req: Any, db: Session = Depends(get_db), x_store_token: str = Header(None)):
+async def request_canje(req: CanjeRequest, db: Session = Depends(get_db), x_store_token: str = Header(None)):
     if x_store_token != settings.STORE_TOKEN:
         raise HTTPException(status_code=401, detail="Token inválido")
     return await services.procesar_canje_atomico(req.email.lower().strip(), req.monto, db)
