@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text  # IMPORTANTE: Necesario para el script de parcheo
 from pydantic import BaseModel
 from typing import List, Dict, Any
 
@@ -14,10 +15,33 @@ from . import services
 from . import tcg_logic
 
 logging.basicConfig(level=logging.INFO)
+
+# 1. Crear las tablas base
 Base.metadata.create_all(bind=engine)
 
-# --- MODELOS DE DATOS (Deben ir antes de los Endpoints) ---
+# ==========================================================
+# SCRIPT DE ACTUALIZACIÓN FORZADA (PARCHEO DE COLUMNAS)
+# ==========================================================
+def actualizar_estructura_db():
+    db = SessionLocal()
+    try:
+        logging.info("Verificando y parchando columnas en 'game_coin_users'...")
+        # Forzamos la creación de columnas si la tabla ya existía sin ellas
+        db.execute(text("ALTER TABLE game_coin_users ADD COLUMN IF NOT EXISTS name VARCHAR;"))
+        db.execute(text("ALTER TABLE game_coin_users ADD COLUMN IF NOT EXISTS surname VARCHAR;"))
+        db.execute(text("ALTER TABLE game_coin_users ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
+        db.commit()
+        logging.info("Estructura de base de datos sincronizada con el modelo nuevo.")
+    except Exception as e:
+        logging.error(f"Aviso en parcheo de BD (puede que las columnas ya existan): {e}")
+    finally:
+        db.close()
 
+# Ejecutar el parche antes de que inicie la App
+actualizar_estructura_db()
+# ==========================================================
+
+# --- MODELOS DE DATOS ---
 class BalanceAdjustment(BaseModel):
     email: str
     amount: int
@@ -36,7 +60,7 @@ class CanjeRequest(BaseModel):
     email: str
     monto: int
 
-# --- INICIALIZACIÓN BÓVEDA ---
+# --- BÓVEDA ---
 def inicializar_boveda():
     db = SessionLocal()
     try:
@@ -52,7 +76,7 @@ def inicializar_boveda():
                     db.add(SystemConfig(key=key, value=env_val))
         db.commit()
     except Exception as e:
-        logging.error(f"Error Bóveda: {e}")
+        logging.error(f"Error inicializando config Bóveda: {e}")
     finally:
         db.close()
 
@@ -68,7 +92,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ENDPOINTS PÚBLICOS ---
+# --- ENDPOINTS ---
 
 @app.get("/health")
 def health_check():
@@ -99,7 +123,7 @@ async def public_analyze_buylist(file: UploadFile = File(...)):
         return result
     return result.to_dict(orient="records")
 
-# --- ENDPOINTS ADMINISTRATIVOS ---
+# --- ENDPOINTS ADMINISTRATIVOS (BÓVEDA) ---
 
 @app.get("/admin/users")
 def list_users(db: Session = Depends(get_db), x_admin_user: str = Header(None), x_admin_pass: str = Header(None)):
@@ -131,16 +155,7 @@ def adjust(req: BalanceAdjustment, db: Session = Depends(get_db), x_admin_user: 
         user.saldo = max(0, user.saldo - req.amount)
     
     db.commit()
-    return {"status": "success", "nuevo_saldo": user.saldo}
-
-@app.post("/admin/analyze_csv")
-async def admin_analyze_csv(file: UploadFile = File(...), x_admin_user: str = Header(None), x_admin_pass: str = Header(None), db: Session = Depends(get_db)):
-    if x_admin_user != settings.ADMIN_USER or x_admin_pass != settings.ADMIN_PASS:
-        raise HTTPException(status_code=401)
-    content = await file.read()
-    return (await services.analizar_csv_con_stock_real(content, db)).to_dict(orient="records")
-
-# --- WEBHOOKS ---
+    return {"status": "success", "new_balance": user.saldo}
 
 @app.post("/api/webhooks/order_paid")
 async def handle_order_paid(payload: Dict[str, Any], db: Session = Depends(get_db)):
