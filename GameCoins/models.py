@@ -1,3 +1,4 @@
+# GameCoins/models.py
 from sqlalchemy import Column, Integer, String, Float, DateTime, func
 from .database import Base
 
@@ -5,11 +6,11 @@ class GameCoinUser(Base):
     __tablename__ = "game_coin_users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
-    saldo = Column(Integer, default=0) # Crédito actual para gastar
+    saldo = Column(Integer, default=0) # Dinero actual para gastar
     name = Column(String, nullable=True)
     surname = Column(String, nullable=True)
-    historico_acumulado = Column(Integer, default=0) # Total ganado (Torneos + Ventas)
-    historico_canjeado = Column(Integer, default=0)  # Total ya gastado
+    historico_acumulado = Column(Integer, default=0) # Total ganado en la vida
+    historico_canjeado = Column(Integer, default=0)  # Total gastado en la vida
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class PriceCache(Base):
