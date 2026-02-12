@@ -1,206 +1,38 @@
-import asyncio
-import aiohttp
-import smtplib
+# GameCoins/services.py
 import pandas as pd
-import secrets
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-from io import BytesIO, StringIO
-from datetime import datetime
-from fastapi import HTTPException
+import io
+from .models import PriceCache
 
-from .models import SystemConfig, GameCoinUser
-from .config import settings
-
-# --- FUNCIONES DE CANJE (FALTABAN AQUÍ) ---
-
-async def crear_cupon_jumpseller(monto: int, email: str, creds: tuple):
-    """Crea un cupón de uso único en Jumpseller."""
-    login, token = creds
-    code = f"GQ-{secrets.token_hex(3).upper()}-{monto}"
+async def analizar_manabox_ck(content: bytes, db):
+    df = pd.read_csv(io.BytesIO(content))
+    results = []
+    tasa_dolar = 950 # Puedes mover esto a settings o SystemConfig
     
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    params = {'login': login, 'authtoken': token}
+    for _, row in df.iterrows():
+        s_id = str(row.get('Scryfall ID'))
+        name = row.get('Name')
+        precio_ck = row.get('Purchase price') # Valor CK en el CSV de ManaBox
+
+        # Manejo de Caché
+        if pd.notnull(precio_ck) and precio_ck > 0:
+            cache = db.query(PriceCache).filter(PriceCache.scryfall_id == s_id).first()
+            if cache: cache.price_usd = precio_ck
+            else: db.add(PriceCache(scryfall_id=s_id, name=name, price_usd=precio_ck))
+            valor_ck = precio_ck
+        else:
+            cache = db.query(PriceCache).filter(PriceCache.scryfall_id == s_id).first()
+            valor_ck = cache.price_usd if cache else 0
+
+        # Tu regla de negocio: Compras al 50% del valor CK
+        oferta_clp = int(valor_ck * tasa_dolar * 0.5)
+
+        results.append({
+            "name": name,
+            "qty": int(row.get('Quantity', 1)),
+            "price_usd": valor_ck,
+            "offer_clp": oferta_clp,
+            "condition": row.get('Condition', 'NM')
+        })
     
-    # Configuración del cupón
-    payload = {
-        "promotion": {
-            "name": f"Canje GameCoins {monto} - {email}",
-            "code": code,
-            "value": monto,
-            "discount_target": "order",
-            "discount_type": "fix", # Descuento fijo en dinero
-            "minimum_order_amount": 0,
-            "quantity": 1, # Solo 1 uso
-            "status": "active",
-            "customer_categories": [], # Opcional: restringir
-            "products": [] # Aplica a todo
-        }
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, params=params, json=payload) as resp:
-            if resp.status in [200, 201]:
-                data = await resp.json()
-                return data.get('promotion', {}).get('code')
-            else:
-                err = await resp.text()
-                print(f"Error Jumpseller: {err}")
-                return None
-
-async def procesar_canje_atomico(email: str, monto: int, db):
-    # 1. Validaciones básicas
-    if monto < settings.MIN_CANJE:
-        raise HTTPException(status_code=400, detail=f"Mínimo de canje es {settings.MIN_CANJE} QP")
-        
-    user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    if not user or user.saldo < monto:
-        raise HTTPException(status_code=400, detail="Saldo insuficiente")
-
-    # 2. Obtener credenciales Jumpseller
-    t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
-    s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_LOGIN").first() # Ojo: Login (email admin), no Store ID para crear promos usualmente
-    # NOTA: Jumpseller API usa 'login' (email del dueño) y 'authtoken'. 
-    # Si guardaste el login en SystemConfig bajo 'JUMPSELLER_LOGIN' o 'SMTP_USER' úsalo.
-    # Asumiré que JUMPSELLER_LOGIN está en env o usamos SMTP_EMAIL como fallback si es el mismo.
-    
-    login_js = s.value if s else settings.SMTP_USER 
-    token_js = t.value if t else None
-    
-    if not login_js or not token_js:
-        raise HTTPException(status_code=500, detail="Error de configuración tienda")
-
-    # 3. Crear Cupón en Jumpseller
-    codigo = await crear_cupon_jumpseller(monto, email, (login_js, token_js))
-    
-    if not codigo:
-        raise HTTPException(status_code=500, detail="Error al generar cupón en tienda")
-
-    # 4. Descontar saldo (Atómico)
-    user.saldo -= monto
-    user.historico_canjeado += monto
     db.commit()
-
-    return {
-        "status": "success", 
-        "new_balance": user.saldo, 
-        "code": codigo,
-        "message": f"Canje exitoso. Tu código es {codigo}"
-    }
-
-# --- FUNCIONES DE BUYLIST (YA EXISTENTES) ---
-
-async def get_jumpseller_stock(session, name, login, token):
-    if not name: return 0
-    try:
-        url = f"{settings.JUMPSELLER_API_BASE}/products/search.json"
-        async with session.get(url, params={'login':login, 'authtoken':token, 'query':name, 'fields':'stock'}) as r:
-            if r.status == 200:
-                data = await r.json()
-                return sum(p.get('stock', 0) for p in data)
-    except: pass
-    return 0
-
-async def fetch_scryfall_prices(session, scryfall_id):
-    if not scryfall_id or pd.isna(scryfall_id): return 0.0, 0.0
-    try:
-        async with session.get(f"https://api.scryfall.com/cards/{scryfall_id}") as r:
-            if r.status == 200:
-                d = await r.json()
-                p = d.get('prices', {})
-                return float(p.get('usd') or 0), float(p.get('usd_foil') or 0)
-    except: pass
-    return 0.0, 0.0
-
-async def analizar_csv_con_stock_real(content, db):
-    try:
-        t = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_API_TOKEN").first()
-        s = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_STORE").first() # Para búsqueda usamos Store o Login depende endpoint, search usa login
-        # Ajuste: Search products usa Login y Token.
-        # Vamos a leer JUMPSELLER_LOGIN si existe, sino fallback a un valor conocido
-        l_config = db.query(SystemConfig).filter(SystemConfig.key=="JUMPSELLER_LOGIN").first()
-        login = l_config.value if l_config else settings.SMTP_USER # Fallback
-        
-        creds = (login, t.value) if t else None
-        
-        df = pd.read_csv(BytesIO(content))
-        df.columns = [str(c).lower().strip().replace(' ', '_') for c in df.columns]
-        
-        has_csv_price = 'purchase_price' in df.columns
-        use_scryfall = 'scryfall_id' in df.columns
-        
-        async with aiohttp.ClientSession() as sess:
-            tasks_stock = []
-            tasks_prices = []
-            
-            for _, row in df.iterrows():
-                tasks_stock.append(get_jumpseller_stock(sess, row.get('name'), *creds) if creds else asyncio.sleep(0))
-                if use_scryfall:
-                    tasks_prices.append(fetch_scryfall_prices(sess, row.get('scryfall_id')))
-            
-            results_stock = await asyncio.gather(*tasks_stock)
-            results_prices = await asyncio.gather(*tasks_prices) if use_scryfall else [(0.0, 0.0)] * len(df)
-
-        processed = []
-        for i, (_, row) in enumerate(df.iterrows()):
-            stock = int(results_stock[i]) if creds else 0
-            sf_pn, sf_pf = results_prices[i]
-            
-            csv_price = float(row.get('purchase_price', 0)) if has_csv_price else 0.0
-            is_foil = str(row.get('foil', '')).lower() == 'foil'
-            
-            if is_foil:
-                pf = csv_price if csv_price > 0 else sf_pf
-                pn = sf_pn
-            else:
-                pn = csv_price if csv_price > 0 else sf_pn
-                pf = sf_pf
-            
-            status, razon = "APROBADO", "OK"
-            limit = settings.STOCK_LIMIT_HIGH_DEMAND if pn >= 20.0 else settings.STOCK_LIMIT_DEFAULT
-            
-            if stock >= limit: 
-                status, razon = "RECHAZADO (FULL)", f"Stock {stock}/{limit}"
-            elif is_foil:
-                if pf >= 20.0 and pn < 20.0 and (pf/pn > settings.STAKE_RATIO_THRESHOLD if pn>0 else True) and (pf-pn > settings.STAKE_DIFF_THRESHOLD):
-                    status, razon = "RECHAZADO (ESTACA)", "Relación sospechosa"
-                elif pn >= 20.0:
-                    status, razon = "HIGH END", "Alta Demanda"
-
-            processed.append({
-                "name": row.get('name','Unknown'),
-                "price_normal": pn, "price_foil": pf,
-                "current_stock": stock, "stock_limit": limit,
-                "status": status, "razon": razon,
-                "valor_compra_efectivo": round((pf if is_foil else pn) * settings.CASH_MULTIPLIER * settings.USD_TO_CLP)
-            })
-            
-        df_res = pd.DataFrame(processed)
-        df_res['rank'] = df_res['status'].apply(lambda s: 0 if "HIGH" in s else (1 if "APRO" in s else 2))
-        return df_res.sort_values('rank').drop(columns=['rank'])
-    except Exception as e: return {"error": str(e)}
-
-def enviar_correo_cotizacion(data):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = settings.SMTP_USER
-        msg['To'] = f"{settings.TARGET_EMAIL}, {data['email']}"
-        msg['Subject'] = f"Venta GameQuest - {data['rut']}"
-        body = f"Nueva solicitud:\nNombre: {data['nombre']} {data['apellido']}\nRUT: {data['rut']}\nTel: {data['telefono']}\nPago: {data['pago']}"
-        msg.attach(MIMEText(body, 'plain'))
-        df = pd.DataFrame(data['cartas'])
-        csv_out = StringIO()
-        df.to_csv(csv_out, index=False)
-        part = MIMEBase('application', "octet-stream")
-        part.set_payload(csv_out.getvalue().encode("utf-8"))
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename="oferta_{data["rut"]}.csv"')
-        msg.attach(part)
-        with smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT) as server:
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASS)
-            server.send_message(msg)
-        return True
-    except: return False
+    return results
