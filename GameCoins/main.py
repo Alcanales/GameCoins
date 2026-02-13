@@ -5,15 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, or_ 
+from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-from .database import engine, Base, get_db, SessionLocal
-from .models import GameCoinUser
-from .config import settings
-from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
-from . import services
+# --- IMPORTS ABSOLUTOS (CORREGIDOS) ---
+from database import engine, Base, get_db, SessionLocal
+from models import GameCoinUser
+from config import settings
+from schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
+import services
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def verify_admin_token(authorization: str = Header(None)):
         return active_sessions[token]
     except: raise HTTPException(401, "Token malformado")
 
-# --- ENDPOINTS ADMIN OPTIMIZADOS ---
+# --- ENDPOINTS ADMIN ---
 
 @app.get("/admin/users")
 def list_users(
@@ -89,34 +90,26 @@ def list_users(
     db: Session = Depends(get_db), 
     admin: str = Depends(verify_admin_token)
 ):
-    """
-    Buscador Estricto: "Si Contiene" (ilike %term%)
-    Campos: Email, Nombre, Apellido.
-    """
+    """Buscador 'Si Contiene' Optimizado"""
     query = db.query(GameCoinUser)
 
-    # 1. Filtro de Saldo
     if only_balance:
         query = query.filter(GameCoinUser.saldo > 0)
 
-    # 2. Búsqueda por Texto (Solo Nombre/Email)
     if search and len(search.strip()) > 0:
         term = f"%{search.strip().lower()}%"
-        
         query = query.filter(
             or_(
-                GameCoinUser.email.ilike(term),   
-                GameCoinUser.name.ilike(term),    
-                GameCoinUser.surname.ilike(term)  
+                GameCoinUser.email.ilike(term),
+                GameCoinUser.name.ilike(term),
+                GameCoinUser.surname.ilike(term)
             )
         )
 
-    # Cálculos rápidos SQL (Totales Globales)
     total_points = db.query(func.sum(GameCoinUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GameCoinUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GameCoinUser.historico_canjeado)).scalar() or 0
     
-    # Orden Descendente por Saldo
     users = query.order_by(GameCoinUser.saldo.desc()).limit(limit).all()
     
     return {

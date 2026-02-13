@@ -5,16 +5,14 @@ import uuid
 import aiohttp
 import asyncio
 from sqlalchemy.orm import Session
-from .config import settings
-from .models import GameCoinUser
+from config import settings        
+from models import GameCoinUser    
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- JUMPSELLER SYNC ---
-
 async def fetch_jumpseller_customers():
-    """Descarga paginada de clientes."""
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
         "login": settings.JUMPSELLER_LOGIN,
@@ -22,9 +20,7 @@ async def fetch_jumpseller_customers():
         "limit": 50,
         "page": 1
     }
-    
     all_customers = []
-    
     async with aiohttp.ClientSession() as session:
         while True:
             try:
@@ -32,76 +28,52 @@ async def fetch_jumpseller_customers():
                     if resp.status != 200:
                         logger.error(f"Error Jumpseller Sync: {resp.status}")
                         break
-                        
                     data = await resp.json()
-                    if not data:
-                        break 
-                        
+                    if not data: break 
                     all_customers.extend(data)
-                    logger.info(f"Sync Page {params['page']}: {len(data)} clientes encontrados.")
-                    
-                    if len(data) < 50:
-                        break 
-                    
+                    logger.info(f"Sync Page {params['page']}: {len(data)} clientes.")
+                    if len(data) < 50: break 
                     params["page"] += 1
-                    
             except Exception as e:
-                logger.error(f"Excepción en Sync Jumpseller: {e}")
+                logger.error(f"Excepción en Sync: {e}")
                 break
-                
-    logger.info(f"Total Clientes Jumpseller Descargados: {len(all_customers)}")
+    logger.info(f"Total Clientes Descargados: {len(all_customers)}")
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    """Sincroniza y normaliza emails."""
     logger.info("Iniciando Sincronización...")
     customers = await fetch_jumpseller_customers()
-    
     added = 0
     updated = 0
     
     for c in customers:
         customer_data = c.get('customer', {})
-        # Normalizar email a minúsculas y sin espacios
         email = customer_data.get('email', '').strip().lower()
-        
         if not email: continue
 
         user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-        
-        # Datos (Si vienen vacíos, usamos string vacío)
         name = customer_data.get('name') or ''
         surname = customer_data.get('surname') or ''
-        rut = customer_data.get('taxid') # Jumpseller standard field for RUT/DNI
+        rut = customer_data.get('taxid')
 
         if not user:
-            new_user = GameCoinUser(
-                email=email,
-                name=name,
-                surname=surname,
-                rut=rut,
-                saldo=0 
-            )
+            new_user = GameCoinUser(email=email, name=name, surname=surname, rut=rut, saldo=0)
             db.add(new_user)
             added += 1
         else:
-            # Actualizar si hay cambios
             if user.name != name or user.surname != surname or (rut and user.rut != rut):
                 user.name = name
                 user.surname = surname
                 if rut: user.rut = rut
                 updated += 1
-    
     db.commit()
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
 
 # --- JUMPSELLER COUPONS ---
-
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    
     payload = {
         "promotion": {
             "name": f"Canje QuestPoints - {email}",
@@ -113,19 +85,15 @@ async def create_jumpseller_coupon(email: str, amount: int):
             "minimum_order_amount": 0
         }
     }
-
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, params=params, json=payload) as resp:
-                if resp.status not in [200, 201]:
-                    return None
+                if resp.status not in [200, 201]: return None
                 data = await resp.json()
                 return data.get("promotion", {}).get("code", code)
-        except:
-            return None
+        except: return None
 
 # --- BUYLIST LOGIC ---
-
 def clean_currency(value):
     if pd.isna(value): return 0.0
     if isinstance(value, (int, float)): return float(value)
@@ -157,7 +125,6 @@ async def analizar_manabox_ck(content: bytes, db):
         for _, row in df.iterrows():
             price_usd = clean_currency(row.get(col_price, 0))
             if price_usd <= 0.05: continue
-            
             qty = int(clean_currency(row.get(col_qty, 1)))
             multiplier = get_pricing_tier(price_usd)
             offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
@@ -170,7 +137,6 @@ async def analizar_manabox_ck(content: bytes, db):
                 "offer_clp_total": offer_unit * qty,
                 "status": "HIGH END 💎" if price_usd >= 50 else ("BULK" if price_usd < 1 else "APROBADO")
             })
-
         results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
         return results
     except Exception as e:
