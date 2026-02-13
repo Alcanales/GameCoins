@@ -1,14 +1,13 @@
 import logging
 import uuid
-import logging
-import uuid
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from apscheduler.schedulers.asyncio import AsyncIOScheduler # Importante para tareas programadas
+from sqlalchemy import text, func, or_ # <--- IMPORTANTE: 'func' y 'or_' para optimización
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from typing import Optional
 
 from .database import engine, Base, get_db, SessionLocal
 from .models import GameCoinUser
@@ -16,7 +15,6 @@ from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
 from . import services
 
-# Configuración Logs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -25,7 +23,6 @@ def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()
-        # Aseguramos columnas existentes
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
         db.commit()
@@ -35,7 +32,7 @@ def run_migrations():
 
 run_migrations()
 
-# --- SCHEDULER (Tarea Automática 11:30 PM) ---
+# --- SCHEDULER ---
 scheduler = AsyncIOScheduler()
 
 async def auto_sync_job():
@@ -50,10 +47,9 @@ async def auto_sync_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Iniciar Scheduler al arrancar la app
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
-    logger.info("✅ Scheduler iniciado: Sync programado a las 23:30")
+    logger.info("✅ Scheduler iniciado")
     yield
 
 app = FastAPI(title="GameQuest Vault API", lifespan=lifespan)
@@ -65,7 +61,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- AUTH ---
 active_sessions = {}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
@@ -84,12 +79,47 @@ def verify_admin_token(authorization: str = Header(None)):
         return active_sessions[token]
     except: raise HTTPException(401, "Token malformado")
 
-# --- ENDPOINTS ADMIN ---
+# --- ENDPOINTS ADMIN OPTIMIZADOS ---
 
 @app.get("/admin/users")
-def list_users(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
-    users = db.query(GameCoinUser).all()
-    return {"users": users, "totalPointsInVault": sum(u.saldo for u in users)}
+def list_users(
+    limit: int = 100, 
+    search: Optional[str] = None, 
+    only_balance: bool = False,
+    db: Session = Depends(get_db), 
+    admin: str = Depends(verify_admin_token)
+):
+    """Buscador Híbrido Optimizado"""
+    query = db.query(GameCoinUser)
+
+    if only_balance:
+        query = query.filter(GameCoinUser.saldo > 0)
+
+    if search and len(search.strip()) > 0:
+        term = f"%{search.strip().lower()}%"
+        query = query.filter(
+            or_(
+                GameCoinUser.email.ilike(term),
+                GameCoinUser.name.ilike(term),
+                GameCoinUser.surname.ilike(term),
+                GameCoinUser.rut.ilike(term)
+            )
+        )
+
+    # Cálculos rápidos SQL
+    total_points = db.query(func.sum(GameCoinUser.saldo)).scalar() or 0
+    total_count = db.query(func.count(GameCoinUser.id)).scalar() or 0
+    total_redeemed = db.query(func.sum(GameCoinUser.historico_canjeado)).scalar() or 0
+    
+    users = query.order_by(GameCoinUser.saldo.desc()).limit(limit).all()
+    
+    return {
+        "users": users,
+        "totalPointsInVault": total_points,
+        "totalCount": total_count,
+        "totalRedeemed": total_redeemed,
+        "filteredCount": len(users)
+    }
 
 @app.post("/admin/adjust_balance")
 def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
@@ -108,13 +138,12 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
     db.commit()
     return {"status": "success", "new_balance": user.saldo}
 
-# NUEVO ENDPOINT: Botón Manual de Sincronización
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
 
-# --- PUBLIC & CANJE ---
+# --- ENDPOINTS PUBLICOS ---
 
 @app.get("/health")
 def health(): return {"status": "online"}
@@ -148,7 +177,7 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
 
     cupon = await services.create_jumpseller_coupon(user.email, req.monto)
     if not cupon:
-        user.saldo += req.monto # Rollback
+        user.saldo += req.monto 
         user.historico_canjeado -= req.monto
         db.commit()
         raise HTTPException(502, "Error Jumpseller")

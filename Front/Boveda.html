@@ -2,140 +2,172 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Bóveda GameQuest - Control Central</title>
+    <title>Bóveda GameQuest</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; background: #0f172a; }
-        .vault-bg {
-            background-color: #0f172a;
-            background-image: 
-                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-                radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-                radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
-            background-size: 150% 150%;
-            animation: gradient-move 15s ease infinite;
-        }
-        @keyframes gradient-move {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .input-aesthetic { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: white; transition: all 0.3s; }
-        .input-aesthetic:focus { background: rgba(255, 255, 255, 0.15); border-color: #fbbf24; outline: none; }
+        body { font-family: 'Inter', system-ui, sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .input-clean { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; transition: all 0.2s; }
+        .input-clean:focus { border-color: #eab308; outline: none; box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.15); }
+        .truncate-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); }
+        .spin-slow { animation: spin 2s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="vault-bg min-h-screen text-slate-200">
-
-    <div id="login-view" class="flex items-center justify-center min-h-screen">
-        <div class="w-full max-w-sm glass p-8 rounded-3xl shadow-2xl">
+<body class="min-h-screen flex flex-col">
+    <div id="login-view" class="flex flex-grow items-center justify-center p-4 bg-slate-50">
+        <div class="w-full max-w-sm bg-white rounded-xl card-shadow border border-slate-100 p-8">
             <div class="text-center mb-8">
-                <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 shadow-lg mb-4 text-white text-2xl">
-                    <i class="fas fa-user-shield"></i>
-                </div>
-                <h2 class="text-2xl font-bold text-white tracking-tight">Acceso Bóveda</h2>
-                <p class="text-sm text-gray-400 mt-2">Identifícate para gestionar puntos</p>
+                <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-50 text-yellow-600 mb-4"><i class="fas fa-lock"></i></div>
+                <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Acceso Bóveda</h1>
             </div>
-            <form onsubmit="event.preventDefault(); login();" class="space-y-6">
-                <div>
-                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Usuario Admin</label>
-                    <input type="text" id="user" class="input-aesthetic w-full rounded-xl py-3 px-4 mt-1 text-sm" placeholder="Usuario">
-                </div>
-                <div>
-                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Contraseña</label>
-                    <input type="password" id="pass" class="input-aesthetic w-full rounded-xl py-3 px-4 mt-1 text-sm" placeholder="••••••••">
-                </div>
-                <button type="submit" class="w-full bg-white hover:bg-yellow-500 hover:text-white text-slate-900 font-bold py-3.5 rounded-xl transition-all shadow-lg transform active:scale-95 text-sm uppercase">Ingresar</button>
+            <form onsubmit="event.preventDefault(); login();" class="space-y-5">
+                <input type="text" id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
+                <input type="password" id="pass" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••">
+                <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg transition-all shadow-md transform active:scale-95">INGRESAR</button>
             </form>
         </div>
     </div>
 
-    <div id="dashboard-view" class="hidden min-h-screen p-6 md:p-12 opacity-0 transition-opacity duration-700">
-        <div class="max-w-6xl mx-auto">
-            <div class="flex justify-between items-center mb-10">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-yellow-400 border border-white/10"><i class="fas fa-coins"></i></div>
-                    <h1 class="font-bold text-white text-xl">Panel Bóveda</h1>
-                </div>
-                <button onclick="location.reload()" class="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition">SALIR</button>
+    <div id="dashboard-view" class="hidden flex-col w-full max-w-[1400px] mx-auto p-4 md:p-8">
+        <header class="flex justify-between items-center mb-6 pb-4 border-b border-slate-200">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-slate-900 text-yellow-400 rounded flex items-center justify-center"><i class="fas fa-coins"></i></div>
+                <div><h2 class="text-lg font-bold text-slate-800">GameQuest Bóveda</h2><p class="text-xs text-slate-500">Gestión de Puntos</p></div>
             </div>
+            <div class="flex gap-2">
+                <button onclick="syncUsers()" id="btn-sync" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-2"><i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span></button>
+                <button onclick="logout()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 rounded-lg text-xs font-bold transition shadow-sm">SALIR</button>
+            </div>
+        </header>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                <div class="glass p-8 rounded-3xl">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Clientes</p>
-                    <p id="stat-count" class="text-4xl font-black text-white">--</p>
-                </div>
-                <div class="glass p-8 rounded-3xl">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Puntos Totales</p>
-                    <p id="stat-pts" class="text-4xl font-black text-yellow-500">--</p>
-                </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-8 flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div class="relative w-full md:w-96">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400"><i class="fas fa-search"></i></div>
+                <input type="text" id="search-input" onkeyup="if(event.key === 'Enter') load()" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre, email o RUT...">
             </div>
+            <div class="flex w-full md:w-auto gap-3 items-center">
+                <select id="filter-mode" onchange="load()" class="input-clean rounded-lg py-2.5 px-3 text-sm font-bold text-slate-600 bg-slate-50 cursor-pointer">
+                    <option value="all">👁️ Ver Todos</option>
+                    <option value="balance">💰 Solo con Saldo</option>
+                </select>
+                <button onclick="load()" class="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm">BUSCAR</button>
+            </div>
+        </div>
 
-            <div class="glass rounded-3xl overflow-hidden shadow-2xl">
-                <table class="w-full text-left">
-                    <thead class="bg-white/5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                        <tr><th class="px-8 py-5">Cliente</th><th class="px-8 py-5 text-center">Saldo</th><th class="px-8 py-5 text-center">Acciones</th></tr>
-                    </thead>
-                    <tbody id="user-table" class="divide-y divide-white/5"></tbody>
-                </table>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Circulante Total</p><p id="stat-pts" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Clientes Totales</p><p id="stat-count" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Histórico Canjeado</p><p id="stat-redeemed" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden flex flex-col flex-grow">
+            <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div class="col-span-3 pl-2">Cliente / RUT</div>
+                <div class="col-span-3">Nombre</div>
+                <div class="col-span-2 text-center">Histórico</div>
+                <div class="col-span-2 text-center">Saldo</div>
+                <div class="col-span-2 text-center">Acciones</div>
             </div>
+            <div id="user-table" class="divide-y divide-slate-100 max-h-[600px] overflow-y-auto"></div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados</div>
         </div>
     </div>
 
     <script>
         const API = "https://gamecoins.onrender.com";
-        let u_auth, p_auth;
+        let authToken = null;
 
         async function login() {
-            u_auth = document.getElementById('user').value;
-            p_auth = document.getElementById('pass').value;
+            const u = document.getElementById('user').value;
+            const p = document.getElementById('pass').value;
             try {
-                const res = await fetch(`${API}/admin/users`, { headers: { "x-admin-user": u_auth, "x-admin-pass": p_auth } });
+                const res = await fetch(`${API}/api/auth/login`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: u, password: p }) });
                 if(res.ok) {
+                    const data = await res.json();
+                    authToken = data.access_token;
                     document.getElementById('login-view').classList.add('hidden');
                     const dash = document.getElementById('dashboard-view');
-                    dash.classList.remove('hidden');
-                    setTimeout(() => dash.classList.add('opacity-100'), 50);
+                    dash.classList.remove('hidden'); dash.classList.add('flex');
                     load();
                 } else { Swal.fire('Error', 'Credenciales inválidas', 'error'); }
-            } catch(e) { Swal.fire('Error', 'Conectando con Render...', 'warning'); }
+            } catch(e) { Swal.fire('Error', 'Sin conexión', 'error'); }
         }
 
         async function load() {
-            const res = await fetch(`${API}/admin/users`, { headers: { "x-admin-user": u_auth, "x-admin-pass": p_auth } });
-            const data = await res.json();
-            const body = document.getElementById('user-table');
-            body.innerHTML = '';
-            let total = 0;
-            data.forEach(u => {
-                total += u.saldo;
-                body.innerHTML += `
-                <tr>
-                    <td class="px-8 py-5 font-bold text-white">${u.email}</td>
-                    <td class="px-8 py-5 text-center"><span class="bg-yellow-500/10 text-yellow-500 px-4 py-1 rounded-full font-black text-xs">${u.saldo} QP</span></td>
-                    <td class="px-8 py-5 text-center">
-                        <button onclick="adjust('${u.email}', 'add')" class="text-green-500 mx-2 hover:scale-110 transition"><i class="fas fa-plus-circle fa-lg"></i></button>
-                        <button onclick="adjust('${u.email}', 'subtract')" class="text-red-500 mx-2 hover:scale-110 transition"><i class="fas fa-minus-circle fa-lg"></i></button>
-                    </td>
-                </tr>`;
-            });
-            document.getElementById('stat-count').innerText = data.length;
-            document.getElementById('stat-pts').innerText = total.toLocaleString();
+            if(!authToken) return;
+            const search = document.getElementById('search-input').value;
+            const mode = document.getElementById('filter-mode').value;
+            document.getElementById('user-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Cargando datos...</div>';
+            
+            try {
+                let url = `${API}/admin/users?limit=100`;
+                if(search) url += `&search=${encodeURIComponent(search)}`;
+                if(mode === 'balance') url += `&only_balance=true`;
+
+                const res = await fetch(url, { headers: { "Authorization": `Bearer ${authToken}` } });
+                if(res.status === 403) { logout(); return; }
+                const data = await res.json();
+                
+                const container = document.getElementById('user-table');
+                let htmlBuffer = '';
+                
+                if(data.users.length === 0) {
+                    htmlBuffer = '<div class="p-8 text-center text-slate-500">No se encontraron clientes.</div>';
+                } else {
+                    data.users.forEach(u => {
+                        const name = (u.name || u.surname) ? `${u.name||''} ${u.surname||''}` : '<i class="text-slate-400">Sin nombre</i>';
+                        const initials = u.email.substring(0,2).toUpperCase();
+                        htmlBuffer += `
+                        <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-4 md:gap-0 border-b border-slate-100 md:border-0">
+                            <div class="md:col-span-3 flex items-center gap-3 pl-2 overflow-hidden">
+                                <div class="w-10 h-10 flex-shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">${initials}</div>
+                                <div class="min-w-0"><p class="font-bold text-slate-800 text-sm truncate-text" title="${u.email}">${u.email}</p><p class="text-[11px] text-slate-500 font-mono tracking-wider">${u.rut || 'SIN RUT'}</p></div>
+                            </div>
+                            <div class="md:col-span-3 text-sm text-slate-600 truncate-text">${name}</div>
+                            <div class="md:col-span-2 text-center"><span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span></div>
+                            <div class="md:col-span-2 text-center"><span class="inline-block border rounded-lg px-3 py-1 text-sm font-bold ${u.saldo > 0 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span></div>
+                            <div class="md:col-span-2 flex justify-center gap-2">
+                                <button onclick="adjust('${u.email}', 'add')" class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition"><i class="fas fa-plus"></i></button>
+                                <button onclick="adjust('${u.email}', 'subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition"><i class="fas fa-minus"></i></button>
+                            </div>
+                        </div>`;
+                    });
+                }
+                container.innerHTML = htmlBuffer;
+                document.getElementById('stat-count').innerText = data.totalCount.toLocaleString();
+                document.getElementById('stat-pts').innerText = data.totalPointsInVault.toLocaleString();
+                document.getElementById('stat-redeemed').innerText = '$' + data.totalRedeemed.toLocaleString();
+                document.getElementById('results-count').innerText = data.users.length;
+            } catch(e) { console.error(e); }
+        }
+
+        async function syncUsers() {
+            const btn = document.getElementById('btn-sync');
+            const icon = btn.querySelector('i');
+            icon.classList.add('spin-slow'); btn.disabled = true; btn.innerHTML = `<i class="fas fa-sync-alt spin-slow"></i> SINCRONIZANDO...`;
+            try {
+                const res = await fetch(`${API}/admin/sync_users`, { method: 'POST', headers: { "Authorization": `Bearer ${authToken}` } });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    Swal.fire({icon: 'success', title: 'Sincronización Completa', text: `Agregados: ${data.details.added}, Actualizados: ${data.details.updated}`, confirmButtonColor: '#2563eb'});
+                    load();
+                }
+            } catch(e) { Swal.fire('Error', 'Fallo Sync', 'error'); }
+            btn.disabled = false; btn.innerHTML = `<i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span>`; icon.classList.remove('spin-slow');
         }
 
         async function adjust(email, op) {
-            const { value: amt } = await Swal.fire({ title: op==='add'?'Abonar':'Descontar', input: 'number', background: '#0f172a', color: '#fff' });
-            if(amt) {
-                await fetch(`${API}/admin/adjust_balance`, {
-                    method: 'POST',
-                    headers: { "Content-Type": "application/json", "x-admin-user": u_auth, "x-admin-pass": p_auth },
-                    body: JSON.stringify({ email, amount: parseInt(amt), operation: op })
-                });
+            const isAdd = op === 'add';
+            const { value: amt } = await Swal.fire({ title: isAdd ? 'ABONAR' : 'DESCONTAR', html: `<p class="text-sm text-slate-500">${email}</p>`, input: 'number', confirmButtonColor: isAdd ? '#22c55e' : '#ef4444', showCancelButton: true });
+            if(amt && parseInt(amt) > 0) {
+                await fetch(`${API}/admin/adjust_balance`, { method: 'POST', headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` }, body: JSON.stringify({ email, amount: parseInt(amt), operation: op }) });
                 load();
             }
         }
+        function logout() { authToken = null; location.reload(); }
     </script>
 </body>
 </html>
