@@ -5,18 +5,18 @@ import uuid
 import aiohttp
 import asyncio
 from sqlalchemy.orm import Session
-from .config import settings  # Import relativo correcto
-from .models import GameCoinUser # Import relativo correcto
+from .config import settings
+from .models import GameCoinUser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- JUMPSELLER SYNC ROBUSTO ---
+# --- JUMPSELLER SYNC ROBUSTO (VERSIÓN FINAL) ---
 
 async def fetch_jumpseller_customers():
     """
-    Descarga paginada de clientes con sistema de reintentos y tolerancia a fallos.
-    Garantiza que se descarguen TODOS los clientes incluso si la red parpadea.
+    Descarga paginada con frenos y reintentos.
+    Evita bloqueos por velocidad y recupera fallos de red.
     """
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
@@ -27,99 +27,91 @@ async def fetch_jumpseller_customers():
     }
     
     all_customers = []
-    max_retries = 3
+    max_retries = 3 # Intentar 3 veces cada página si falla
     
     async with aiohttp.ClientSession() as session:
         while True:
             retry_count = 0
             success = False
             
-            # Bucle de Reintentos para la página actual
+            # Bucle de perseverancia (Reintentos)
             while retry_count < max_retries:
                 try:
                     async with session.get(url, params=params) as resp:
-                        # Caso 1: Éxito
+                        # Caso 1: Éxito total
                         if resp.status == 200:
                             data = await resp.json()
                             if not data:
                                 success = True
+                                params['page'] = -1 # Señal de fin
                                 break 
                             
                             all_customers.extend(data)
-                            logger.info(f"Sync Page {params['page']}: {len(data)} clientes descargados.")
+                            logger.info(f"✅ Pág {params['page']}: {len(data)} clientes. Total parcial: {len(all_customers)}")
                             
                             if len(data) < 50:
-                                params['page'] = -1 # Señal para salir del bucle principal
+                                params['page'] = -1 # Es la última página
                             else:
-                                params["page"] += 1 # Siguiente página
+                                params["page"] += 1 # Vamos a la siguiente
                             
                             success = True
+                            # ¡TRUCO! Pausa de 0.2s para que Jumpseller no nos bloquee
                             await asyncio.sleep(0.2) 
                             break 
                         
-                        # Caso 2: Rate Limit (Demasiadas peticiones)
+                        # Caso 2: Nos pidieron parar (Rate Limit)
                         elif resp.status == 429:
-                            logger.warning(f"Rate Limit en página {params['page']}. Esperando 5s...")
+                            logger.warning(f"⚠️ Jumpseller saturado en pág {params['page']}. Esperando 5 seg...")
                             await asyncio.sleep(5)
                             retry_count += 1
                         
-                        # Caso 3: Error del Servidor (500, 502, 504)
-                        elif resp.status >= 500:
-                            logger.warning(f"Error Jumpseller {resp.status} en página {params['page']}. Reintentando ({retry_count+1}/{max_retries})...")
+                        # Caso 3: Error del servidor
+                        else:
+                            logger.error(f"❌ Error {resp.status} en pág {params['page']}. Reintentando...")
                             await asyncio.sleep(2)
                             retry_count += 1
-                        
-                        # Caso 4: Error Cliente (401, 404, etc) -> No tiene sentido reintentar
-                        else:
-                            logger.error(f"Error Fatal Jumpseller: {resp.status}. Deteniendo Sync.")
-                            return all_customers # Devolvemos lo que llevamos hasta ahora
 
                 except Exception as e:
-                    logger.error(f"Excepción de Red en página {params['page']}: {e}. Reintentando...")
+                    logger.error(f"💥 Fallo de red: {e}. Reintentando...")
                     await asyncio.sleep(2)
                     retry_count += 1
             
+            # Si params['page'] es -1, terminamos exitosamente
             if params['page'] == -1:
-                break # Fin natural de la paginación
+                break
                 
+            # Si agotamos los intentos y no hubo éxito, cortamos para no pegar el servidor
             if not success:
-                logger.error(f"Fallo crítico al descargar página {params['page']} después de {max_retries} intentos. Sync incompleta.")
-                break # Evitamos bucles infinitos si una página está rota
+                logger.error("🛑 Sincronización abortada por errores persistentes.")
+                break
                 
-    logger.info(f"✅ Sincronización Finalizada. Total Clientes: {len(all_customers)}")
+    logger.info(f"🏁 Total Clientes Descargados: {len(all_customers)}")
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    """Sincroniza y normaliza emails en la base de datos."""
-    logger.info("Iniciando Sincronización Maestra...")
-    
-    # 1. Obtener datos de manera robusta
+    """Sincroniza y normaliza emails."""
+    logger.info("🚀 Iniciando Sync Maestra...")
     customers = await fetch_jumpseller_customers()
     
     if not customers:
-        logger.warning("No se obtuvieron clientes de Jumpseller.")
-        return {"added": 0, "updated": 0, "total_scanned": 0, "status": "warning"}
+        return {"added": 0, "updated": 0, "total_scanned": 0, "status": "empty"}
 
     added = 0
     updated = 0
     
-    # 2. Procesar datos
     for c in customers:
         customer_data = c.get('customer', {})
-        # Normalizar email a minúsculas y sin espacios (Vital para el buscador)
         email = customer_data.get('email', '').strip().lower()
         
         if not email: continue
 
         user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
         
-        # Datos (Si vienen vacíos, usamos string vacío para evitar errores)
         name = customer_data.get('name') or ''
         surname = customer_data.get('surname') or ''
-        rut = customer_data.get('taxid') # Jumpseller suele enviar el RUT aquí
+        rut = customer_data.get('taxid')
 
         if not user:
-            # CREAR NUEVO
             new_user = GameCoinUser(
                 email=email,
                 name=name,
@@ -130,25 +122,17 @@ async def sync_users_to_db(db: Session):
             db.add(new_user)
             added += 1
         else:
-            # ACTUALIZAR SI HAY CAMBIOS
-            # Esto es importante para que aparezcan nombres que antes estaban vacíos
+            # Actualizamos datos si cambiaron
             if user.name != name or user.surname != surname or (rut and user.rut != rut):
                 user.name = name
                 user.surname = surname
                 if rut: user.rut = rut
                 updated += 1
     
-    try:
-        db.commit()
-        logger.info(f"DB Commit Exitoso. Agregados: {added}, Actualizados: {updated}")
-    except Exception as e:
-        logger.error(f"Error al guardar en DB: {e}")
-        db.rollback()
-        return {"error": str(e)}
+    db.commit()
+    return {"added": added, "updated": updated, "total_scanned": len(customers)}
 
-    return {"added": added, "updated": updated, "total_scanned": len(customers), "status": "success"}
-
-# --- JUMPSELLER COUPONS (Sin cambios, ya funciona bien) ---
+# --- JUMPSELLER COUPONS (SIN CAMBIOS) ---
 
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
@@ -177,7 +161,7 @@ async def create_jumpseller_coupon(email: str, amount: int):
         except:
             return None
 
-# --- BUYLIST LOGIC (Sin cambios) ---
+# --- BUYLIST LOGIC (SIN CAMBIOS) ---
 
 def clean_currency(value):
     if pd.isna(value): return 0.0
@@ -196,22 +180,20 @@ def get_pricing_tier(price_usd: float) -> float:
 async def analizar_manabox_ck(content: bytes, db):
     try:
         df = pd.read_csv(io.BytesIO(content))
-        # Normalización de columnas para evitar errores de CSV
         df.columns = [c.strip().lower() for c in df.columns]
         
-        # Búsqueda flexible de columnas
         col_name = next((c for c in df.columns if 'name' in c), 'name')
         col_price = next((c for c in df.columns if 'card kingdom' in c), 
                     next((c for c in df.columns if 'market' in c), 
                     next((c for c in df.columns if 'price' in c), None)))      
         col_qty = next((c for c in df.columns if 'quantity' in c or 'qty' in c or 'count' in c), 'quantity')
         
-        if not col_price: return {"error": "Sin precio de referencia detectado (Card Kingdom/Market)."}
+        if not col_price: return {"error": "Sin precio Card Kingdom detectado."}
 
         results = []
         for _, row in df.iterrows():
             price_usd = clean_currency(row.get(col_price, 0))
-            if price_usd <= 0.05: continue # Ignorar bulk extremo
+            if price_usd <= 0.05: continue
             
             qty = int(clean_currency(row.get(col_qty, 1)))
             multiplier = get_pricing_tier(price_usd)
@@ -229,4 +211,4 @@ async def analizar_manabox_ck(content: bytes, db):
         results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
         return results
     except Exception as e:
-        return {"error": f"Error procesando CSV: {str(e)}"}
+        return {"error": str(e)}
