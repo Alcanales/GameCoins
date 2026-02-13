@@ -23,21 +23,9 @@ logger = logging.getLogger(__name__)
 def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
-        db = SessionLocal()
-        
-        if not reset_done:
-            logger.info("⚠️ Ejecutando Reset Único de historico_canjeado...")
-            db.execute(text("UPDATE gamecoins SET historico_canjeado = 0;"))
-            
-            db.add(SystemConfig(key="reset_puntos_2026", value="completed"))
-            logger.info("✅ Reset completado con éxito.")
-        
-        db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
-        
-        db.commit()
-        db.close()
+        logger.info("✅ Tablas verificadas/creadas")
     except Exception as e:
-        logger.error(f"Migration Error: {e}")
+        logger.error(f"❌ Error silencioso en migración: {e}")
 
 run_migrations()
 
