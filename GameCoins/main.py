@@ -11,7 +11,6 @@ from typing import Optional
 
 # --- IMPORTS RELATIVOS ---
 from .database import engine, Base, get_db, SessionLocal
-# USAMOS LA NUEVA CLASE GamePointUser
 from .models import GamePointUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
@@ -22,10 +21,15 @@ logger = logging.getLogger(__name__)
 
 # --- MIGRACIONES SEGURAS ---
 def run_migrations():
-    """Crea las tablas al iniciar."""
+    """Crea las tablas en la base de datos correcta (db_gamequest)."""
     try:
+        # Esto imprime la URL enmascarada para verificar en logs (seguridad)
+        db_url = settings.DATABASE_URL
+        masked_url = db_url.split('@')[-1] if '@' in db_url else "Unknown"
+        logger.info(f"🔌 Conectando a Base de Datos: ...@{masked_url}")
+        
         Base.metadata.create_all(bind=engine)
-        logger.info("✅ Tablas verificadas/creadas (GamePointUser & SystemConfig)")
+        logger.info("✅ Tablas verificadas/creadas en db_gamequest")
     except Exception as e:
         logger.error(f"❌ Error crítico en migración: {e}")
 
@@ -194,7 +198,10 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
 @app.get("/admin/force_create_tables")
 def force_create_tables(db: Session = Depends(get_db)):
     try:
+        db_url = str(engine.url)
+        masked = db_url.split('@')[-1] if '@' in db_url else db_url
+        
         Base.metadata.create_all(bind=engine)
-        return {"status": "success", "message": "Tablas (re)creadas forzosamente. Revisa DBeaver."}
+        return {"status": "success", "message": f"Tablas forzadas en {masked}. Revisa DBeaver."}
     except Exception as e:
         raise HTTPException(500, f"Error creando tablas: {str(e)}")

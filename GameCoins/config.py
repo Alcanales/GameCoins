@@ -3,7 +3,15 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # --- INFRAESTRUCTURA ---
-    DATABASE_URL: str = os.getenv("DATABASE_URL")
+    # Obtenemos la URL original
+    _raw_db_url: str = os.getenv("DATABASE_URL", "")
+
+    @property
+    def DATABASE_URL(self) -> str:
+        url = self._raw_db_url
+        if url and url.endswith("/postgres"):
+            return url.replace("/postgres", "/db_gamequest")
+        return url
     
     # --- SEGURIDAD ---
     ADMIN_USER: str = os.getenv("ADMIN_USER", "admin")
@@ -12,8 +20,6 @@ class Settings(BaseSettings):
     
     # --- ECONOMÍA Y PRECIOS ---
     USD_TO_CLP: int = int(os.getenv("USD_TO_CLP", 1000))
-    
-    # Multiplicadores Base (Referencia)
     CASH_MULTIPLIER: float = float(os.getenv("CASH_MULTIPLIER", 0.45))
     GAMECOIN_MULTIPLIER: float = float(os.getenv("GAMECOIN_MULTIPLIER", 0.55)) 
     
