@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String, DateTime, func
 from .database import Base 
 
-class GameCoinUser(Base):
+class GamePointUser(Base):
 
-    __tablename__ = "gamecoins"
+    __tablename__ = "gampoints"
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)

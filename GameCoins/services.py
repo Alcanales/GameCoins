@@ -7,37 +7,22 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from .config import settings
-from .models import GameCoinUser
+# CORRECCIÓN: Importamos GamePointUser
+from .models import GamePointUser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 1. FUNCIÓN DE SANITIZACIÓN INTERNACIONAL ---
+# --- SANITIZACIÓN DE NOMBRES ---
 def sanitize_name(text):
-    """
-    Limpia y formatea nombres respetando costumbres internacionales.
-    - Permite Ñ, ñ, Tildes (áéíóú).
-    - Elimina espacios dobles.
-    - Convierte a formato Título (Juan Perez).
-    """
-    if not text or pd.isna(text): 
-        return ""
-    
-    # Convertir a string y quitar espacios extremos
+    """Limpia nombres, respeta Ñ y tildes, formato Título."""
+    if not text or pd.isna(text): return ""
     text = str(text).strip()
-    
-    # Eliminar caracteres que NO sean letras, espacios, guiones o apóstrofes
-    # (Mantenemos soporte unicode para Ñ y tildes automáticamente en Python 3)
-    
-    # Colapsar espacios múltiples (ej: "Juan    Perez" -> "Juan Perez")
-    text = re.sub(r'\s+', ' ', text)
-    
-    # Formato Título: "JUAN perez" -> "Juan Perez"
-    return text.title()
+    text = re.sub(r'\s+', ' ', text) # Quitar espacios dobles
+    return text.title() # "JUAN PEREZ" -> "Juan Perez"
 
-# --- JUMPSELLER SYNC ROBUSTO ---
+# --- JUMPSELLER SYNC ---
 async def fetch_jumpseller_customers():
-    """Descarga TODOS los clientes de Jumpseller."""
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
         "login": settings.JUMPSELLER_LOGIN,
@@ -55,7 +40,6 @@ async def fetch_jumpseller_customers():
                     if resp.status != 200: break
                     data = await resp.json()
                     if not data: break 
-                    
                     all_customers.extend(data)
                     if len(data) < 50: break 
                     params["page"] += 1
@@ -64,7 +48,7 @@ async def fetch_jumpseller_customers():
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    logger.info("🚀 Iniciando Sync: Búsqueda Profunda + Sanitización (Soporte Ñ)...")
+    logger.info("🚀 Iniciando Sincronización en Gampoints (GamePointUser)...")
     customers = await fetch_jumpseller_customers()
     
     if not customers:
@@ -78,47 +62,39 @@ async def sync_users_to_db(db: Session):
         email = customer_data.get('email', '').strip().lower()
         if not email: continue
 
-        # --- 2. ESTRATEGIA DE BÚSQUEDA DE NOMBRE COMPLETA ---
-        
-        # Extraemos las posibles fuentes de nombre
+        # --- ESTRATEGIA DE BÚSQUEDA PROFUNDA DE NOMBRES ---
         billing = customer_data.get('billing_address', {})
         shipping = customer_data.get('shipping_address', {})
         
-        # Lista de candidatos en orden de prioridad (El primero que sirva gana)
+        # Prioridad: 1. Facturación, 2. Ficha Cliente, 3. Envío
         candidates = [
-            (billing.get('name'), billing.get('surname')),      # 1. Facturación (Más confiable)
-            (customer_data.get('name'), customer_data.get('surname')), # 2. Ficha Cliente
-            (shipping.get('name'), shipping.get('surname'))     # 3. Envío
+            (billing.get('name'), billing.get('surname')),
+            (customer_data.get('name'), customer_data.get('surname')),
+            (shipping.get('name'), shipping.get('surname'))
         ]
 
         final_name = ""
         final_surname = ""
 
-        # Buscamos el primer par de nombres válido
         for n, s in candidates:
-            clean_n = sanitize_name(n)
-            clean_s = sanitize_name(s)
-            
-            # Si encontramos al menos un nombre, nos quedamos con estos datos
-            if clean_n: 
-                final_name = clean_n
-                final_surname = clean_s
+            cn = sanitize_name(n)
+            cs = sanitize_name(s)
+            if cn: 
+                final_name = cn
+                final_surname = cs
                 break
         
-        # 3. Fallback: Si NADA funcionó, rescatar del email
+        # Fallback: Usar parte del email si todo falla
         if not final_name:
-            # Ejemplo: "juan.perez_99@gmail.com" -> "Juan Perez 99"
             username = email.split('@')[0]
-            # Reemplazamos puntos, guiones y guiones bajos por espacios
-            username_clean = re.sub(r'[._-]', ' ', username)
-            final_name = sanitize_name(username_clean)
-            final_surname = "" # Apellido queda vacío si viene del mail
+            final_name = sanitize_name(re.sub(r'[._-]', ' ', username))
+            final_surname = ""
 
-        # --- PERSISTENCIA EN BASE DE DATOS ---
-        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+        # --- GUARDADO EN DB (GamePointUser) ---
+        user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
 
         if not user:
-            new_user = GameCoinUser(
+            new_user = GamePointUser(
                 email=email,
                 name=final_name,
                 surname=final_surname,
@@ -127,18 +103,40 @@ async def sync_users_to_db(db: Session):
             db.add(new_user)
             added += 1
         else:
-            # Actualizamos SIEMPRE para "limpiar" nombres antiguos sucios
-            # o rellenar los que estaban vacíos
+            # Actualizamos SIEMPRE para corregir nombres vacíos
             if user.name != final_name or user.surname != final_surname:
                 user.name = final_name
                 user.surname = final_surname
                 updated += 1
     
     db.commit()
-    logger.info(f"✅ Sync Terminado: {added} nuevos, {updated} corregidos/actualizados.")
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
 
-# --- OTRAS FUNCIONES (MANTENER IGUAL) ---
+async def create_jumpseller_coupon(email: str, amount: int):
+    code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
+    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
+    payload = {
+        "promotion": {
+            "name": f"Canje QuestPoints - {email}",
+            "code": code,
+            "enabled": True,
+            "discount_type": "fixed",
+            "value": amount,
+            "usage_limit": 1,
+            "minimum_order_amount": 0
+        }
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, params=params, json=payload) as resp:
+                if resp.status not in [200, 201]: return None
+                data = await resp.json()
+                return data.get("promotion", {}).get("code", code)
+        except: return None
+
+async def analizar_manabox_ck(content: bytes, db):
+    return []
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"

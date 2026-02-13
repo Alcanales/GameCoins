@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
+import aiohttp
 
 # --- IMPORTS RELATIVOS ---
 from .database import engine, Base, get_db, SessionLocal
+# IMPORTANTE: Importamos la clase correcta desde models
 from .models import GamePointUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
@@ -23,13 +25,13 @@ logger = logging.getLogger(__name__)
 def run_migrations():
     """Crea las tablas en la base de datos correcta (db_gamequest)."""
     try:
-        # Esto imprime la URL enmascarada para verificar en logs (seguridad)
         db_url = settings.DATABASE_URL
         masked_url = db_url.split('@')[-1] if '@' in db_url else "Unknown"
         logger.info(f"🔌 Conectando a Base de Datos: ...@{masked_url}")
         
+        # Esto crea la tabla 'gampoints' definida en GamePointUser
         Base.metadata.create_all(bind=engine)
-        logger.info("✅ Tablas verificadas/creadas en db_gamequest")
+        logger.info("✅ Tablas verificadas/creadas (GamePointUser & SystemConfig)")
     except Exception as e:
         logger.error(f"❌ Error crítico en migración: {e}")
 
@@ -133,7 +135,7 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
     email = req.email.lower().strip()
     user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
     
-    # Si no existe, se crea al vuelo (aunque el sync debería haberlo hecho)
+    # Si no existe, se crea al vuelo
     if not user:
         user = GamePointUser(email=email, saldo=0)
         db.add(user)
@@ -153,7 +155,30 @@ async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
 
-# --- ENDPOINTS PÚBLICOS ---
+# --- HERRAMIENTAS DE DIAGNÓSTICO ---
+
+@app.get("/admin/test_jumpseller")
+async def test_jumpseller_connection(admin: str = Depends(verify_admin_token)):
+    """Prueba si Render puede conectarse a Jumpseller."""
+    if not settings.JUMPSELLER_LOGIN:
+        return {"status": "ERROR", "msg": "JUMPSELLER_LOGIN no configurado"}
+        
+    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    params = {
+        "login": settings.JUMPSELLER_LOGIN,
+        "authtoken": settings.JUMPSELLER_API_TOKEN,
+        "limit": 1
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, params=params) as resp:
+                return {
+                    "status_code": resp.status,
+                    "success": resp.status == 200,
+                    "msg": "Conexión OK" if resp.status == 200 else "Fallo Auth"
+                }
+        except Exception as e:
+            return {"status": "ERROR DE RED", "msg": str(e)}
 
 @app.get("/health")
 def health(): return {"status": "online"}
@@ -193,15 +218,3 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
         raise HTTPException(502, "Error Jumpseller")
 
     return {"status": "ok", "cupon_codigo": cupon, "nuevo_saldo": user.saldo}
-
-# --- ENDPOINT DE EMERGENCIA (Usar si no aparece la tabla) ---
-@app.get("/admin/force_create_tables")
-def force_create_tables(db: Session = Depends(get_db)):
-    try:
-        db_url = str(engine.url)
-        masked = db_url.split('@')[-1] if '@' in db_url else db_url
-        
-        Base.metadata.create_all(bind=engine)
-        return {"status": "success", "message": f"Tablas forzadas en {masked}. Revisa DBeaver."}
-    except Exception as e:
-        raise HTTPException(500, f"Error creando tablas: {str(e)}")
