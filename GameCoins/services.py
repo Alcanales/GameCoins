@@ -3,39 +3,117 @@ import io
 import logging
 import uuid
 import aiohttp
+import asyncio
+from sqlalchemy.orm import Session
 from .config import settings
+from .models import GameCoinUser
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- LÓGICA DE JUMPSELLER (NUEVO) ---
+# --- JUMPSELLER SYNC (NUEVO) ---
 
-async def create_jumpseller_coupon(email: str, amount: int):
-    """
-    Crea un cupón de descuento en Jumpseller por el monto especificado.
-    Retorna el código del cupón generado.
-    """
-    code = f"GQ-{uuid.uuid4().hex[:8].upper()}" # Ej: GQ-A1B2C3D4
-    
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+async def fetch_jumpseller_customers():
+    """Descarga todos los clientes de Jumpseller paginando."""
+    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
         "login": settings.JUMPSELLER_LOGIN,
-        "authtoken": settings.JUMPSELLER_API_TOKEN
+        "authtoken": settings.JUMPSELLER_API_TOKEN,
+        "limit": 50,
+        "page": 1
     }
     
-    # Configuración del Cupón Jumpseller
+    all_customers = []
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Error Jumpseller Sync: {resp.status}")
+                        break
+                        
+                    data = await resp.json()
+                    if not data:
+                        break # No hay más clientes
+                        
+                    all_customers.extend(data)
+                    
+                    if len(data) < 50:
+                        break # Última página
+                    
+                    params["page"] += 1
+                    
+            except Exception as e:
+                logger.error(f"Excepción en Sync Jumpseller: {e}")
+                break
+                
+    return all_customers
+
+async def sync_users_to_db(db: Session):
+    """Lógica principal: Trae clientes de Jumpseller y los crea en GameCoins DB."""
+    logger.info("Iniciando Sincronización de Usuarios Jumpseller...")
+    customers = await fetch_jumpseller_customers()
+    
+    added = 0
+    updated = 0
+    
+    for c in customers:
+        customer_data = c.get('customer', {})
+        email = customer_data.get('email', '').strip().lower()
+        
+        if not email: continue
+
+        # Buscar si ya existe
+        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+        
+        # Datos útiles
+        name = customer_data.get('name', '')
+        surname = customer_data.get('surname', '')
+        # Jumpseller a veces guarda el RUT en campos adicionales o taxid, 
+        # aquí asumimos que podría venir en 'taxid' o lo dejamos null si no está claro.
+        rut = customer_data.get('taxid', None) 
+
+        if not user:
+            # CREAR NUEVO
+            new_user = GameCoinUser(
+                email=email,
+                name=name,
+                surname=surname,
+                rut=rut,
+                saldo=0 # Empieza con 0 puntos
+            )
+            db.add(new_user)
+            added += 1
+        else:
+            # ACTUALIZAR DATOS (Si cambió nombre o RUT)
+            if user.name != name or user.surname != surname:
+                user.name = name
+                user.surname = surname
+                if rut: user.rut = rut
+                updated += 1
+    
+    db.commit()
+    logger.info(f"Sync Finalizado. Agregados: {added}, Actualizados: {updated}")
+    return {"added": added, "updated": updated, "total_scanned": len(customers)}
+
+# --- JUMPSELLER COUPONS (MANTENIDO) ---
+
+async def create_jumpseller_coupon(email: str, amount: int):
+    code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
+    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
+    
     payload = {
         "promotion": {
             "name": f"Canje QuestPoints - {email}",
             "code": code,
             "enabled": True,
-            "discount_type": "fixed", # Descuento en dinero fijo ($)
+            "discount_type": "fixed",
             "value": amount,
-            "usage_limit": 1, # Solo 1 uso
-            "minimum_order_amount": 0,
-            # Opcional: Podríamos expirar el cupón en 1 año si quisieras
-            # "expires_at": "2025-12-31" 
+            "usage_limit": 1,
+            "minimum_order_amount": 0
         }
     }
 
@@ -43,39 +121,27 @@ async def create_jumpseller_coupon(email: str, amount: int):
         try:
             async with session.post(url, params=params, json=payload) as resp:
                 if resp.status not in [200, 201]:
-                    text = await resp.text()
-                    logger.error(f"Error Jumpseller ({resp.status}): {text}")
                     return None
-                
                 data = await resp.json()
-                # Jumpseller retorna el objeto creado, confirmamos el código
                 return data.get("promotion", {}).get("code", code)
-                
-        except Exception as e:
-            logger.error(f"Excepción conectando a Jumpseller: {e}")
+        except:
             return None
 
-# --- LÓGICA DE BUYLIST (MANTENIDA) ---
+# --- BUYLIST LOGIC (MANTENIDA) ---
 
 def clean_currency(value):
-    """Convierte formatos como '$1,200.50' o '1.200,50' a float estándar."""
     if pd.isna(value): return 0.0
     if isinstance(value, (int, float)): return float(value)
-    
-    val_str = str(value).replace('$', '').strip()
-    val_str = val_str.replace(',', '') 
-    try:
-        return float(val_str)
-    except ValueError:
-        return 0.0
+    val_str = str(value).replace('$', '').replace(',', '').strip()
+    try: return float(val_str)
+    except: return 0.0
 
 def get_pricing_tier(price_usd: float) -> float:
-    """Tiered Pricing Strategy"""
     if price_usd <= 0: return 0.0
-    if price_usd < 3.0: return 0.30     # Tier 1
-    elif price_usd < 10.0: return 0.45  # Tier 2
-    elif price_usd < 50.0: return 0.55  # Tier 3
-    else: return 0.65                   # Tier 4
+    if price_usd < 3.0: return 0.30
+    elif price_usd < 10.0: return 0.45
+    elif price_usd < 50.0: return 0.55
+    else: return 0.65
 
 async def analizar_manabox_ck(content: bytes, db):
     try:
@@ -87,50 +153,28 @@ async def analizar_manabox_ck(content: bytes, db):
                     next((c for c in df.columns if 'market' in c), 
                     next((c for c in df.columns if 'price' in c), None)))      
         col_qty = next((c for c in df.columns if 'quantity' in c or 'qty' in c or 'count' in c), 'quantity')
-        col_condition = next((c for c in df.columns if 'condition' in c), 'condition')
-        col_foil = next((c for c in df.columns if 'foil' in c), None)
-
-        if not col_price:
-            return {"error": "El archivo no contiene precios. Exporta desde ManaBox seleccionando 'Card Kingdom Price'."}
+        
+        if not col_price: return {"error": "Sin precio Card Kingdom detectado."}
 
         results = []
-        
         for _, row in df.iterrows():
-            name = row.get(col_name, 'Unknown')
-            qty = int(clean_currency(row.get(col_qty, 1)))
             price_usd = clean_currency(row.get(col_price, 0))
-            
-            is_foil = False
-            if col_foil:
-                val_foil = str(row.get(col_foil, '')).lower()
-                is_foil = val_foil in ['true', 'yes', 'foil', '1']
-
             if price_usd <= 0.05: continue
-
+            
+            qty = int(clean_currency(row.get(col_qty, 1)))
             multiplier = get_pricing_tier(price_usd)
-            offer_clp_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
-            offer_clp_total = offer_clp_unit * qty
-
-            status = "APROBADO"
-            if price_usd >= 50.0: status = "HIGH END 💎"
-            elif price_usd < 1.0: status = "BULK"
-
+            offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
+            
             results.append({
-                "name": name,
+                "name": row.get(col_name, 'Unknown'),
                 "qty": qty,
                 "price_usd_ref": price_usd,
-                "offer_clp_unit": offer_clp_unit,
-                "offer_clp_total": offer_clp_total,
-                "condition": row.get(col_condition, 'NM'),
-                "is_foil": is_foil,
-                "multiplier_label": f"{int(multiplier*100)}%",
-                "status": status,
-                "source": "ManaBox/CK"
+                "offer_clp_unit": offer_unit,
+                "offer_clp_total": offer_unit * qty,
+                "status": "HIGH END 💎" if price_usd >= 50 else ("BULK" if price_usd < 1 else "APROBADO")
             })
 
         results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
         return results
-
     except Exception as e:
-        logger.error(f"Error analizando CSV: {e}")
-        return {"error": f"Error al procesar el archivo: {str(e)}"}
+        return {"error": str(e)}

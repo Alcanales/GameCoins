@@ -1,10 +1,14 @@
 import logging
 import uuid
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, status
+import logging
+import uuid
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import Optional
+from apscheduler.schedulers.asyncio import AsyncIOScheduler # Importante para tareas programadas
 
 from .database import engine, Base, get_db, SessionLocal
 from .models import GameCoinUser
@@ -12,23 +16,47 @@ from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
 from . import services
 
-# Configuración básica de logs
+# Configuración Logs
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# --- INICIALIZACIÓN DE DB --
+# --- MIGRACIONES ---
 def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()
+        # Aseguramos columnas existentes
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
         db.commit()
         db.close()
     except Exception as e:
-        logging.error(f"Migration Error: {e}")
+        logger.error(f"Migration Error: {e}")
+
 run_migrations()
 
-app = FastAPI(title="GameQuest Vault API")
+# --- SCHEDULER (Tarea Automática 11:30 PM) ---
+scheduler = AsyncIOScheduler()
+
+async def auto_sync_job():
+    logger.info("⏰ Ejecutando Sincronización Automática (23:30)...")
+    db = SessionLocal()
+    try:
+        await services.sync_users_to_db(db)
+    except Exception as e:
+        logger.error(f"Error en Auto-Sync: {e}")
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Iniciar Scheduler al arrancar la app
+    scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
+    scheduler.start()
+    logger.info("✅ Scheduler iniciado: Sync programado a las 23:30")
+    yield
+
+app = FastAPI(title="GameQuest Vault API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,7 +65,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- SEGURIDAD (TOKEN STORAGE EN MEMORIA) ---
+# --- AUTH ---
 active_sessions = {}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
@@ -49,43 +77,24 @@ def login(creds: LoginRequest):
     raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
 def verify_admin_token(authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Token requerido")
+    if not authorization: raise HTTPException(401, "Token requerido")
     try:
         scheme, token = authorization.split()
-        if scheme.lower() != 'bearer':
-            raise HTTPException(status_code=401, detail="Formato de token inválido")
-        if token not in active_sessions:
-            raise HTTPException(status_code=403, detail="Sesión expirada o inválida")
+        if token not in active_sessions: raise HTTPException(403, "Sesión inválida")
         return active_sessions[token]
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Token malformado")
+    except: raise HTTPException(401, "Token malformado")
 
-@app.post("/api/auth/logout")
-def logout(authorization: str = Header(None)):
-    try:
-        scheme, token = authorization.split()
-        if token in active_sessions:
-            del active_sessions[token]
-        return {"status": "logged_out"}
-    except:
-        return {"status": "ignored"}
-
-# --- ENDPOINTS ADMINISTRATIVOS (PROTEGIDOS) ---
+# --- ENDPOINTS ADMIN ---
 
 @app.get("/admin/users")
 def list_users(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     users = db.query(GameCoinUser).all()
-    return {
-        "users": users,
-        "totalPointsInVault": sum(u.saldo for u in users)
-    }
+    return {"users": users, "totalPointsInVault": sum(u.saldo for u in users)}
 
 @app.post("/admin/adjust_balance")
 def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     email = req.email.lower().strip()
     user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
-    
     if not user:
         user = GameCoinUser(email=email, saldo=0)
         db.add(user)
@@ -96,15 +105,19 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
     elif req.operation == 'subtract':
         user.saldo = max(0, user.saldo - req.amount)
         user.historico_canjeado += req.amount
-    
     db.commit()
-    return {"status": "success", "new_balance": user.saldo, "user": email}
+    return {"status": "success", "new_balance": user.saldo}
 
-# --- ENDPOINTS PÚBLICOS (CLIENTE) ---
+# NUEVO ENDPOINT: Botón Manual de Sincronización
+@app.post("/admin/sync_users")
+async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+    result = await services.sync_users_to_db(db)
+    return {"status": "success", "details": result}
+
+# --- PUBLIC & CANJE ---
 
 @app.get("/health")
-def health():
-    return {"status": "online", "mode": "Manabox-Only"}
+def health(): return {"status": "online"}
 
 @app.get("/api/public/balance/{email}")
 def get_public_balance(email: str, db: Session = Depends(get_db)):
@@ -116,60 +129,28 @@ async def analyze_buylist_endpoint(file: UploadFile = File(...), db: Session = D
     content = await file.read()
     return await services.analizar_manabox_ck(content, db)
 
-# --- ENDPOINT DE CANJE REAL (INTEGRACIÓN JUMPSELLER) ---
-
 @app.post("/api/canje")
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_store_token: str = Header(None)):
-    """
-    1. Verifica Token de Tienda y Mantenimiento.
-    2. Verifica Saldo del Usuario.
-    3. Descuenta Puntos (Atómico en DB).
-    4. Crea Cupón en Jumpseller API.
-    5. Retorna Código al Cliente.
-    """
-    # 1. Validaciones Iniciales
-    if x_store_token != settings.STORE_TOKEN:
-         raise HTTPException(status_code=403, detail="Store Token Inválido")
-    
-    if settings.MAINTENANCE_MODE_CANJE:
-        raise HTTPException(status_code=503, detail="Sistema de canje en mantenimiento por inventario.")
+    if x_store_token != settings.STORE_TOKEN: raise HTTPException(403, "Token Inválido")
+    if settings.MAINTENANCE_MODE_CANJE: raise HTTPException(503, "Mantenimiento")
 
-    # 2. Validación de Saldo
     user = db.query(GameCoinUser).filter(GameCoinUser.email == req.email.lower().strip()).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado en sistema de puntos.")
-        
-    if user.saldo < req.monto:
-        raise HTTPException(status_code=400, detail="Saldo insuficiente para este canje.")
-    
-    if req.monto < settings.MIN_CANJE:
-        raise HTTPException(status_code=400, detail=f"El canje mínimo es de ${settings.MIN_CANJE} CLP")
+    if not user or user.saldo < req.monto: raise HTTPException(400, "Saldo insuficiente")
+    if req.monto < settings.MIN_CANJE: raise HTTPException(400, f"Mínimo ${settings.MIN_CANJE}")
 
-    # 3. Transacción: Descuento de Puntos
-    # Primero descontamos para evitar duplicidad si Jumpseller falla (es más seguro devolver que regalar)
     try:
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
         db.commit()
-    except Exception as e:
+    except:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error en base de datos al procesar puntos.")
+        raise HTTPException(500, "Error DB")
 
-    # 4. Llamada a API Jumpseller
-    cupon_codigo = await services.create_jumpseller_coupon(user.email, req.monto)
-    
-    if not cupon_codigo:
-        # ROLLBACK MANUAL: Si falla Jumpseller, devolvemos los puntos
-        user.saldo += req.monto
+    cupon = await services.create_jumpseller_coupon(user.email, req.monto)
+    if not cupon:
+        user.saldo += req.monto # Rollback
         user.historico_canjeado -= req.monto
         db.commit()
-        raise HTTPException(status_code=502, detail="Error comunicando con Jumpseller. Puntos devueltos.")
+        raise HTTPException(502, "Error Jumpseller")
 
-    # 5. Éxito
-    return {
-        "status": "ok", 
-        "cupon_codigo": cupon_codigo, 
-        "nuevo_saldo": user.saldo,
-        "mensaje": f"Canje exitoso. Tu código es {cupon_codigo}"
-    }
+    return {"status": "ok", "cupon_codigo": cupon, "nuevo_saldo": user.saldo}
