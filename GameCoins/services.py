@@ -27,7 +27,7 @@ async def fetch_jumpseller_customers():
         "authtoken": settings.JUMPSELLER_API_TOKEN,
         "limit": 50,
         "page": 1,
-        "status": "all" # <-- FUERZA A TRAER TODOS (Aprobados, Pendientes, etc.)
+        "status": "all" 
     }
     
     all_customers = []
@@ -48,44 +48,30 @@ async def fetch_jumpseller_customers():
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    logger.info("🚀 Iniciando Sincronización Eficiente...")
+    logger.info("🚀 Sincronizando clientes hacia gampoints...")
     customers = await fetch_jumpseller_customers()
     
-    if not customers:
-        return {"added": 0, "updated": 0, "total_scanned": 0, "status": "empty"}
-
-    added = 0
-    updated = 0
-    
+    added, updated = 0, 0
     for c in customers:
         customer_data = c.get('customer', {})
         email = customer_data.get('email', '').strip().lower()
-        
         if not email: continue
 
-        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
+        user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
         
         name = customer_data.get('name') or ''
         surname = customer_data.get('surname') or ''
 
         if not user:
-            new_user = GameCoinUser(
-                email=email,
-                name=name,
-                surname=surname,
-                saldo=0 
-            )
-            db.add(new_user)
+            db.add(GamePointUser(email=email, name=name, surname=surname, saldo=0))
             added += 1
         else:
             if user.name != name or user.surname != surname:
-                user.name = name
-                user.surname = surname
+                user.name, user.surname = name, surname
                 updated += 1
     
     db.commit()
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
-
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
