@@ -9,9 +9,9 @@ from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# --- IMPORTS ACTUALIZADOS ---
+# --- IMPORTS ---
 from .database import engine, Base, get_db, SessionLocal
-# AQUÍ ESTABA EL ERROR: Ahora importamos GamePointUser
+# USAMOS LA NUEVA TABLA
 from .models import GamePointUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
@@ -20,22 +20,11 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- MIGRACIÓN SEGURA ---
+# --- MIGRACIONES ---
 def run_migrations():
-    """Crea las tablas si no existen."""
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Tablas verificadas/creadas")
-        
-        # Lógica de reset (opcional, verifica si ya se hizo)
-        db = SessionLocal()
-        reset_done = db.query(SystemConfig).filter(SystemConfig.key == "reset_puntos_2026").first()
-        if not reset_done:
-             # Nota: Ajusta esto si necesitas resetear la nueva tabla o solo marcarlo
-            db.add(SystemConfig(key="reset_puntos_2026", value="completed"))
-            db.commit()
-        db.close()
-
     except Exception as e:
         logger.error(f"❌ Error en migración: {e}")
 
@@ -70,7 +59,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- LOGIN (Se mantiene igual) ---
+# --- LOGIN ---
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
@@ -97,11 +86,10 @@ def verify_admin_token(authorization: str = Header(None), db: Session = Depends(
     except:
         raise HTTPException(401, "Token malformado")
 
-# --- ENDPOINTS ACTUALIZADOS A GAMEPOINTUSER ---
+# --- ENDPOINTS (USANDO GamePointUser) ---
 
 @app.get("/admin/users")
 def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
-    # REFERENCIA ACTUALIZADA
     query = db.query(GamePointUser)
 
     if only_balance:
@@ -117,7 +105,6 @@ def list_users(limit: int = 100, search: Optional[str] = None, only_balance: boo
             )
         )
 
-    # Totales usando la nueva tabla
     total_points = db.query(func.sum(GamePointUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GamePointUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GamePointUser.historico_canjeado)).scalar() or 0
@@ -134,7 +121,6 @@ def list_users(limit: int = 100, search: Optional[str] = None, only_balance: boo
 @app.post("/admin/adjust_balance")
 def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     email = req.email.lower().strip()
-    # REFERENCIA ACTUALIZADA
     user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
     if not user:
         user = GamePointUser(email=email, saldo=0)
@@ -151,6 +137,7 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
 
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+    # ESTO LLAMA A LA LÓGICA DE AGREGAR LOS FALTANTES
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
 
@@ -159,7 +146,6 @@ def health(): return {"status": "online"}
 
 @app.get("/api/public/balance/{email}")
 def get_public_balance(email: str, db: Session = Depends(get_db)):
-    # REFERENCIA ACTUALIZADA
     user = db.query(GamePointUser).filter(GamePointUser.email == email.lower().strip()).first()
     return {"saldo": user.saldo if user else 0}
 
@@ -173,7 +159,6 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
     if x_store_token != settings.STORE_TOKEN: raise HTTPException(403, "Token Inválido")
     if settings.MAINTENANCE_MODE_CANJE: raise HTTPException(503, "Mantenimiento")
 
-    # REFERENCIA ACTUALIZADA
     user = db.query(GamePointUser).filter(GamePointUser.email == req.email.lower().strip()).first()
     if not user or user.saldo < req.monto: raise HTTPException(400, "Saldo insuficiente")
     if req.monto < settings.MIN_CANJE: raise HTTPException(400, f"Mínimo ${settings.MIN_CANJE}")
