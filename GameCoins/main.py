@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, or_ # <--- IMPORTANTE: 'func' y 'or_' para optimización
+from sqlalchemy import text, func, or_ 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
@@ -89,28 +89,34 @@ def list_users(
     db: Session = Depends(get_db), 
     admin: str = Depends(verify_admin_token)
 ):
-    """Buscador Híbrido Optimizado"""
+    """
+    Buscador Estricto: "Si Contiene" (ilike %term%)
+    Campos: Email, Nombre, Apellido.
+    """
     query = db.query(GameCoinUser)
 
+    # 1. Filtro de Saldo
     if only_balance:
         query = query.filter(GameCoinUser.saldo > 0)
 
+    # 2. Búsqueda por Texto (Solo Nombre/Email)
     if search and len(search.strip()) > 0:
         term = f"%{search.strip().lower()}%"
+        
         query = query.filter(
             or_(
-                GameCoinUser.email.ilike(term),
-                GameCoinUser.name.ilike(term),
-                GameCoinUser.surname.ilike(term),
-                GameCoinUser.rut.ilike(term)
+                GameCoinUser.email.ilike(term),   
+                GameCoinUser.name.ilike(term),    
+                GameCoinUser.surname.ilike(term)  
             )
         )
 
-    # Cálculos rápidos SQL
+    # Cálculos rápidos SQL (Totales Globales)
     total_points = db.query(func.sum(GameCoinUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GameCoinUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GameCoinUser.historico_canjeado)).scalar() or 0
     
+    # Orden Descendente por Saldo
     users = query.order_by(GameCoinUser.saldo.desc()).limit(limit).all()
     
     return {
