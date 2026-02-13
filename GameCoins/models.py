@@ -1,12 +1,11 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, func
-from .database import Base  # <--- PUNTO AGREGADO
+from .database import Base 
 
 class GameCoinUser(Base):
     __tablename__ = "gamecoins"
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
-    rut = Column(String, nullable=True)
     name = Column(String, nullable=True)
     surname = Column(String, nullable=True)
     saldo = Column(Integer, default=0)
