@@ -9,9 +9,9 @@ from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# --- IMPORTS ---
+# --- IMPORTS RELATIVOS ---
 from .database import engine, Base, get_db, SessionLocal
-# USAMOS LA NUEVA TABLA
+# USAMOS LA NUEVA CLASE GamePointUser
 from .models import GamePointUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
@@ -20,19 +20,20 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- MIGRACIONES ---
+# --- MIGRACIONES SEGURAS ---
 def run_migrations():
+    """Crea las tablas al iniciar."""
     try:
         Base.metadata.create_all(bind=engine)
-        logger.info("✅ Tablas verificadas/creadas")
+        logger.info("✅ Tablas verificadas/creadas (GamePointUser & SystemConfig)")
     except Exception as e:
-        logger.error(f"❌ Error en migración: {e}")
+        logger.error(f"❌ Error crítico en migración: {e}")
 
 # --- SCHEDULER ---
 scheduler = AsyncIOScheduler()
 
 async def auto_sync_job():
-    logger.info("⏰ Sincronización Automática (23:30)...")
+    logger.info("⏰ Ejecutando Sincronización Automática (23:30)...")
     db = SessionLocal()
     try:
         await services.sync_users_to_db(db)
@@ -41,12 +42,16 @@ async def auto_sync_job():
     finally:
         db.close()
 
+# --- LIFESPAN (ARRANQUE) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Crear tablas al iniciar
     run_migrations()
+    
+    # 2. Iniciar tareas programadas
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
-    logger.info("✅ Scheduler iniciado")
+    logger.info("✅ Servidor Online y Scheduler iniciado")
     yield
     scheduler.shutdown()
 
@@ -86,7 +91,7 @@ def verify_admin_token(authorization: str = Header(None), db: Session = Depends(
     except:
         raise HTTPException(401, "Token malformado")
 
-# --- ENDPOINTS (USANDO GamePointUser) ---
+# --- ENDPOINTS PRINCIPALES (GamePointUser) ---
 
 @app.get("/admin/users")
 def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
@@ -105,6 +110,7 @@ def list_users(limit: int = 100, search: Optional[str] = None, only_balance: boo
             )
         )
 
+    # Métricas Globales
     total_points = db.query(func.sum(GamePointUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GamePointUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GamePointUser.historico_canjeado)).scalar() or 0
@@ -122,6 +128,8 @@ def list_users(limit: int = 100, search: Optional[str] = None, only_balance: boo
 def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     email = req.email.lower().strip()
     user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
+    
+    # Si no existe, se crea al vuelo (aunque el sync debería haberlo hecho)
     if not user:
         user = GamePointUser(email=email, saldo=0)
         db.add(user)
@@ -137,9 +145,11 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
 
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
-    # ESTO LLAMA A LA LÓGICA DE AGREGAR LOS FALTANTES
+    """Sincroniza y agrega clientes faltantes."""
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
+
+# --- ENDPOINTS PÚBLICOS ---
 
 @app.get("/health")
 def health(): return {"status": "online"}
@@ -179,3 +189,12 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
         raise HTTPException(502, "Error Jumpseller")
 
     return {"status": "ok", "cupon_codigo": cupon, "nuevo_saldo": user.saldo}
+
+# --- ENDPOINT DE EMERGENCIA (Usar si no aparece la tabla) ---
+@app.get("/admin/force_create_tables")
+def force_create_tables(db: Session = Depends(get_db)):
+    try:
+        Base.metadata.create_all(bind=engine)
+        return {"status": "success", "message": "Tablas (re)creadas forzosamente. Revisa DBeaver."}
+    except Exception as e:
+        raise HTTPException(500, f"Error creando tablas: {str(e)}")
