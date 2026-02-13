@@ -4,6 +4,7 @@ import logging
 import uuid
 import aiohttp
 import asyncio
+import re
 from sqlalchemy.orm import Session
 from .config import settings
 from .models import GameCoinUser
@@ -11,87 +12,43 @@ from .models import GameCoinUser
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- JUMPSELLER SYNC ROBUSTO (VERSIÓN BLINDADA) ---
+# --- UTILIDAD: LIMPIEZA DE RUT ---
+def clean_rut(rut_str):
+    """Estandariza RUT: quita puntos, guiones y espacios. '12.345.678-K' -> '12345678K'"""
+    if not rut_str: return None
+    return re.sub(r'[^0-9kK]', '', str(rut_str)).upper()
 
+# --- JUMPSELLER SYNC ROBUSTO ---
 async def fetch_jumpseller_customers():
-    """
-    Descarga paginada con frenos y reintentos.
-    Garantiza llegar al final de la lista incluso si la red falla.
-    """
+    """Descarga paginada de clientes (TODOS los estados)."""
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
         "login": settings.JUMPSELLER_LOGIN,
         "authtoken": settings.JUMPSELLER_API_TOKEN,
         "limit": 50,
-        "page": 1
+        "page": 1,
+        "status": "all" # <-- FUERZA A TRAER TODOS (Aprobados, Pendientes, etc.)
     }
     
     all_customers = []
-    max_retries = 3 # Intentar 3 veces cada página antes de rendirse
-    
     async with aiohttp.ClientSession() as session:
         while True:
-            retry_count = 0
-            success = False
-            
-            # Bucle de perseverancia (Reintentos por página)
-            while retry_count < max_retries:
-                try:
-                    async with session.get(url, params=params) as resp:
-                        # Caso 1: Éxito total (200 OK)
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if not data:
-                                params['page'] = -1 # Señal de fin
-                                success = True
-                                break 
-                            
-                            all_customers.extend(data)
-                            logger.info(f"✅ Pág {params['page']}: {len(data)} clientes. Total parcial: {len(all_customers)}")
-                            
-                            # Si vienen menos de 50, es la última página
-                            if len(data) < 50:
-                                params['page'] = -1 
-                            else:
-                                params["page"] += 1 # Siguiente página
-                            
-                            success = True
-                            # PAUSA TÁCTICA: 0.2s para evitar bloqueo de Jumpseller
-                            await asyncio.sleep(0.2) 
-                            break 
-                        
-                        # Caso 2: Jumpseller saturado (429) -> Esperar
-                        elif resp.status == 429:
-                            logger.warning(f"⚠️ Jumpseller pide espera en pág {params['page']}. Pausa de 5s...")
-                            await asyncio.sleep(5)
-                            retry_count += 1
-                        
-                        # Caso 3: Error del servidor -> Reintentar
-                        else:
-                            logger.error(f"❌ Error {resp.status} en pág {params['page']}. Reintentando ({retry_count+1}/{max_retries})...")
-                            await asyncio.sleep(2)
-                            retry_count += 1
-
-                except Exception as e:
-                    logger.error(f"💥 Fallo de red: {e}. Reintentando...")
-                    await asyncio.sleep(2)
-                    retry_count += 1
-            
-            # Salida del bucle principal
-            if params['page'] == -1:
-                break
+            try:
+                async with session.get(url, params=params) as resp:
+                    if resp.status != 200: break
+                    data = await resp.json()
+                    if not data: break 
+                    
+                    all_customers.extend(data)
+                    if len(data) < 50: break 
+                    params["page"] += 1
+                    await asyncio.sleep(0.2) 
+            except: break
                 
-            # Si fallaron los 3 intentos, paramos para no colgar el servidor
-            if not success:
-                logger.error("🛑 Sincronización abortada por errores persistentes en la red.")
-                break
-                
-    logger.info(f"🏁 Total Final Clientes Descargados: {len(all_customers)}")
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    """Sincroniza y normaliza emails."""
-    logger.info("🚀 Iniciando Sync Maestra...")
+    logger.info("🚀 Iniciando Sincronización Eficiente...")
     customers = await fetch_jumpseller_customers()
     
     if not customers:
@@ -110,32 +67,24 @@ async def sync_users_to_db(db: Session):
         
         name = customer_data.get('name') or ''
         surname = customer_data.get('surname') or ''
-        rut = customer_data.get('taxid')
 
         if not user:
             new_user = GameCoinUser(
                 email=email,
                 name=name,
                 surname=surname,
-                rut=rut,
                 saldo=0 
             )
             db.add(new_user)
             added += 1
         else:
-            # Actualizamos datos si cambiaron
-            if user.name != name or user.surname != surname or (rut and user.rut != rut):
+            if user.name != name or user.surname != surname:
                 user.name = name
                 user.surname = surname
-                if rut: user.rut = rut
                 updated += 1
     
     db.commit()
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
-
-# --- EL RESTO DEL ARCHIVO SIGUE IGUAL (create_jumpseller_coupon, analizar_manabox_ck) ---
-# Copia aquí las funciones de cupones y buylist que ya tenías o usa el archivo completo anterior.
-# Asegúrate de NO borrar create_jumpseller_coupon ni analizar_manabox_ck.
 
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"

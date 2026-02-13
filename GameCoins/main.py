@@ -24,13 +24,28 @@ def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()
-        # Hotfixes para columnas
-        db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
+        
+        # 1. ELIMINAR COLUMNA RUT DE LA BASE DE DATOS FÍSICA
+        db.execute(text("ALTER TABLE gamecoins DROP COLUMN IF EXISTS rut;"))
+        
+        # 2. RESET ÚNICO DE PUNTOS CANJEADOS
+        reset_done = db.query(SystemConfig).filter(SystemConfig.key == "reset_puntos_2026").first()
+        
+        if not reset_done:
+            logger.info("⚠️ Ejecutando Reset Único de historico_canjeado...")
+            db.execute(text("UPDATE gamecoins SET historico_canjeado = 0;"))
+            
+            db.add(SystemConfig(key="reset_puntos_2026", value="completed"))
+            logger.info("✅ Reset completado con éxito.")
+        
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
+        
         db.commit()
         db.close()
     except Exception as e:
         logger.error(f"Migration Error: {e}")
+
+run_migrations()
 
 run_migrations()
 
