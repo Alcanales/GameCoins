@@ -25,12 +25,6 @@ def run_migrations():
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()
         
-        # 1. ELIMINAR COLUMNA RUT DE LA BASE DE DATOS FÍSICA
-        db.execute(text("ALTER TABLE gamecoins DROP COLUMN IF EXISTS rut;"))
-        
-        # 2. RESET ÚNICO DE PUNTOS CANJEADOS
-        reset_done = db.query(SystemConfig).filter(SystemConfig.key == "reset_puntos_2026").first()
-        
         if not reset_done:
             logger.info("⚠️ Ejecutando Reset Único de historico_canjeado...")
             db.execute(text("UPDATE gamecoins SET historico_canjeado = 0;"))
