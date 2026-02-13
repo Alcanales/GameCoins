@@ -129,45 +129,10 @@ def verify_admin_token(authorization: str = Header(None), db: Session = Depends(
         raise HTTPException(401, "Token malformado")
 
 # --- ENDPOINTS ADMINISTRATIVOS ---
-
+# Todos los endpoints ahora usan GamePointUser
 @app.get("/admin/users")
-def list_users(
-    limit: int = 100, 
-    search: Optional[str] = None, 
-    only_balance: bool = False,
-    db: Session = Depends(get_db), 
-    admin: str = Depends(verify_admin_token)
-):
-    """Listado y búsqueda de usuarios (Email, Nombre, Apellido)."""
-    query = db.query(GameCoinUser)
-
-    if only_balance:
-        query = query.filter(GameCoinUser.saldo > 0)
-
-    if search and len(search.strip()) > 0:
-        term = f"%{search.strip().lower()}%"
-        query = query.filter(
-            or_(
-                GameCoinUser.email.ilike(term),
-                GameCoinUser.name.ilike(term),
-                GameCoinUser.surname.ilike(term)
-            )
-        )
-
-    # Cálculo de métricas globales para los indicadores de la Bóveda
-    total_points = db.query(func.sum(GameCoinUser.saldo)).scalar() or 0
-    total_count = db.query(func.count(GameCoinUser.id)).scalar() or 0
-    total_redeemed = db.query(func.sum(GameCoinUser.historico_canjeado)).scalar() or 0
-    
-    users = query.order_by(GameCoinUser.saldo.desc()).limit(limit).all()
-    
-    return {
-        "users": users,
-        "totalPointsInVault": total_points,
-        "totalCount": total_count,
-        "totalRedeemed": total_redeemed
-    }
-
+def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+    query = db.query(GamePointUser) # Consulta a gampoints
 @app.post("/admin/adjust_balance")
 def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     """Ajuste manual de saldos desde el panel administrativo."""
