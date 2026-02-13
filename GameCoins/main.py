@@ -10,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
 # --- IMPORTS RELATIVOS (CORREGIDOS) ---
+# El punto (.) indica "busca en esta misma carpeta"
 from .database import engine, Base, get_db, SessionLocal
 from .models import GameCoinUser
 from .config import settings
