@@ -15,19 +15,17 @@ from . import services
 # Configuración básica de logs
 logging.basicConfig(level=logging.INFO)
 
-# --- INICIALIZACIÓN DE DB ---
+# --- INICIALIZACIÓN DE DB --
 def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
-        # Parches SQL manuales si fueran necesarios (Legacy support)
         db = SessionLocal()
-        db.execute(text("ALTER TABLE game_coin_users ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
-        db.execute(text("ALTER TABLE game_coin_users ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
+        db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
+        db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
         db.commit()
         db.close()
     except Exception as e:
         logging.error(f"Migration Error: {e}")
-
 run_migrations()
 
 app = FastAPI(title="GameQuest Vault API")
