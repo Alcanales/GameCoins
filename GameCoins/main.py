@@ -9,10 +9,9 @@ from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# --- IMPORTS RELATIVOS (CORREGIDOS) ---
-# El punto (.) indica "busca en esta misma carpeta"
+# --- IMPORTS RELATIVOS (ESTRUCTURA CORRECTA) ---
 from .database import engine, Base, get_db, SessionLocal
-from .models import GameCoinUser
+from .models import GameCoinUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
 from . import services
@@ -27,6 +26,7 @@ def run_migrations():
         db = SessionLocal()
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
+        Base.metadata.create_all(bind=engine)
         db.commit()
         db.close()
     except Exception as e:
@@ -63,23 +63,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-active_sessions = {}
-
+# --- AUTH SYSTEM (DATABASE BACKED) ---
 @app.post("/api/auth/login", response_model=TokenResponse)
-def login(creds: LoginRequest):
+def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
         token = str(uuid.uuid4())
-        active_sessions[token] = creds.username
+        
+        session_entry = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
+        if not session_entry:
+            session_entry = SystemConfig(key="admin_token", value=token)
+            db.add(session_entry)
+        else:
+            session_entry.value = token
+        
+        db.commit()
         return {"access_token": token, "token_type": "bearer"}
+    
     raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
-def verify_admin_token(authorization: str = Header(None)):
-    if not authorization: raise HTTPException(401, "Token requerido")
+def verify_admin_token(authorization: str = Header(None), db: Session = Depends(get_db)):
+    if not authorization: 
+        raise HTTPException(401, "Token requerido")
+    
     try:
         scheme, token = authorization.split()
-        if token not in active_sessions: raise HTTPException(403, "Sesión inválida")
-        return active_sessions[token]
-    except: raise HTTPException(401, "Token malformado")
+        if scheme.lower() != 'bearer':
+            raise HTTPException(401, "Esquema de autenticación inválido")
+
+        stored_session = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
+        
+        if not stored_session or stored_session.value != token:
+            raise HTTPException(403, "Sesión expirada o inválida")
+            
+        return settings.ADMIN_USER
+
+    except ValueError:
+        raise HTTPException(401, "Token malformado")
 
 # --- ENDPOINTS ADMIN ---
 
@@ -91,6 +110,7 @@ def list_users(
     db: Session = Depends(get_db), 
     admin: str = Depends(verify_admin_token)
 ):
+    """Buscador Optimizado: Email, Nombre, Apellido"""
     query = db.query(GameCoinUser)
 
     if only_balance:
@@ -106,6 +126,7 @@ def list_users(
             )
         )
 
+    # Totales Rápidos
     total_points = db.query(func.sum(GameCoinUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GameCoinUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GameCoinUser.historico_canjeado)).scalar() or 0
@@ -139,6 +160,7 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
 
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
+    # Ahora que el token funciona, esto correrá sin problemas
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
 
