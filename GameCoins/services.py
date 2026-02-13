@@ -8,14 +8,13 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .models import GameCoinUser
 
-# Configuración de Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- JUMPSELLER SYNC (NUEVO) ---
+# --- JUMPSELLER SYNC ---
 
 async def fetch_jumpseller_customers():
-    """Descarga todos los clientes de Jumpseller paginando."""
+    """Descarga paginada de clientes."""
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
         "login": settings.JUMPSELLER_LOGIN,
@@ -36,12 +35,13 @@ async def fetch_jumpseller_customers():
                         
                     data = await resp.json()
                     if not data:
-                        break # No hay más clientes
+                        break 
                         
                     all_customers.extend(data)
+                    logger.info(f"Sync Page {params['page']}: {len(data)} clientes encontrados.")
                     
                     if len(data) < 50:
-                        break # Última página
+                        break 
                     
                     params["page"] += 1
                     
@@ -49,11 +49,12 @@ async def fetch_jumpseller_customers():
                 logger.error(f"Excepción en Sync Jumpseller: {e}")
                 break
                 
+    logger.info(f"Total Clientes Jumpseller Descargados: {len(all_customers)}")
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    """Lógica principal: Trae clientes de Jumpseller y los crea en GameCoins DB."""
-    logger.info("Iniciando Sincronización de Usuarios Jumpseller...")
+    """Sincroniza y normaliza emails."""
+    logger.info("Iniciando Sincronización...")
     customers = await fetch_jumpseller_customers()
     
     added = 0
@@ -61,44 +62,40 @@ async def sync_users_to_db(db: Session):
     
     for c in customers:
         customer_data = c.get('customer', {})
+        # Normalizar email a minúsculas y sin espacios
         email = customer_data.get('email', '').strip().lower()
         
         if not email: continue
 
-        # Buscar si ya existe
         user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
         
-        # Datos útiles
-        name = customer_data.get('name', '')
-        surname = customer_data.get('surname', '')
-        # Jumpseller a veces guarda el RUT en campos adicionales o taxid, 
-        # aquí asumimos que podría venir en 'taxid' o lo dejamos null si no está claro.
-        rut = customer_data.get('taxid', None) 
+        # Datos (Si vienen vacíos, usamos string vacío)
+        name = customer_data.get('name') or ''
+        surname = customer_data.get('surname') or ''
+        rut = customer_data.get('taxid') # Jumpseller standard field for RUT/DNI
 
         if not user:
-            # CREAR NUEVO
             new_user = GameCoinUser(
                 email=email,
                 name=name,
                 surname=surname,
                 rut=rut,
-                saldo=0 # Empieza con 0 puntos
+                saldo=0 
             )
             db.add(new_user)
             added += 1
         else:
-            # ACTUALIZAR DATOS (Si cambió nombre o RUT)
-            if user.name != name or user.surname != surname:
+            # Actualizar si hay cambios
+            if user.name != name or user.surname != surname or (rut and user.rut != rut):
                 user.name = name
                 user.surname = surname
                 if rut: user.rut = rut
                 updated += 1
     
     db.commit()
-    logger.info(f"Sync Finalizado. Agregados: {added}, Actualizados: {updated}")
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
 
-# --- JUMPSELLER COUPONS (MANTENIDO) ---
+# --- JUMPSELLER COUPONS ---
 
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
@@ -127,7 +124,7 @@ async def create_jumpseller_coupon(email: str, amount: int):
         except:
             return None
 
-# --- BUYLIST LOGIC (MANTENIDA) ---
+# --- BUYLIST LOGIC ---
 
 def clean_currency(value):
     if pd.isna(value): return 0.0
