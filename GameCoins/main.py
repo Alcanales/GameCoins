@@ -5,11 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, or_ 
+from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# --- IMPORTS RELATIVOS (ESTRUCTURA CORRECTA) ---
+# --- IMPORTS RELATIVOS (ESTRUCTURA CORRECTA PARA RENDER) ---
 from .database import engine, Base, get_db, SessionLocal
 from .models import GameCoinUser, SystemConfig
 from .config import settings
@@ -19,14 +19,14 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- MIGRACIONES ---
+# --- MIGRACIONES AL INICIO ---
 def run_migrations():
     try:
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()
+        # Hotfixes para columnas
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;"))
         db.execute(text("ALTER TABLE gamecoins ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;"))
-        Base.metadata.create_all(bind=engine)
         db.commit()
         db.close()
     except Exception as e:
@@ -34,7 +34,7 @@ def run_migrations():
 
 run_migrations()
 
-# --- SCHEDULER ---
+# --- SCHEDULER (TAREAS AUTOMÁTICAS) ---
 scheduler = AsyncIOScheduler()
 
 async def auto_sync_job():
@@ -63,12 +63,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- AUTH SYSTEM (DATABASE BACKED) ---
+# --- SISTEMA DE AUTH BLINDADO (BD) ---
+
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
         token = str(uuid.uuid4())
         
+        # Guardar token en DB para persistencia entre workers
         session_entry = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
         if not session_entry:
             session_entry = SystemConfig(key="admin_token", value=token)
@@ -88,8 +90,9 @@ def verify_admin_token(authorization: str = Header(None), db: Session = Depends(
     try:
         scheme, token = authorization.split()
         if scheme.lower() != 'bearer':
-            raise HTTPException(401, "Esquema de autenticación inválido")
+            raise HTTPException(401, "Esquema inválido")
 
+        # Verificar contra la DB
         stored_session = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
         
         if not stored_session or stored_session.value != token:
@@ -160,11 +163,11 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
 
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
-    # Ahora que el token funciona, esto correrá sin problemas
+    # Ejecuta la sincronización masiva
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
 
-# --- ENDPOINTS PUBLICOS ---
+# --- ENDPOINTS PÚBLICOS ---
 
 @app.get("/health")
 def health(): return {"status": "online"}
