@@ -7,10 +7,33 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from .config import settings
-from .models import GamePointUser
+from .models import GameCoinUser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- 1. FUNCIÓN DE SANITIZACIÓN INTERNACIONAL ---
+def sanitize_name(text):
+    """
+    Limpia y formatea nombres respetando costumbres internacionales.
+    - Permite Ñ, ñ, Tildes (áéíóú).
+    - Elimina espacios dobles.
+    - Convierte a formato Título (Juan Perez).
+    """
+    if not text or pd.isna(text): 
+        return ""
+    
+    # Convertir a string y quitar espacios extremos
+    text = str(text).strip()
+    
+    # Eliminar caracteres que NO sean letras, espacios, guiones o apóstrofes
+    # (Mantenemos soporte unicode para Ñ y tildes automáticamente en Python 3)
+    
+    # Colapsar espacios múltiples (ej: "Juan    Perez" -> "Juan Perez")
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Formato Título: "JUAN perez" -> "Juan Perez"
+    return text.title()
 
 # --- JUMPSELLER SYNC ROBUSTO ---
 async def fetch_jumpseller_customers():
@@ -41,11 +64,11 @@ async def fetch_jumpseller_customers():
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    logger.info("🚀 Iniciando Sincronización y Corrección de Nombres...")
+    logger.info("🚀 Iniciando Sync: Búsqueda Profunda + Sanitización (Soporte Ñ)...")
     customers = await fetch_jumpseller_customers()
     
     if not customers:
-        return {"status": "empty", "details": "No se descargaron clientes de Jumpseller"}
+        return {"status": "empty", "details": "No se descargaron clientes."}
 
     added = 0
     updated = 0
@@ -55,43 +78,67 @@ async def sync_users_to_db(db: Session):
         email = customer_data.get('email', '').strip().lower()
         if not email: continue
 
-        # Extraer datos asegurando que no sean None
-        raw_name = customer_data.get('name')
-        raw_surname = customer_data.get('surname')
+        # --- 2. ESTRATEGIA DE BÚSQUEDA DE NOMBRE COMPLETA ---
         
-        # Si Jumpseller devuelve None, usamos string vacío, pero intentamos 'fullname' si existe
-        name = raw_name if raw_name else ''
-        surname = raw_surname if raw_surname else ''
+        # Extraemos las posibles fuentes de nombre
+        billing = customer_data.get('billing_address', {})
+        shipping = customer_data.get('shipping_address', {})
         
-        # Buscar usuario en DB
-        user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
+        # Lista de candidatos en orden de prioridad (El primero que sirva gana)
+        candidates = [
+            (billing.get('name'), billing.get('surname')),      # 1. Facturación (Más confiable)
+            (customer_data.get('name'), customer_data.get('surname')), # 2. Ficha Cliente
+            (shipping.get('name'), shipping.get('surname'))     # 3. Envío
+        ]
+
+        final_name = ""
+        final_surname = ""
+
+        # Buscamos el primer par de nombres válido
+        for n, s in candidates:
+            clean_n = sanitize_name(n)
+            clean_s = sanitize_name(s)
+            
+            # Si encontramos al menos un nombre, nos quedamos con estos datos
+            if clean_n: 
+                final_name = clean_n
+                final_surname = clean_s
+                break
+        
+        # 3. Fallback: Si NADA funcionó, rescatar del email
+        if not final_name:
+            # Ejemplo: "juan.perez_99@gmail.com" -> "Juan Perez 99"
+            username = email.split('@')[0]
+            # Reemplazamos puntos, guiones y guiones bajos por espacios
+            username_clean = re.sub(r'[._-]', ' ', username)
+            final_name = sanitize_name(username_clean)
+            final_surname = "" # Apellido queda vacío si viene del mail
+
+        # --- PERSISTENCIA EN BASE DE DATOS ---
+        user = db.query(GameCoinUser).filter(GameCoinUser.email == email).first()
 
         if not user:
-            # CREAR NUEVO
-            new_user = GamePointUser(
+            new_user = GameCoinUser(
                 email=email,
-                name=name,
-                surname=surname,
-                saldo=0
+                name=final_name,
+                surname=final_surname,
+                saldo=0 
             )
             db.add(new_user)
             added += 1
         else:
-            # ACTUALIZAR SIEMPRE SI EL NOMBRE EN DB ESTÁ VACÍO
-            # Esto soluciona el problema de "Sin Nombre"
-            db_name_empty = not user.name or user.name.strip() == ''
-            name_changed = user.name != name or user.surname != surname
-            
-            if (db_name_empty and name) or name_changed:
-                user.name = name
-                user.surname = surname
+            # Actualizamos SIEMPRE para "limpiar" nombres antiguos sucios
+            # o rellenar los que estaban vacíos
+            if user.name != final_name or user.surname != final_surname:
+                user.name = final_name
+                user.surname = final_surname
                 updated += 1
     
     db.commit()
-    logger.info(f"✅ Sync Terminado: {added} nuevos, {updated} nombres corregidos.")
+    logger.info(f"✅ Sync Terminado: {added} nuevos, {updated} corregidos/actualizados.")
     return {"added": added, "updated": updated, "total_scanned": len(customers)}
 
-# ... (El resto de funciones create_jumpseller_coupon y analizar_manabox se mantienen igual) ...
+# --- OTRAS FUNCIONES (MANTENER IGUAL) ---
 async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
