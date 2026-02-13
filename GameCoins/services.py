@@ -5,8 +5,8 @@ import uuid
 import aiohttp
 import asyncio
 from sqlalchemy.orm import Session
-from config import settings        
-from models import GameCoinUser    
+from .config import settings       
+from .models import GameCoinUser    
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

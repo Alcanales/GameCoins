@@ -5,16 +5,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, or_
+from sqlalchemy import text, func, or_ 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# --- IMPORTS ABSOLUTOS (CORREGIDOS) ---
-from database import engine, Base, get_db, SessionLocal
-from models import GameCoinUser
-from config import settings
-from schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
-import services
+# --- IMPORTS RELATIVOS (CORREGIDOS) ---
+from .database import engine, Base, get_db, SessionLocal
+from .models import GameCoinUser
+from .config import settings
+from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
+from . import services
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,7 +90,6 @@ def list_users(
     db: Session = Depends(get_db), 
     admin: str = Depends(verify_admin_token)
 ):
-    """Buscador 'Si Contiene' Optimizado"""
     query = db.query(GameCoinUser)
 
     if only_balance:
