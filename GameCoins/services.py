@@ -7,21 +7,106 @@ import asyncio
 import re
 from sqlalchemy.orm import Session
 from .config import settings
-# CORRECCIÓN: Importamos GamePointUser
 from .models import GamePointUser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- SANITIZACIÓN DE NOMBRES ---
+# --- UTILIDADES ---
 def sanitize_name(text):
-    """Limpia nombres, respeta Ñ y tildes, formato Título."""
     if not text or pd.isna(text): return ""
     text = str(text).strip()
-    text = re.sub(r'\s+', ' ', text) # Quitar espacios dobles
-    return text.title() # "JUAN PEREZ" -> "Juan Perez"
+    text = re.sub(r'\s+', ' ', text)
+    return text.title()
 
-# --- JUMPSELLER SYNC ---
+def clean_currency(value):
+    """Convierte strings de dinero ($1,200.50) a float."""
+    if pd.isna(value): return 0.0
+    if isinstance(value, (int, float)): return float(value)
+    val_str = str(value).replace('$', '').replace(',', '').strip()
+    try: return float(val_str)
+    except: return 0.0
+
+def get_pricing_tier(price_usd: float) -> float:
+    """Define el porcentaje de compra basado en el valor de la carta."""
+    if price_usd <= 0: return 0.0
+    # Tier List Ajustable
+    if price_usd < 3.0: return 0.30   # 30% para cartas baratas
+    elif price_usd < 10.0: return 0.45 # 45% standard
+    elif price_usd < 50.0: return 0.55 # 55% mid-range
+    else: return 0.65                  # 65% high-end
+
+# --- ANALISIS BUYLIST (MANABOX -> CARD KINGDOM) ---
+async def analizar_manabox_ck(content: bytes):
+    try:
+        # 1. Leer CSV
+        df = pd.read_csv(io.BytesIO(content))
+        
+        # 2. Normalizar columnas (lowercase, strip) para búsqueda flexible
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        # 3. Detectar columnas clave
+        # Busca columna de nombre
+        col_name = next((c for c in df.columns if 'name' in c), 'name')
+        
+        # Busca columna de cantidad
+        col_qty = next((c for c in df.columns if c in ['quantity', 'qty', 'count', 'amount']), 'quantity')
+        
+        # 4. LÓGICA ESPECÍFICA MANABOX/CARD KINGDOM
+        # Buscamos columnas que contengan "card kingdom" o "ck"
+        posibles_precios = [c for c in df.columns if 'card kingdom' in c or 'cardkingdom' in c]
+        
+        # Fallback: si no hay CK explícito, buscamos "price" o "market" pero advertimos
+        if not posibles_precios:
+            col_price = next((c for c in df.columns if 'price' in c or 'market' in c), None)
+            if not col_price:
+                return {"error": "No se detectó columna de precio 'Card Kingdom' en el CSV."}
+        else:
+            # Tomamos la primera coincidencia de Card Kingdom (ej: 'price (card kingdom)')
+            col_price = posibles_precios[0]
+
+        results = []
+        
+        for _, row in df.iterrows():
+            # Obtener precio base CK
+            price_usd = clean_currency(row.get(col_price, 0))
+            
+            # Filtro: Ignorar cartas de menos de 5 centavos o sin precio
+            if price_usd <= 0.05: continue
+            
+            qty = int(clean_currency(row.get(col_qty, 1)))
+            if qty < 1: continue
+
+            # Cálculo de Oferta
+            multiplier = get_pricing_tier(price_usd)
+            
+            # Fórmula: (Precio USD * Dolar Tienda * Multiplicador)
+            offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
+            
+            # Etiquetado
+            status_label = "APROBADO"
+            if price_usd >= 50: status_label = "HIGH END 💎"
+            elif price_usd < 1: status_label = "BULK"
+
+            results.append({
+                "name": row.get(col_name, 'Unknown'),
+                "qty": qty,
+                "price_usd_ref": price_usd,          # Precio Card Kingdom
+                "offer_clp_unit": offer_unit,        # Oferta unitaria
+                "offer_clp_total": offer_unit * qty, # Total línea
+                "multiplier_used": f"{int(multiplier*100)}%",
+                "status": status_label
+            })
+
+        # Ordenar por valor (más caras primero)
+        results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
+        return results
+
+    except Exception as e:
+        logger.error(f"Error procesando CSV: {str(e)}")
+        return {"error": f"Error al procesar el archivo: {str(e)}"}
+
+# --- JUMPSELLER SYNC & COUPONS ---
 async def fetch_jumpseller_customers():
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
@@ -31,7 +116,6 @@ async def fetch_jumpseller_customers():
         "page": 1,
         "status": "all"
     }
-    
     all_customers = []
     async with aiohttp.ClientSession() as session:
         while True:
@@ -48,62 +132,47 @@ async def fetch_jumpseller_customers():
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    logger.info("🚀 Iniciando Sincronización en Gampoints (GamePointUser)...")
+    logger.info("🚀 Iniciando Sincronización...")
     customers = await fetch_jumpseller_customers()
     
     if not customers:
         return {"status": "empty", "details": "No se descargaron clientes."}
 
-    added = 0
-    updated = 0
+    added, updated = 0, 0
     
     for c in customers:
-        customer_data = c.get('customer', {})
-        email = customer_data.get('email', '').strip().lower()
+        cust = c.get('customer', {})
+        email = cust.get('email', '').strip().lower()
         if not email: continue
 
-        # --- ESTRATEGIA DE BÚSQUEDA PROFUNDA DE NOMBRES ---
-        billing = customer_data.get('billing_address', {})
-        shipping = customer_data.get('shipping_address', {})
+        # Lógica de nombres: Billing > Customer > Shipping
+        billing = cust.get('billing_address', {})
+        shipping = cust.get('shipping_address', {})
         
-        # Prioridad: 1. Facturación, 2. Ficha Cliente, 3. Envío
         candidates = [
             (billing.get('name'), billing.get('surname')),
-            (customer_data.get('name'), customer_data.get('surname')),
+            (cust.get('name'), cust.get('surname')),
             (shipping.get('name'), shipping.get('surname'))
         ]
 
-        final_name = ""
-        final_surname = ""
-
+        final_name, final_surname = "", ""
         for n, s in candidates:
-            cn = sanitize_name(n)
-            cs = sanitize_name(s)
+            cn, cs = sanitize_name(n), sanitize_name(s)
             if cn: 
-                final_name = cn
-                final_surname = cs
+                final_name, final_surname = cn, cs
                 break
         
-        # Fallback: Usar parte del email si todo falla
         if not final_name:
-            username = email.split('@')[0]
-            final_name = sanitize_name(re.sub(r'[._-]', ' ', username))
-            final_surname = ""
+            final_name = sanitize_name(email.split('@')[0])
 
-        # --- GUARDADO EN DB (GamePointUser) ---
+        # Guardado en DB (ID basado en Email)
         user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
 
         if not user:
-            new_user = GamePointUser(
-                email=email,
-                name=final_name,
-                surname=final_surname,
-                saldo=0 
-            )
+            new_user = GamePointUser(email=email, name=final_name, surname=final_surname, saldo=0)
             db.add(new_user)
             added += 1
         else:
-            # Actualizamos SIEMPRE para corregir nombres vacíos
             if user.name != final_name or user.surname != final_surname:
                 user.name = final_name
                 user.surname = final_surname
@@ -116,90 +185,29 @@ async def create_jumpseller_coupon(email: str, amount: int):
     code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
+    
+    # Payload optimizado para cupón de uso único
     payload = {
         "promotion": {
-            "name": f"Canje QuestPoints - {email}",
+            "name": f"Canje Puntos - {email}",
             "code": code,
             "enabled": True,
             "discount_type": "fixed",
             "value": amount,
-            "usage_limit": 1,
-            "minimum_order_amount": 0
+            "usage_limit": 1,  # Importante: Solo se usa una vez
+            "minimum_order_amount": 0,
+            # Opcional: Vincular el cupón solo a este cliente si Jumpseller lo permite en tu plan
+            # "customer_categories": [...] 
         }
     }
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, params=params, json=payload) as resp:
-                if resp.status not in [200, 201]: return None
+                if resp.status not in [200, 201]: 
+                    logger.error(f"Fallo Jumpseller API: {resp.status}")
+                    return None
                 data = await resp.json()
                 return data.get("promotion", {}).get("code", code)
-        except: return None
-
-async def analizar_manabox_ck(content: bytes, db):
-    return []
-async def create_jumpseller_coupon(email: str, amount: int):
-    code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
-    payload = {
-        "promotion": {
-            "name": f"Canje QuestPoints - {email}",
-            "code": code,
-            "enabled": True,
-            "discount_type": "fixed",
-            "value": amount,
-            "usage_limit": 1,
-            "minimum_order_amount": 0
-        }
-    }
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, params=params, json=payload) as resp:
-                if resp.status not in [200, 201]: return None
-                data = await resp.json()
-                return data.get("promotion", {}).get("code", code)
-        except: return None
-
-def clean_currency(value):
-    if pd.isna(value): return 0.0
-    if isinstance(value, (int, float)): return float(value)
-    val_str = str(value).replace('$', '').replace(',', '').strip()
-    try: return float(val_str)
-    except: return 0.0
-
-def get_pricing_tier(price_usd: float) -> float:
-    if price_usd <= 0: return 0.0
-    if price_usd < 3.0: return 0.30
-    elif price_usd < 10.0: return 0.45
-    elif price_usd < 50.0: return 0.55
-    else: return 0.65
-
-async def analizar_manabox_ck(content: bytes, db):
-    try:
-        df = pd.read_csv(io.BytesIO(content))
-        df.columns = [c.strip().lower() for c in df.columns]
-        col_name = next((c for c in df.columns if 'name' in c), 'name')
-        col_price = next((c for c in df.columns if 'card kingdom' in c), 
-                    next((c for c in df.columns if 'market' in c), 
-                    next((c for c in df.columns if 'price' in c), None)))      
-        col_qty = next((c for c in df.columns if 'quantity' in c or 'qty' in c or 'count' in c), 'quantity')
-        if not col_price: return {"error": "Sin precio Card Kingdom detectado."}
-        results = []
-        for _, row in df.iterrows():
-            price_usd = clean_currency(row.get(col_price, 0))
-            if price_usd <= 0.05: continue
-            qty = int(clean_currency(row.get(col_qty, 1)))
-            multiplier = get_pricing_tier(price_usd)
-            offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
-            results.append({
-                "name": row.get(col_name, 'Unknown'),
-                "qty": qty,
-                "price_usd_ref": price_usd,
-                "offer_clp_unit": offer_unit,
-                "offer_clp_total": offer_unit * qty,
-                "status": "HIGH END 💎" if price_usd >= 50 else ("BULK" if price_usd < 1 else "APROBADO")
-            })
-        results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
-        return results
-    except Exception as e:
-        return {"error": str(e)}
+        except Exception as e: 
+            logger.error(f"Excepción conectando a Jumpseller: {e}")
+            return None

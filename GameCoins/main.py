@@ -1,6 +1,5 @@
 import logging
 import uuid
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,11 +7,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
-import aiohttp
 
-# --- IMPORTS RELATIVOS ---
+# Imports internos
 from .database import engine, Base, get_db, SessionLocal
-# IMPORTANTE: Importamos la clase correcta desde models
 from .models import GamePointUser, SystemConfig
 from .config import settings
 from .schemas import LoginRequest, BalanceAdjustment, CanjeRequest, TokenResponse
@@ -21,17 +18,12 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- MIGRACIONES SEGURAS ---
+# --- MIGRACIONES ---
 def run_migrations():
-    """Crea las tablas en la base de datos correcta (db_gamequest)."""
     try:
-        db_url = settings.DATABASE_URL
-        masked_url = db_url.split('@')[-1] if '@' in db_url else "Unknown"
-        logger.info(f"🔌 Conectando a Base de Datos: ...@{masked_url}")
-        
-        # Esto crea la tabla 'gampoints' definida en GamePointUser
+        # Crea tablas si no existen
         Base.metadata.create_all(bind=engine)
-        logger.info("✅ Tablas verificadas/creadas (GamePointUser & SystemConfig)")
+        logger.info("✅ Tablas verificadas/creadas")
     except Exception as e:
         logger.error(f"❌ Error crítico en migración: {e}")
 
@@ -48,29 +40,36 @@ async def auto_sync_job():
     finally:
         db.close()
 
-# --- LIFESPAN (ARRANQUE) ---
+# --- LIFESPAN ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Crear tablas al iniciar
     run_migrations()
-    
-    # 2. Iniciar tareas programadas
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
-    logger.info("✅ Servidor Online y Scheduler iniciado")
+    logger.info("✅ GameQuest Vault Online")
     yield
     scheduler.shutdown()
 
 app = FastAPI(title="GameQuest Vault API", lifespan=lifespan)
 
+# --- CONFIGURACIÓN CORS (SEGURIDAD) ---
+# Aquí definimos estrictamente quién puede hablar con la API
+ORIGINS = [
+    "https://gamequest.cl",                # Tu dominio principal
+    "https://www.gamequest.cl",            # Subdominio www
+    "https://admin.jumpseller.com",        # Panel admin Jumpseller (para pruebas internas)
+    "http://localhost:8000"                # Desarrollo local
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=ORIGINS, 
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# --- LOGIN ---
+# --- LOGIN ADMIN ---
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
@@ -97,12 +96,12 @@ def verify_admin_token(authorization: str = Header(None), db: Session = Depends(
     except:
         raise HTTPException(401, "Token malformado")
 
-# --- ENDPOINTS PRINCIPALES (GamePointUser) ---
+# --- ENDPOINTS ---
 
 @app.get("/admin/users")
 def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
     query = db.query(GamePointUser)
-
+    
     if only_balance:
         query = query.filter(GamePointUser.saldo > 0)
 
@@ -116,7 +115,6 @@ def list_users(limit: int = 100, search: Optional[str] = None, only_balance: boo
             )
         )
 
-    # Métricas Globales
     total_points = db.query(func.sum(GamePointUser.saldo)).scalar() or 0
     total_count = db.query(func.count(GamePointUser.id)).scalar() or 0
     total_redeemed = db.query(func.sum(GamePointUser.historico_canjeado)).scalar() or 0
@@ -135,7 +133,6 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
     email = req.email.lower().strip()
     user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
     
-    # Si no existe, se crea al vuelo
     if not user:
         user = GamePointUser(email=email, saldo=0)
         db.add(user)
@@ -151,34 +148,8 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
 
 @app.post("/admin/sync_users")
 async def manual_sync(db: Session = Depends(get_db), admin: str = Depends(verify_admin_token)):
-    """Sincroniza y agrega clientes faltantes."""
     result = await services.sync_users_to_db(db)
     return {"status": "success", "details": result}
-
-# --- HERRAMIENTAS DE DIAGNÓSTICO ---
-
-@app.get("/admin/test_jumpseller")
-async def test_jumpseller_connection(admin: str = Depends(verify_admin_token)):
-    """Prueba si Render puede conectarse a Jumpseller."""
-    if not settings.JUMPSELLER_LOGIN:
-        return {"status": "ERROR", "msg": "JUMPSELLER_LOGIN no configurado"}
-        
-    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
-    params = {
-        "login": settings.JUMPSELLER_LOGIN,
-        "authtoken": settings.JUMPSELLER_API_TOKEN,
-        "limit": 1
-    }
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params=params) as resp:
-                return {
-                    "status_code": resp.status,
-                    "success": resp.status == 200,
-                    "msg": "Conexión OK" if resp.status == 200 else "Fallo Auth"
-                }
-        except Exception as e:
-            return {"status": "ERROR DE RED", "msg": str(e)}
 
 @app.get("/health")
 def health(): return {"status": "online"}
@@ -191,7 +162,8 @@ def get_public_balance(email: str, db: Session = Depends(get_db)):
 @app.post("/api/public/analyze_buylist")
 async def analyze_buylist_endpoint(file: UploadFile = File(...), db: Session = Depends(get_db)):
     content = await file.read()
-    return await services.analizar_manabox_ck(content, db)
+    # Procesamiento delegado a services.py optimizado
+    return await services.analizar_manabox_ck(content)
 
 @app.post("/api/canje")
 async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_store_token: str = Header(None)):
@@ -202,6 +174,7 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
     if not user or user.saldo < req.monto: raise HTTPException(400, "Saldo insuficiente")
     if req.monto < settings.MIN_CANJE: raise HTTPException(400, f"Mínimo ${settings.MIN_CANJE}")
 
+    # Descuento optimista
     try:
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
@@ -211,10 +184,12 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
         raise HTTPException(500, "Error DB")
 
     cupon = await services.create_jumpseller_coupon(user.email, req.monto)
+    
+    # Rollback manual si falla API externa
     if not cupon:
         user.saldo += req.monto 
         user.historico_canjeado -= req.monto
         db.commit()
-        raise HTTPException(502, "Error Jumpseller")
+        raise HTTPException(502, "Error al crear cupón en Jumpseller")
 
     return {"status": "ok", "cupon_codigo": cupon, "nuevo_saldo": user.saldo}
