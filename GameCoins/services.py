@@ -131,7 +131,7 @@ async def sync_users_to_db(db: Session):
     db.commit()
     return {"added": added, "updated": updated}
 
-# --- CREACIÓN DE CUPÓN (PAYLOAD CORREGIDO) ---
+# --- CREACIÓN DE CUPÓN (PAYLOAD FINAL EXACTO) ---
 async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_retries: int = 3):
     unique_suffix = uuid.uuid4().hex[:6].upper()
     code = f"GQ-{unique_suffix}"
@@ -146,14 +146,15 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
         "authtoken": settings.JS_AUTH_TOKEN
     }
     
+    # ⚠️ PAYLOAD EXACTO PARA LA API DE JUMPSELLER
     payload = {
         "promotion": {
             "name": promotion_name,
             "code": code,
             "enabled": True,
-            "type": "fixed",                # Corrección: "type" en lugar de "discount_type"
-            "discount_target": "order",     # Corrección: Aplicar el descuento al total de la orden
-            "amount": amount,               # Corrección: "amount" en lugar de "value"
+            "type": "fixed",                
+            "discount_target": "order",     
+            "discount_amount": amount,      
             "usage_limit": 1
         }
     }
