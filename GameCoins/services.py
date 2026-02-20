@@ -100,7 +100,7 @@ async def fetch_jumpseller_customers():
                     all_customers.extend(data)
                     if len(data) < 50: break 
                     params["page"] += 1
-                    await asyncio.sleep(0.5) # Pausa amigable para no saturar Jumpseller
+                    await asyncio.sleep(0.5) 
             except: break
     return all_customers
 
@@ -131,7 +131,7 @@ async def sync_users_to_db(db: Session):
     db.commit()
     return {"added": added, "updated": updated}
 
-# --- CREACIÓN DE CUPÓN CON REINTENTOS ANTI-RATE LIMIT ---
+# --- CREACIÓN DE CUPÓN (PAYLOAD CORREGIDO) ---
 async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_retries: int = 3):
     unique_suffix = uuid.uuid4().hex[:6].upper()
     code = f"GQ-{unique_suffix}"
@@ -151,10 +151,10 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
             "name": promotion_name,
             "code": code,
             "enabled": True,
-            "discount_type": "fixed",
-            "value": amount,
-            "usage_limit": 1,
-            "minimum_order_amount": 0,
+            "type": "fixed",                # Corrección: "type" en lugar de "discount_type"
+            "discount_target": "order",     # Corrección: Aplicar el descuento al total de la orden
+            "amount": amount,               # Corrección: "amount" en lugar de "value"
+            "usage_limit": 1
         }
     }
     
@@ -162,10 +162,9 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
         for attempt in range(max_retries):
             try:
                 async with session.post(url, params=params, json=payload) as resp:
-                    # Si Jumpseller nos bloquea por ir muy rápido, esperamos y reintentamos
                     if resp.status == 429:
-                        wait_time = 2 ** attempt # Espera 1s, luego 2s, luego 4s...
-                        logger.warning(f"Jumpseller Rate Limit 429. Reintentando en {wait_time}s... (Intento {attempt+1}/{max_retries})")
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Jumpseller Rate Limit. Reintentando en {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         continue
                     
