@@ -1,7 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 
-# --- AUTH & ADMIN ---
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -12,7 +11,6 @@ class BalanceAdjustment(BaseModel):
     operation: str # 'add' o 'subtract'
     motive: Optional[str] = "Manual Admin Adjustment"
 
-# --- CANJE & PUBLIC ---
 class CanjeRequest(BaseModel):
     email: EmailStr
     monto: int = Field(gt=0)

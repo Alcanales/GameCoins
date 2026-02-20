@@ -6,14 +6,13 @@ import aiohttp
 import asyncio
 import re
 from datetime import datetime
-from sqlalchemy.orm import Session  # <--- ESTA ES LA LÍNEA QUE FALTABA
+from sqlalchemy.orm import Session
 from .config import settings
 from .models import GamePointUser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- UTILIDADES ---
 def sanitize_name(text):
     if not text or pd.isna(text): return ""
     text = str(text).strip()
@@ -33,7 +32,6 @@ def get_pricing_tier(price_usd: float) -> float:
     elif price_usd < 50.0: return 0.55
     else: return 0.65
 
-# --- ANALISIS BUYLIST (MANABOX -> CARD KINGDOM) ---
 async def analizar_manabox_ck(content: bytes):
     try:
         df = pd.read_csv(io.BytesIO(content))
@@ -42,7 +40,6 @@ async def analizar_manabox_ck(content: bytes):
         col_name = next((c for c in df.columns if 'name' in c), 'name')
         col_qty = next((c for c in df.columns if c in ['quantity', 'qty', 'count', 'amount']), 'quantity')
         
-        # Prioridad: Card Kingdom -> Market -> Price
         posibles_precios = [c for c in df.columns if 'card kingdom' in c or 'cardkingdom' in c or 'ck' in c]
         if not posibles_precios:
             col_price = next((c for c in df.columns if 'price' in c or 'market' in c), None)
@@ -81,7 +78,6 @@ async def analizar_manabox_ck(content: bytes):
         logger.error(f"Error CSV: {e}")
         return {"error": str(e)}
 
-# --- JUMPSELLER SYNC ---
 async def fetch_jumpseller_customers():
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
@@ -115,7 +111,6 @@ async def sync_users_to_db(db: Session):
         email = cust.get('email', '').strip().lower()
         if not email: continue
 
-        # Normalización de nombre
         final_name = sanitize_name(cust.get('name') or cust.get('billing_address', {}).get('name'))
         final_surname = sanitize_name(cust.get('surname') or cust.get('billing_address', {}).get('surname'))
         if not final_name: final_name = email.split('@')[0]
@@ -133,16 +128,10 @@ async def sync_users_to_db(db: Session):
     db.commit()
     return {"added": added, "updated": updated}
 
-# --- CREACIÓN ROBUSTA DE CUPÓN ---
 async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
-    """
-    Crea un cupón de UN SOLO USO, con nombre y fecha.
-    """
-    # 1. Generamos código único corto para facilitar copiado
     unique_suffix = uuid.uuid4().hex[:6].upper()
     code = f"GQ-{unique_suffix}"
     
-    # 2. Nombre descriptivo para el admin (Requisito: Nombre + Fecha)
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     promotion_name = f"Canje: {user_name} ({email}) - {fecha_hoy}"
 
@@ -155,12 +144,12 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
     
     payload = {
         "promotion": {
-            "name": promotion_name,  
-            "code": code,            
+            "name": promotion_name,
+            "code": code,
             "enabled": True,
             "discount_type": "fixed",
             "value": amount,
-            "usage_limit": 1,        
+            "usage_limit": 1,
             "minimum_order_amount": 0,
         }
     }

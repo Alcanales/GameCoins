@@ -8,7 +8,6 @@ from sqlalchemy import func, or_
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
-# Imports Locales
 from .database import engine, Base, get_db, SessionLocal
 from .models import GamePointUser, SystemConfig, GamePointTransaction
 from .config import settings
@@ -18,15 +17,9 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- INICIO (Con protección de concurrencia Gunicorn) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Intentar crear tablas. Si choca con otro Worker, ignorar de forma segura.
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        logger.warning(f"Aviso durante creación de tablas (Normal en multi-worker): {e}")
-
+    # Sin creación de tablas automática aquí para evitar deadlocks de Gunicorn
     scheduler = AsyncIOScheduler()
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
@@ -41,7 +34,6 @@ async def auto_sync_job():
 
 app = FastAPI(title="GameQuest API", lifespan=lifespan)
 
-# CORS PROD
 ORIGINS = [
     "https://gamequest.cl",
     "https://www.gamequest.cl",
@@ -50,13 +42,12 @@ ORIGINS = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ORIGINS,
+    allow_origins=ORIGINS, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- AUTH ---
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
@@ -81,6 +72,19 @@ def verify_admin(authorization: str = Header(None), db: Session = Depends(get_db
 
 # --- ENDPOINTS ---
 
+@app.get("/health")
+def health():
+    return {"status": "online"}
+
+@app.post("/admin/init_db")
+def init_database(admin: str = Depends(verify_admin)):
+    """Ejecutar solo la primera vez o si se agregan tablas nuevas"""
+    try:
+        Base.metadata.create_all(bind=engine)
+        return {"status": "Tablas verificadas/creadas correctamente"}
+    except Exception as e:
+        raise HTTPException(500, f"Error DB: {e}")
+
 @app.get("/admin/users")
 def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin)):
     q = db.query(GamePointUser)
@@ -102,9 +106,8 @@ def adjust_balance(req: BalanceAdjustment, db: Session = Depends(get_db), admin:
     if not user:
         user = GamePointUser(email=req.email.lower(), saldo=0)
         db.add(user)
-        db.flush() # Para obtener ID
+        db.flush() 
     
-    # Registro de Transacción
     tx = GamePointTransaction(
         user_id=user.id,
         amount=req.amount,
@@ -130,17 +133,14 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
 
     user = db.query(GamePointUser).filter(GamePointUser.email == req.email.lower().strip()).first()
     
-    # Validaciones Estrictas
     if not user: raise HTTPException(404, "Usuario no encontrado")
     if user.saldo < req.monto: raise HTTPException(400, "Saldo insuficiente")
     if req.monto < settings.MIN_CANJE: raise HTTPException(400, f"Mínimo ${settings.MIN_CANJE}")
 
-    # 1. Descuento Optimista (ACID Transaction Start)
     try:
         user.saldo -= req.monto
         user.historico_canjeado += req.monto
         
-        # Auditoría
         tx = GamePointTransaction(
             user_id=user.id,
             amount=req.monto,
@@ -155,16 +155,13 @@ async def procesar_canje(req: CanjeRequest, db: Session = Depends(get_db), x_sto
         logger.error(f"Error DB Canje: {e}")
         raise HTTPException(500, "Error interno procesando saldo")
 
-    # 2. Llamada Externa (Jumpseller)
     user_name = f"{user.name or ''} {user.surname or ''}".strip() or "Cliente"
     cupon = await services.create_jumpseller_coupon(user.email, req.monto, user_name)
 
-    # 3. Manejo de Fallo Externo (Rollback Manual)
     if not cupon:
         logger.error(f"Fallo Cupón para {user.email}. Reembolsando...")
         user.saldo += req.monto
         user.historico_canjeado -= req.monto
-        # Auditoría de Reembolso
         tx_refund = GamePointTransaction(
             user_id=user.id, 
             amount=req.monto, 
