@@ -18,11 +18,15 @@ from . import services
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- INICIO ---
+# --- INICIO (Con protección de concurrencia Gunicorn) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Crear tablas (incluyendo la nueva de transacciones)
-    Base.metadata.create_all(bind=engine)
+    # Intentar crear tablas. Si choca con otro Worker, ignorar de forma segura.
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning(f"Aviso durante creación de tablas (Normal en multi-worker): {e}")
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
@@ -46,7 +50,7 @@ ORIGINS = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ORIGINS, # Bloquea acceso no autorizado
+    allow_origins=ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
