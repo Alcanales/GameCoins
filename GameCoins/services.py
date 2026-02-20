@@ -5,7 +5,7 @@ import uuid
 import aiohttp
 import asyncio
 import re
-from sqlalchemy.orm import Session
+from datetime import datetime
 from .config import settings
 from .models import GamePointUser
 
@@ -16,11 +16,9 @@ logger = logging.getLogger(__name__)
 def sanitize_name(text):
     if not text or pd.isna(text): return ""
     text = str(text).strip()
-    text = re.sub(r'\s+', ' ', text)
-    return text.title()
+    return re.sub(r'\s+', ' ', text).title()
 
 def clean_currency(value):
-    """Convierte strings de dinero ($1,200.50) a float."""
     if pd.isna(value): return 0.0
     if isinstance(value, (int, float)): return float(value)
     val_str = str(value).replace('$', '').replace(',', '').strip()
@@ -28,93 +26,69 @@ def clean_currency(value):
     except: return 0.0
 
 def get_pricing_tier(price_usd: float) -> float:
-    """Define el porcentaje de compra basado en el valor de la carta."""
     if price_usd <= 0: return 0.0
-    # Tier List Ajustable
-    if price_usd < 3.0: return 0.30   # 30% para cartas baratas
-    elif price_usd < 10.0: return 0.45 # 45% standard
-    elif price_usd < 50.0: return 0.55 # 55% mid-range
-    else: return 0.65                  # 65% high-end
+    if price_usd < 3.0: return 0.30
+    elif price_usd < 10.0: return 0.45
+    elif price_usd < 50.0: return 0.55
+    else: return 0.65
 
 # --- ANALISIS BUYLIST (MANABOX -> CARD KINGDOM) ---
 async def analizar_manabox_ck(content: bytes):
     try:
-        # 1. Leer CSV
         df = pd.read_csv(io.BytesIO(content))
-        
-        # 2. Normalizar columnas (lowercase, strip) para búsqueda flexible
         df.columns = [c.strip().lower() for c in df.columns]
         
-        # 3. Detectar columnas clave
-        # Busca columna de nombre
         col_name = next((c for c in df.columns if 'name' in c), 'name')
-        
-        # Busca columna de cantidad
         col_qty = next((c for c in df.columns if c in ['quantity', 'qty', 'count', 'amount']), 'quantity')
         
-        # 4. LÓGICA ESPECÍFICA MANABOX/CARD KINGDOM
-        # Buscamos columnas que contengan "card kingdom" o "ck"
-        posibles_precios = [c for c in df.columns if 'card kingdom' in c or 'cardkingdom' in c]
-        
-        # Fallback: si no hay CK explícito, buscamos "price" o "market" pero advertimos
+        # Prioridad: Card Kingdom -> Market -> Price
+        posibles_precios = [c for c in df.columns if 'card kingdom' in c or 'cardkingdom' in c or 'ck' in c]
         if not posibles_precios:
             col_price = next((c for c in df.columns if 'price' in c or 'market' in c), None)
-            if not col_price:
-                return {"error": "No se detectó columna de precio 'Card Kingdom' en el CSV."}
+            if not col_price: return {"error": "No se detectó columna de precio (Card Kingdom/Price)."}
         else:
-            # Tomamos la primera coincidencia de Card Kingdom (ej: 'price (card kingdom)')
             col_price = posibles_precios[0]
 
         results = []
-        
         for _, row in df.iterrows():
-            # Obtener precio base CK
             price_usd = clean_currency(row.get(col_price, 0))
-            
-            # Filtro: Ignorar cartas de menos de 5 centavos o sin precio
             if price_usd <= 0.05: continue
             
             qty = int(clean_currency(row.get(col_qty, 1)))
             if qty < 1: continue
 
-            # Cálculo de Oferta
             multiplier = get_pricing_tier(price_usd)
-            
-            # Fórmula: (Precio USD * Dolar Tienda * Multiplicador)
             offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
             
-            # Etiquetado
             status_label = "APROBADO"
             if price_usd >= 50: status_label = "HIGH END 💎"
-            elif price_usd < 1: status_label = "BULK"
+            elif price_usd < settings.MIN_PURCHASE_USD: status_label = "BULK"
 
             results.append({
                 "name": row.get(col_name, 'Unknown'),
                 "qty": qty,
-                "price_usd_ref": price_usd,          # Precio Card Kingdom
-                "offer_clp_unit": offer_unit,        # Oferta unitaria
-                "offer_clp_total": offer_unit * qty, # Total línea
+                "price_usd_ref": price_usd,
+                "offer_clp_unit": offer_unit,
+                "offer_clp_total": offer_unit * qty,
                 "multiplier_used": f"{int(multiplier*100)}%",
                 "status": status_label
             })
 
-        # Ordenar por valor (más caras primero)
         results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
         return results
-
     except Exception as e:
-        logger.error(f"Error procesando CSV: {str(e)}")
-        return {"error": f"Error al procesar el archivo: {str(e)}"}
+        logger.error(f"Error CSV: {e}")
+        return {"error": str(e)}
 
-# --- JUMPSELLER SYNC & COUPONS ---
+# --- JUMPSELLER SYNC ---
 async def fetch_jumpseller_customers():
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    # USA LAS NUEVAS VARIABLES
     params = {
-        "login": settings.JUMPSELLER_LOGIN,
-        "authtoken": settings.JUMPSELLER_API_TOKEN,
+        "login": settings.JS_LOGIN_CODE,
+        "authtoken": settings.JS_AUTH_TOKEN,
         "limit": 50,
-        "page": 1,
-        "status": "all"
+        "page": 1
     }
     all_customers = []
     async with aiohttp.ClientSession() as session:
@@ -127,87 +101,82 @@ async def fetch_jumpseller_customers():
                     all_customers.extend(data)
                     if len(data) < 50: break 
                     params["page"] += 1
-                    await asyncio.sleep(0.2) 
+                    await asyncio.sleep(0.1) 
             except: break
     return all_customers
 
 async def sync_users_to_db(db: Session):
-    logger.info("🚀 Iniciando Sincronización...")
     customers = await fetch_jumpseller_customers()
-    
-    if not customers:
-        return {"status": "empty", "details": "No se descargaron clientes."}
+    if not customers: return {"status": "empty"}
 
     added, updated = 0, 0
-    
     for c in customers:
         cust = c.get('customer', {})
         email = cust.get('email', '').strip().lower()
         if not email: continue
 
-        # Lógica de nombres: Billing > Customer > Shipping
-        billing = cust.get('billing_address', {})
-        shipping = cust.get('shipping_address', {})
-        
-        candidates = [
-            (billing.get('name'), billing.get('surname')),
-            (cust.get('name'), cust.get('surname')),
-            (shipping.get('name'), shipping.get('surname'))
-        ]
+        # Normalización de nombre
+        final_name = sanitize_name(cust.get('name') or cust.get('billing_address', {}).get('name'))
+        final_surname = sanitize_name(cust.get('surname') or cust.get('billing_address', {}).get('surname'))
+        if not final_name: final_name = email.split('@')[0]
 
-        final_name, final_surname = "", ""
-        for n, s in candidates:
-            cn, cs = sanitize_name(n), sanitize_name(s)
-            if cn: 
-                final_name, final_surname = cn, cs
-                break
-        
-        if not final_name:
-            final_name = sanitize_name(email.split('@')[0])
-
-        # Guardado en DB (ID basado en Email)
         user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
-
         if not user:
-            new_user = GamePointUser(email=email, name=final_name, surname=final_surname, saldo=0)
+            new_user = GamePointUser(email=email, name=final_name, surname=final_surname)
             db.add(new_user)
             added += 1
         else:
-            if user.name != final_name or user.surname != final_surname:
+            if user.name != final_name:
                 user.name = final_name
-                user.surname = final_surname
                 updated += 1
     
     db.commit()
-    return {"added": added, "updated": updated, "total_scanned": len(customers)}
+    return {"added": added, "updated": updated}
 
-async def create_jumpseller_coupon(email: str, amount: int):
-    code = f"GQ-{uuid.uuid4().hex[:8].upper()}"
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    params = {"login": settings.JUMPSELLER_LOGIN, "authtoken": settings.JUMPSELLER_API_TOKEN}
+# --- CREACIÓN ROBUSTA DE CUPÓN ---
+async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
+    """
+    Crea un cupón de UN SOLO USO, con nombre y fecha.
+    """
+    # 1. Generamos código único corto para facilitar copiado
+    unique_suffix = uuid.uuid4().hex[:6].upper()
+    code = f"GQ-{unique_suffix}"
     
-    # Payload optimizado para cupón de uso único
+    # 2. Nombre descriptivo para el admin (Requisito: Nombre + Fecha)
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    promotion_name = f"Canje: {user_name} ({email}) - {fecha_hoy}"
+
+    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    
+    # CREDENCIALES NUEVAS
+    params = {
+        "login": settings.JS_LOGIN_CODE,
+        "authtoken": settings.JS_AUTH_TOKEN
+    }
+    
     payload = {
         "promotion": {
-            "name": f"Canje Puntos - {email}",
-            "code": code,
+            "name": promotion_name,  # Nombre descriptivo
+            "code": code,            # Código para el checkout
             "enabled": True,
             "discount_type": "fixed",
             "value": amount,
-            "usage_limit": 1,  # Importante: Solo se usa una vez
+            "usage_limit": 1,        # CRÍTICO: Solo 1 uso total
             "minimum_order_amount": 0,
-            # Opcional: Vincular el cupón solo a este cliente si Jumpseller lo permite en tu plan
-            # "customer_categories": [...] 
+            # No limitamos a customer_id específico para evitar problemas si el cliente
+            # compra como invitado, pero usage_limit:1 garantiza seguridad.
         }
     }
+    
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, params=params, json=payload) as resp:
-                if resp.status not in [200, 201]: 
-                    logger.error(f"Fallo Jumpseller API: {resp.status}")
+                if resp.status not in [200, 201]:
+                    err = await resp.text()
+                    logger.error(f"Jumpseller Error {resp.status}: {err}")
                     return None
                 data = await resp.json()
                 return data.get("promotion", {}).get("code", code)
-        except Exception as e: 
-            logger.error(f"Excepción conectando a Jumpseller: {e}")
+        except Exception as e:
+            logger.error(f"Error de conexión: {e}")
             return None

@@ -8,5 +8,5 @@ aiohttp==3.9.1
 python-multipart==0.0.6
 pydantic-settings==2.1.0
 pydantic==2.5.3
-pydantic[email]==2.5.3
 apscheduler==3.10.4
+requests==2.31.0
