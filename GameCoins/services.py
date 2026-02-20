@@ -6,6 +6,7 @@ import aiohttp
 import asyncio
 import re
 from datetime import datetime
+from sqlalchemy.orm import Session  # <--- ESTA ES LA LÍNEA QUE FALTABA
 from .config import settings
 from .models import GamePointUser
 
@@ -83,7 +84,6 @@ async def analizar_manabox_ck(content: bytes):
 # --- JUMPSELLER SYNC ---
 async def fetch_jumpseller_customers():
     url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
-    # USA LAS NUEVAS VARIABLES
     params = {
         "login": settings.JS_LOGIN_CODE,
         "authtoken": settings.JS_AUTH_TOKEN,
@@ -148,7 +148,6 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
 
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
     
-    # CREDENCIALES NUEVAS
     params = {
         "login": settings.JS_LOGIN_CODE,
         "authtoken": settings.JS_AUTH_TOKEN
@@ -156,15 +155,13 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
     
     payload = {
         "promotion": {
-            "name": promotion_name,  # Nombre descriptivo
-            "code": code,            # Código para el checkout
+            "name": promotion_name,  
+            "code": code,            
             "enabled": True,
             "discount_type": "fixed",
             "value": amount,
-            "usage_limit": 1,        # CRÍTICO: Solo 1 uso total
+            "usage_limit": 1,        
             "minimum_order_amount": 0,
-            # No limitamos a customer_id específico para evitar problemas si el cliente
-            # compra como invitado, pero usage_limit:1 garantiza seguridad.
         }
     }
     
