@@ -91,13 +91,16 @@ async def fetch_jumpseller_customers():
         while True:
             try:
                 async with session.get(url, params=params) as resp:
+                    if resp.status == 429: # Rate Limit
+                        await asyncio.sleep(2)
+                        continue
                     if resp.status != 200: break
                     data = await resp.json()
                     if not data: break 
                     all_customers.extend(data)
                     if len(data) < 50: break 
                     params["page"] += 1
-                    await asyncio.sleep(0.1) 
+                    await asyncio.sleep(0.5) # Pausa amigable para no saturar Jumpseller
             except: break
     return all_customers
 
@@ -128,7 +131,8 @@ async def sync_users_to_db(db: Session):
     db.commit()
     return {"added": added, "updated": updated}
 
-async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
+# --- CREACIÓN DE CUPÓN CON REINTENTOS ANTI-RATE LIMIT ---
+async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_retries: int = 3):
     unique_suffix = uuid.uuid4().hex[:6].upper()
     code = f"GQ-{unique_suffix}"
     
@@ -155,14 +159,27 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str):
     }
     
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, params=params, json=payload) as resp:
-                if resp.status not in [200, 201]:
-                    err = await resp.text()
-                    logger.error(f"Jumpseller Error {resp.status}: {err}")
+        for attempt in range(max_retries):
+            try:
+                async with session.post(url, params=params, json=payload) as resp:
+                    # Si Jumpseller nos bloquea por ir muy rápido, esperamos y reintentamos
+                    if resp.status == 429:
+                        wait_time = 2 ** attempt # Espera 1s, luego 2s, luego 4s...
+                        logger.warning(f"Jumpseller Rate Limit 429. Reintentando en {wait_time}s... (Intento {attempt+1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    
+                    if resp.status not in [200, 201]:
+                        err = await resp.text()
+                        logger.error(f"Jumpseller Error {resp.status}: {err}")
+                        return None
+                    
+                    data = await resp.json()
+                    return data.get("promotion", {}).get("code", code)
+            except Exception as e:
+                logger.error(f"Error de conexión en intento {attempt+1}: {e}")
+                if attempt == max_retries - 1:
                     return None
-                data = await resp.json()
-                return data.get("promotion", {}).get("code", code)
-        except Exception as e:
-            logger.error(f"Error de conexión: {e}")
-            return None
+                await asyncio.sleep(1)
+                
+        return None
