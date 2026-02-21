@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Sin creación de tablas automática aquí para evitar deadlocks de Gunicorn
     scheduler = AsyncIOScheduler()
     scheduler.add_job(auto_sync_job, 'cron', hour=23, minute=30)
     scheduler.start()
@@ -34,19 +33,35 @@ async def auto_sync_job():
 
 app = FastAPI(title="GameQuest API", lifespan=lifespan)
 
-ORIGINS = [
-    "https://gamequest.cl",
-    "https://www.gamequest.cl",
-    "https://admin.jumpseller.com"
-]
-
+# CORS UNIVERSAL PARA EVITAR BLOQUEOS DE LA BÓVEDA
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ORIGINS, 
-    allow_credentials=True,
+    allow_origins=["*"], 
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# RETROCOMPATIBILIDAD BÓVEDA ANTIGUA + TOKENS NUEVOS
+def verify_admin(
+    x_admin_user: Optional[str] = Header(None),
+    x_admin_pass: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None), 
+    db: Session = Depends(get_db)
+):
+    if x_admin_user == settings.ADMIN_USER and x_admin_pass == settings.ADMIN_PASS:
+        return "admin_legacy"
+        
+    if authorization:
+        try:
+            token = authorization.split()[1]
+            conf = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
+            if conf and conf.value == token:
+                return "admin_token"
+        except:
+            pass
+            
+    raise HTTPException(401, "No autorizado. Credenciales inválidas.")
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
@@ -62,23 +77,12 @@ def login(creds: LoginRequest, db: Session = Depends(get_db)):
         return {"access_token": token, "token_type": "bearer"}
     raise HTTPException(401, "Credenciales inválidas")
 
-def verify_admin(authorization: str = Header(None), db: Session = Depends(get_db)):
-    if not authorization: raise HTTPException(401)
-    try:
-        token = authorization.split()[1]
-        conf = db.query(SystemConfig).filter(SystemConfig.key == "admin_token").first()
-        if not conf or conf.value != token: raise Exception()
-    except: raise HTTPException(403, "Token inválido")
-
-# --- ENDPOINTS ---
-
 @app.get("/health")
 def health():
     return {"status": "online"}
 
 @app.post("/admin/init_db")
 def init_database(admin: str = Depends(verify_admin)):
-    """Ejecutar solo la primera vez o si se agregan tablas nuevas"""
     try:
         Base.metadata.create_all(bind=engine)
         return {"status": "Tablas verificadas/creadas correctamente"}
