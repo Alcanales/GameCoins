@@ -8,7 +8,7 @@ class LoginRequest(BaseModel):
 class BalanceAdjustment(BaseModel):
     email: EmailStr
     amount: int = Field(gt=0, description="Monto siempre positivo")
-    operation: str # 'add' o 'subtract'
+    operation: str
     motive: Optional[str] = "Manual Admin Adjustment"
 
 class CanjeRequest(BaseModel):
