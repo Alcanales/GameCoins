@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text  # <-- IMPORTANTE: Añadido 'text'
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from typing import Optional
 
@@ -63,6 +63,26 @@ def verify_admin(
             
     raise HTTPException(401, "No autorizado. Credenciales inválidas.")
 
+# --- HERRAMIENTA DE REPARACIÓN DE BASE DE DATOS ---
+@app.get("/api/public/fix_db")
+def auto_fix_database():
+    """Ejecuta esto UNA VEZ desde tu navegador para parchar la base de datos vieja"""
+    try:
+        # 1. Crear tablas nuevas si faltan (ej. Transacciones)
+        Base.metadata.create_all(bind=engine)
+        
+        # 2. Inyectar las nuevas columnas a la tabla de clientes existente de forma segura
+        with engine.connect() as conn:
+            conn.execute(text('ALTER TABLE gampoints ADD COLUMN IF NOT EXISTS historico_canjeado INTEGER DEFAULT 0;'))
+            conn.execute(text('ALTER TABLE gampoints ADD COLUMN IF NOT EXISTS historico_acumulado INTEGER DEFAULT 0;'))
+            conn.commit()
+            
+        return {"status": "✅ Base de datos reparada. Vuelve a tu Bóveda y recarga la página, ¡ya funciona!"}
+    except Exception as e:
+        return {"error": f"Fallo al reparar: {e}"}
+
+# --- RESTO DE ENDPOINTS ---
+
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(creds: LoginRequest, db: Session = Depends(get_db)):
     if creds.username == settings.ADMIN_USER and creds.password == settings.ADMIN_PASS:
@@ -80,14 +100,6 @@ def login(creds: LoginRequest, db: Session = Depends(get_db)):
 @app.get("/health")
 def health():
     return {"status": "online"}
-
-@app.post("/admin/init_db")
-def init_database(admin: str = Depends(verify_admin)):
-    try:
-        Base.metadata.create_all(bind=engine)
-        return {"status": "Tablas verificadas/creadas correctamente"}
-    except Exception as e:
-        raise HTTPException(500, f"Error DB: {e}")
 
 @app.get("/admin/users")
 def list_users(limit: int = 100, search: Optional[str] = None, only_balance: bool = False, db: Session = Depends(get_db), admin: str = Depends(verify_admin)):
