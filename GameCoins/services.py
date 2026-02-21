@@ -51,7 +51,6 @@ async def analizar_manabox_ck(content: bytes):
         for _, row in df.iterrows():
             price_usd = clean_currency(row.get(col_price, 0))
             if price_usd <= 0.05: continue
-            
             qty = int(clean_currency(row.get(col_qty, 1)))
             if qty < 1: continue
 
@@ -75,7 +74,6 @@ async def analizar_manabox_ck(content: bytes):
         results.sort(key=lambda x: x['price_usd_ref'], reverse=True)
         return results
     except Exception as e:
-        logger.error(f"Error CSV: {e}")
         return {"error": str(e)}
 
 async def fetch_jumpseller_customers():
@@ -91,7 +89,7 @@ async def fetch_jumpseller_customers():
         while True:
             try:
                 async with session.get(url, params=params) as resp:
-                    if resp.status == 429: # Rate Limit
+                    if resp.status == 429: 
                         await asyncio.sleep(2)
                         continue
                     if resp.status != 200: break
@@ -131,7 +129,6 @@ async def sync_users_to_db(db: Session):
     db.commit()
     return {"added": added, "updated": updated}
 
-# --- CREACIÓN DE CUPÓN (PAYLOAD UNIVERSAL) ---
 async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_retries: int = 3):
     unique_suffix = uuid.uuid4().hex[:6].upper()
     code = f"GQ-{unique_suffix}"
@@ -140,22 +137,25 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
     promotion_name = f"Canje: {user_name} ({email}) - {fecha_hoy}"
 
     url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-    
     params = {
         "login": settings.JS_LOGIN_CODE,
         "authtoken": settings.JS_AUTH_TOKEN
     }
     
-    # ⚠️ PAYLOAD UNIVERSAL PARA JUMPSELLER
-    # Forzamos float(amount) para evitar que Jumpseller lo tome como nulo/cero
+    monto_puro = int(amount)
+    # PAYLOAD OMNIBUS
     payload = {
         "promotion": {
             "name": promotion_name,
             "code": code,
             "enabled": True,
-            "discount_type": "fixed",         
-            "discount_target": "order",       
-            "amount": float(amount),          # CRÍTICO: Float explícito
+            "type": "fixed",                
+            "discount_target": "order",     
+            "amount": monto_puro,
+            "discount": monto_puro,
+            "discount_amount": monto_puro,
+            "discount_value": monto_puro,
+            "value": monto_puro,
             "usage_limit": 1
         }
     }
@@ -178,7 +178,7 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
                     data = await resp.json()
                     return data.get("promotion", {}).get("code", code)
             except Exception as e:
-                logger.error(f"Error de conexión en intento {attempt+1}: {e}")
+                logger.error(f"Error conexión: {e}")
                 if attempt == max_retries - 1:
                     return None
                 await asyncio.sleep(1)
