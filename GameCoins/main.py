@@ -4,6 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import text, exc, func
 from pydantic import BaseModel
+from decimal import Decimal # <--- NUEVA IMPORTACIÓN NECESARIA
 
 # Importaciones relativas
 from .database import get_db, engine, Base
@@ -40,7 +41,7 @@ class CanjeReq(BaseModel):
 
 class AdminAdjustReq(BaseModel):
     email: str
-    amount: float
+    amount: int 
 
 # --- SEGURIDAD DE LA BÓVEDA ---
 security = HTTPBearer()
@@ -93,7 +94,7 @@ def get_metrics(db: Session = Depends(get_db)):
 @app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     from .models import Gampoint
-    users = db.query(Gampoint).order_by(Gampoint.saldo.desc()).all()
+    users = db.query(Gampoint).order_by(Gampoint.saldo.desc()).limit(100).all()
     return users
 
 @app.post("/api/admin/adjust", dependencies=[Depends(verify_admin)])
@@ -102,10 +103,9 @@ def adjust_balance(req: AdminAdjustReq, db: Session = Depends(get_db)):
     user = db.query(Gampoint).filter(Gampoint.email == req.email.lower()).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    user.saldo += req.amount # Suma o resta dependiendo de si el número es negativo
+    user.saldo += Decimal(req.amount) 
     db.commit()
-    return {"status": "ok", "nuevo_saldo": user.saldo}
+    return {"status": "ok", "nuevo_saldo": float(user.saldo)}
 
 @app.post("/api/admin/sync_users", dependencies=[Depends(verify_admin)])
 async def trigger_sync(db: Session = Depends(get_db)):
