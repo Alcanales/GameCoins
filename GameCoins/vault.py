@@ -14,12 +14,15 @@ logger = logging.getLogger(__name__)
 class VaultController:
     @staticmethod
     async def create_js_coupon(email: str, amount: int):
+        # Generamos un código único con prefijo QuestPoints
         code = f"QP-{uuid.uuid4().hex[:6].upper()}"
         url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
         
-        # Jumpseller es estricto: mandamos el monto en todos los campos posibles
-        monto_valor = int(amount)
+        # Aseguramos que el monto sea un entero puro
+        val = int(amount)
+        
+        # PAYLOAD OMNIBUS: Enviamos el valor en todos los campos posibles para evitar Error 400
         payload = {
             "promotion": {
                 "name": f"Canje QuestPoints: {email}",
@@ -27,14 +30,15 @@ class VaultController:
                 "enabled": True,
                 "type": "fixed",
                 "discount_target": "order",
-                "amount": monto_valor,
-                "discount": monto_valor,
-                "value": monto_valor,
-                "discount_amount": monto_valor,
-                "usage_limit": 1
+                "amount": val,           # Campo principal
+                "discount": val,         # Respaldo API vieja
+                "value": val,            # Respaldo API nueva
+                "discount_amount": val,  # Campo descriptivo
+                "usage_limit": 1,
+                "cumulative": False
             }
         }
-        
+    
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, params=params, json=payload) as resp:
@@ -42,9 +46,9 @@ class VaultController:
                         data = await resp.json()
                         return data.get("promotion", {}).get("code")
                     else:
-                        # Si Jumpseller falla, imprimimos el error exacto en Render
-                        err = await resp.text()
-                        logger.error(f"Jumpseller rechazó el cupón. Status {resp.status}: {err}")
+                        # Registramos el error exacto de Jumpseller para depuración
+                        err_detail = await resp.text()
+                        logger.error(f"Jumpseller rechazó cupón ({resp.status}): {err_detail}")
                         return None
             except Exception as e:
                 logger.error(f"Error de conexión con Jumpseller: {e}")
@@ -71,15 +75,19 @@ class VaultController:
 
     @staticmethod
     async def process_canje(db: Session, email: str, amount: int):
+        # Bloqueamos la fila del usuario para evitar canjes dobles
         user = db.query(Gampoint).filter(Gampoint.email == email.lower()).with_for_update().first()
         
         if not user or user.saldo < amount:
             raise HTTPException(status_code=400, detail="Saldo insuficiente")
 
+        # Intentamos crear el cupón en Jumpseller
         coupon_code = await VaultController.create_js_coupon(email, amount)
         if not coupon_code:
+            # Si entras aquí, revisa los logs de Render para ver el error de Jumpseller
             raise HTTPException(status_code=500, detail="Error creando cupón en Jumpseller")
 
+        # Si el cupón fue exitoso, restamos el saldo
         user.saldo -= Decimal(amount)
         user.historico_canjeado += Decimal(amount)
         

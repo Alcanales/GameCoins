@@ -43,11 +43,14 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @app.get("/api/balance/{email}")
 @app.get("/api/saldo/{email}")
 @app.get("/api/public/balance/{email}")
+@app.get("/api/public/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
     from .models import Gampoint
-    user = db.query(Gampoint).filter(Gampoint.email == email.lower()).first()
-    return {"saldo": float(user.saldo if user else 0)}
-
+    try:
+        user = db.query(Gampoint).filter(Gampoint.email == email.lower().strip()).first()
+        return {"saldo": float(user.saldo) if user and user.saldo else 0.0}
+    except Exception:
+        return {"saldo": 0.0}
 @app.post("/api/canje")
 async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     return await VaultController.process_canje(db, req.email, req.monto)
