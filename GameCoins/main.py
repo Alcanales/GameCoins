@@ -42,6 +42,7 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 # RUTAS DE SALDO (Con alias para evitar 404)
 @app.get("/api/balance/{email}")
 @app.get("/api/saldo/{email}")
+@app.get("/api/public/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
     from .models import Gampoint
     user = db.query(Gampoint).filter(Gampoint.email == email.lower()).first()

@@ -14,16 +14,12 @@ logger = logging.getLogger(__name__)
 class VaultController:
     @staticmethod
     async def create_js_coupon(email: str, amount: int):
-        """Genera un cupón real en Jumpseller."""
-        code = f"QP-{uuid.uuid4().hex[:6].upper()}" 
+        code = f"QP-{uuid.uuid4().hex[:6].upper()}"
         url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+        params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
         
-        params = {
-            "login": settings.JS_LOGIN_CODE, 
-            "authtoken": settings.JS_AUTH_TOKEN 
-        }
-        
-        monto_puro = int(amount)
+        # Jumpseller es estricto: mandamos el monto en todos los campos posibles
+        monto_valor = int(amount)
         payload = {
             "promotion": {
                 "name": f"Canje QuestPoints: {email}",
@@ -31,11 +27,10 @@ class VaultController:
                 "enabled": True,
                 "type": "fixed",
                 "discount_target": "order",
-                "amount": monto_puro,
-                "discount": monto_puro,
-                "discount_amount": monto_puro,
-                "discount_value": monto_puro,
-                "value": monto_puro,
+                "amount": monto_valor,
+                "discount": monto_valor,
+                "value": monto_valor,
+                "discount_amount": monto_valor,
                 "usage_limit": 1
             }
         }
