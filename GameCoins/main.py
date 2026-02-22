@@ -1,12 +1,20 @@
 from fastapi import FastAPI, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text  
 from pydantic import BaseModel
+
 from .database import get_db, engine, Base
 from .vault import VaultController
 from .schemas import CanjeRequest
 
+
+with engine.connect() as conn:
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
+    conn.commit()
+
 Base.metadata.create_all(bind=engine)
+
 app = FastAPI()
 
 app.add_middleware(
@@ -22,7 +30,7 @@ class CanjeReq(BaseModel):
 
 @app.get("/api/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
-    from models import Gampoint
+    from .models import Gampoint
     user = db.query(Gampoint).filter(Gampoint.email == email.lower()).first()
     return {"saldo": float(user.saldo if user else 0)}
 
