@@ -7,7 +7,7 @@ import asyncio
 import re
 from datetime import datetime
 from sqlalchemy.orm import Session
-from .config import settings
+from .config import USD_TO_CLP, JS_AUTH_TOKEN
 from .models import GamePointUser
 
 logging.basicConfig(level=logging.INFO)

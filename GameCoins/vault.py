@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from models import Gampoint
+from .models import Gampoint
 
 logger = logging.getLogger(__name__)
 

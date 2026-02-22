@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from .database import get_db, engine, Base
 from .vault import VaultController
-from pydantic import BaseModel
+from .schemas import CanjeRequest
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
