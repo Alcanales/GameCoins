@@ -7,6 +7,8 @@ import asyncio
 import re
 from datetime import datetime
 from sqlalchemy.orm import Session
+
+# Importaciones corregidas
 from .config import settings
 from .models import Gampoint
 
@@ -43,7 +45,7 @@ async def analizar_manabox_ck(content: bytes):
         posibles_precios = [c for c in df.columns if 'card kingdom' in c or 'cardkingdom' in c or 'ck' in c]
         if not posibles_precios:
             col_price = next((c for c in df.columns if 'price' in c or 'market' in c), None)
-            if not col_price: return {"error": "No se detectó columna de precio (Card Kingdom/Price)."}
+            if not col_price: return {"error": "No se detectó columna de precio."}
         else:
             col_price = posibles_precios[0]
 
@@ -55,14 +57,11 @@ async def analizar_manabox_ck(content: bytes):
             if qty < 1: continue
 
             multiplier = get_pricing_tier(price_usd)
-            
-            # USO CORRECTO DE settings.USD_TO_CLP
             offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
             
             status_label = "APROBADO"
             if price_usd >= 50: status_label = "HIGH END 💎"
-            # Asumimos BULK por debajo de 1 USD si no existe MIN_PURCHASE_USD en settings
-            elif price_usd < getattr(settings, 'MIN_PURCHASE_USD', 1.0): status_label = "BULK"
+            elif price_usd < settings.MIN_PURCHASE_USD: status_label = "BULK"
 
             results.append({
                 "name": row.get(col_name, 'Unknown'),
@@ -80,13 +79,9 @@ async def analizar_manabox_ck(content: bytes):
         return {"error": str(e)}
 
 async def fetch_jumpseller_customers():
-    # Asumimos un base URL por defecto si no está en settings
-    api_base = getattr(settings, 'JUMPSELLER_API_BASE', "https://api.jumpseller.com/v1")
-    url = f"{api_base}/customers.json"
-    
-    # USO CORRECTO DE settings PARA TOKENS Y LOGIN
+    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
     params = {
-        "login": getattr(settings, 'JS_LOGIN_CODE', ''),
+        "login": settings.JS_LOGIN_CODE,
         "authtoken": settings.JS_AUTH_TOKEN,
         "limit": 50,
         "page": 1
@@ -111,19 +106,20 @@ async def fetch_jumpseller_customers():
 
 async def sync_users_to_db(db: Session):
     customers = await fetch_jumpseller_customers()
-    if not customers: return {"status": "empty"}
+    if not customers: return {"added": 0, "updated": 0, "status": "empty"}
 
     added, updated = 0, 0
     for c in customers:
         cust = c.get('customer', {})
-        email = cust.get('email', '').strip().lower()
+        email = cust.get('email', '')
         if not email: continue
+        email = email.strip().lower()
 
         final_name = sanitize_name(cust.get('name') or cust.get('billing_address', {}).get('name'))
         final_surname = sanitize_name(cust.get('surname') or cust.get('billing_address', {}).get('surname'))
         if not final_name: final_name = email.split('@')[0]
 
-        # USO CORRECTO DEL MODELO Gampoint EN LUGAR DE GamePointUser
+        # SE USA GAMPOINT
         user = db.query(Gampoint).filter(Gampoint.email == email).first()
         if not user:
             new_user = Gampoint(email=email, name=final_name, surname=final_surname)
@@ -136,61 +132,3 @@ async def sync_users_to_db(db: Session):
     
     db.commit()
     return {"added": added, "updated": updated}
-
-async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_retries: int = 3):
-    unique_suffix = uuid.uuid4().hex[:6].upper()
-    code = f"GQ-{unique_suffix}"
-    
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-    promotion_name = f"Canje: {user_name} ({email}) - {fecha_hoy}"
-
-    api_base = getattr(settings, 'JUMPSELLER_API_BASE', "https://api.jumpseller.com/v1")
-    url = f"{api_base}/promotions.json"
-    
-    params = {
-        "login": getattr(settings, 'JS_LOGIN_CODE', ''),
-        "authtoken": settings.JS_AUTH_TOKEN
-    }
-    
-    monto_puro = int(amount)
-    # PAYLOAD OMNIBUS
-    payload = {
-        "promotion": {
-            "name": promotion_name,
-            "code": code,
-            "enabled": True,
-            "type": "fixed",                
-            "discount_target": "order",     
-            "amount": monto_puro,
-            "discount": monto_puro,
-            "discount_amount": monto_puro,
-            "discount_value": monto_puro,
-            "value": monto_puro,
-            "usage_limit": 1
-        }
-    }
-    
-    async with aiohttp.ClientSession() as session:
-        for attempt in range(max_retries):
-            try:
-                async with session.post(url, params=params, json=payload) as resp:
-                    if resp.status == 429:
-                        wait_time = 2 ** attempt
-                        logger.warning(f"Jumpseller Rate Limit. Reintentando en {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                    
-                    if resp.status not in [200, 201]:
-                        err = await resp.text()
-                        logger.error(f"Jumpseller Error {resp.status}: {err}")
-                        return None
-                    
-                    data = await resp.json()
-                    return data.get("promotion", {}).get("code", code)
-            except Exception as e:
-                logger.error(f"Error conexión: {e}")
-                if attempt == max_retries - 1:
-                    return None
-                await asyncio.sleep(1)
-                
-        return None

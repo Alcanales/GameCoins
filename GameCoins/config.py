@@ -2,18 +2,12 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    _raw_db_url: str = os.getenv("DATABASE_URL", "")
-
-    @property
-    def DATABASE_URL(self) -> str:
-        url = self._raw_db_url
-        if url and url.endswith("/postgres"):
-            return url.replace("/postgres", "/db_gamequest")
-        return url
+    # Toma la URL de Render y solo cambia postgres:// por postgresql://
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "").replace("postgres://", "postgresql://", 1)
     
     ADMIN_USER: str = os.getenv("ADMIN_USER", "admin")
     ADMIN_PASS: str = os.getenv("ADMIN_PASS", "change_me")
-    STORE_TOKEN: str = os.getenv("STORE_TOKEN")
+    STORE_TOKEN: str = os.getenv("STORE_TOKEN", "")
     
     JS_LOGIN_CODE: str = os.getenv("JS_LOGIN_CODE", "")
     JS_AUTH_TOKEN: str = os.getenv("JS_AUTH_TOKEN", "")

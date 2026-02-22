@@ -4,15 +4,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import text, exc, func
 from pydantic import BaseModel
-from decimal import Decimal # <--- NUEVA IMPORTACIÓN NECESARIA
+from decimal import Decimal
 
-# Importaciones relativas
 from .database import get_db, engine, Base
 from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse
 from .config import settings
 
-# --- CREACIÓN SEGURA DE ESQUEMA Y TABLAS ---
 try:
     with engine.connect() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
@@ -24,7 +22,6 @@ try:
     Base.metadata.create_all(bind=engine)
 except exc.IntegrityError:
     pass
-# ---------------------------------------------
 
 app = FastAPI()
 
@@ -41,18 +38,15 @@ class CanjeReq(BaseModel):
 
 class AdminAdjustReq(BaseModel):
     email: str
-    amount: int 
+    amount: int
 
-# --- SEGURIDAD DE LA BÓVEDA ---
 security = HTTPBearer()
 
 def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = settings.STORE_TOKEN if settings.STORE_TOKEN else "gamecoins-admin-secret"
     if credentials.credentials != token:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+        raise HTTPException(status_code=401, detail="Token inválido")
     return True
-
-# --- RUTAS PÚBLICAS (JUMPSELLER) ---
 
 @app.get("/api/balance/{email}")
 def get_balance(email: str, db: Session = Depends(get_db)):
@@ -69,8 +63,6 @@ async def jumpseller_sync(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     VaultController.sync_user(db, data.get("customer", {}))
     return {"status": "synced"}
-
-# --- RUTAS DE LA BÓVEDA (ADMINISTRACIÓN) ---
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(req: LoginRequest):
@@ -103,6 +95,8 @@ def adjust_balance(req: AdminAdjustReq, db: Session = Depends(get_db)):
     user = db.query(Gampoint).filter(Gampoint.email == req.email.lower()).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Conversión a Decimal para evitar el TypeError
     user.saldo += Decimal(req.amount) 
     db.commit()
     return {"status": "ok", "nuevo_saldo": float(user.saldo)}
@@ -113,7 +107,6 @@ async def trigger_sync(db: Session = Depends(get_db)):
     result = await sync_users_to_db(db)
     return result
 
-# --- HEALTH CHECK ---
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
