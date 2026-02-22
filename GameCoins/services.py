@@ -7,8 +7,8 @@ import asyncio
 import re
 from datetime import datetime
 from sqlalchemy.orm import Session
-from .config import USD_TO_CLP, JS_AUTH_TOKEN
-from .models import GamePointUser
+from .config import settings
+from .models import Gampoint
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,11 +55,14 @@ async def analizar_manabox_ck(content: bytes):
             if qty < 1: continue
 
             multiplier = get_pricing_tier(price_usd)
+            
+            # USO CORRECTO DE settings.USD_TO_CLP
             offer_unit = int(price_usd * settings.USD_TO_CLP * multiplier)
             
             status_label = "APROBADO"
             if price_usd >= 50: status_label = "HIGH END 💎"
-            elif price_usd < settings.MIN_PURCHASE_USD: status_label = "BULK"
+            # Asumimos BULK por debajo de 1 USD si no existe MIN_PURCHASE_USD en settings
+            elif price_usd < getattr(settings, 'MIN_PURCHASE_USD', 1.0): status_label = "BULK"
 
             results.append({
                 "name": row.get(col_name, 'Unknown'),
@@ -77,9 +80,13 @@ async def analizar_manabox_ck(content: bytes):
         return {"error": str(e)}
 
 async def fetch_jumpseller_customers():
-    url = f"{settings.JUMPSELLER_API_BASE}/customers.json"
+    # Asumimos un base URL por defecto si no está en settings
+    api_base = getattr(settings, 'JUMPSELLER_API_BASE', "https://api.jumpseller.com/v1")
+    url = f"{api_base}/customers.json"
+    
+    # USO CORRECTO DE settings PARA TOKENS Y LOGIN
     params = {
-        "login": settings.JS_LOGIN_CODE,
+        "login": getattr(settings, 'JS_LOGIN_CODE', ''),
         "authtoken": settings.JS_AUTH_TOKEN,
         "limit": 50,
         "page": 1
@@ -116,9 +123,10 @@ async def sync_users_to_db(db: Session):
         final_surname = sanitize_name(cust.get('surname') or cust.get('billing_address', {}).get('surname'))
         if not final_name: final_name = email.split('@')[0]
 
-        user = db.query(GamePointUser).filter(GamePointUser.email == email).first()
+        # USO CORRECTO DEL MODELO Gampoint EN LUGAR DE GamePointUser
+        user = db.query(Gampoint).filter(Gampoint.email == email).first()
         if not user:
-            new_user = GamePointUser(email=email, name=final_name, surname=final_surname)
+            new_user = Gampoint(email=email, name=final_name, surname=final_surname)
             db.add(new_user)
             added += 1
         else:
@@ -136,9 +144,11 @@ async def create_jumpseller_coupon(email: str, amount: int, user_name: str, max_
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     promotion_name = f"Canje: {user_name} ({email}) - {fecha_hoy}"
 
-    url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
+    api_base = getattr(settings, 'JUMPSELLER_API_BASE', "https://api.jumpseller.com/v1")
+    url = f"{api_base}/promotions.json"
+    
     params = {
-        "login": settings.JS_LOGIN_CODE,
+        "login": getattr(settings, 'JS_LOGIN_CODE', ''),
         "authtoken": settings.JS_AUTH_TOKEN
     }
     
