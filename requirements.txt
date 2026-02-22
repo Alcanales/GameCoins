@@ -8,3 +8,4 @@ requests==2.31.0
 aiohttp==3.9.1
 pydantic==2.5.3
 email-validator>=2.0.0
+pydantic-settings>=2.1.0
