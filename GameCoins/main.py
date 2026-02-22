@@ -86,7 +86,7 @@ def get_metrics(db: Session = Depends(get_db)):
 @app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
 def get_users(db: Session = Depends(get_db)):
     from .models import Gampoint
-    users = db.query(Gampoint).order_by(Gampoint.saldo.desc()).limit(100).all()
+    users = db.query(Gampoint).order_by(Gampoint.saldo.desc()).all()
     return users
 
 @app.post("/api/admin/adjust", dependencies=[Depends(verify_admin)])
