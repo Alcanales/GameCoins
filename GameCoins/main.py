@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from database import get_db, engine, Base
-from vault import VaultController
+from .database import get_db, engine, Base
+from .vault import VaultController
 from pydantic import BaseModel
 
 Base.metadata.create_all(bind=engine)
