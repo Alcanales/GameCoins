@@ -1,20 +1,18 @@
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from .config import Settings 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+settings = Settings()
+DATABASE_URL = settings.DATABASE_URL 
 
-if DATABASE_URL.startswith("postgres://"):
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-if DATABASE_URL.endswith("/postgres"):
-    DATABASE_URL = DATABASE_URL.replace("/postgres", "/db_gamequest")
 
 engine = create_engine(
     DATABASE_URL, 
     pool_pre_ping=True,
-    connect_args={"options": "-csearch_path=public"} # <--- LA MAGIA ESTÁ AQUÍ
+    connect_args={"options": "-csearch_path=public"}
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
