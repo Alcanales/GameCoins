@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -28,12 +28,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 class AdminAdjustReq(BaseModel):
     email: str
     amount: int
     operation: str = "add"
     motive: Optional[str] = "Manual Admin Adjustment"
-
 
 security = HTTPBearer()
 
@@ -43,10 +43,6 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return True
 
 def verify_store_token(x_store_token: Optional[str] = Header(default=None)):
-    """
-    ✅ FIX #2: /api/canje no tenía autenticación.
-    Valida el header x-store-token enviado desde account.liquid.
-    """
     if x_store_token != settings.STORE_TOKEN:
         raise HTTPException(status_code=401, detail="Token de tienda inválido")
     return True
@@ -99,7 +95,6 @@ def get_users(
 
     users = query.order_by(Gampoint.saldo.desc()).limit(limit).all()
 
-    # Estadísticas globales (siempre sin filtros para reflejar totales reales)
     total_circulante = db.query(func.sum(Gampoint.saldo)).scalar() or 0
     total_canjeado = db.query(func.sum(Gampoint.historico_canjeado)).scalar() or 0
     total_users = db.query(func.count(Gampoint.email)).scalar() or 0
@@ -164,6 +159,28 @@ def get_metrics(db: Session = Depends(get_db)):
         "total_users": total_users
     }
 
+@app.post("/api/webhooks/jumpseller/order")
+async def jumpseller_order_webhook(request: Request):
+    """
+    Webhook que escucha cuando se crea una orden en Jumpseller.
+    Si el cliente usó un cupón de QuestPoints, lo desactiva inmediatamente.
+    """
+    try:
+        payload = await request.json()
+        order = payload.get("order", {})
+        
+        coupons = order.get("coupons", [])
+        
+        for coupon in coupons:
+            code = coupon.get("code", "")
+            
+            if code.startswith("QP-"):
+                await VaultController.disable_js_coupon(code)
+                
+        return {"status": "received"}
+    except Exception as e:
+        print(f"Error procesando webhook de Jumpseller: {e}")
+        return {"status": "error", "detail": str(e)}
 
 @app.get("/health")
 def health():
