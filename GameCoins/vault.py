@@ -22,8 +22,9 @@ class VaultController:
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
 
         val = int(amount)
+        
         today = datetime.datetime.now().strftime('%Y-%m-%d')
-        expires = (datetime.datetime.now() + datetime.timedelta(days=365)).strftime('%Y-%m-%d')
+        expires = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
 
         payload = {
             "promotion": {
@@ -35,8 +36,17 @@ class VaultController:
                 "discount_amount_fix":   val,
                 "begins_at":             today,
                 "expires_at":            expires,
-                "usage_limit":           1,  
-                "customers_usage_limit": 1,  
+                
+                # --- BLOQUEO DE USOS TOTALES (Desmarca el primer infinito) ---
+                "usage_limit":           1,
+                "max_times_used":        1,
+                "max_uses":              1,
+                
+                # --- BLOQUEO POR CLIENTE (Desmarca el segundo infinito) ---
+                "customers_usage_limit": 1,
+                "customer_usage_limit":  1,
+                "max_uses_per_customer": 1,
+                
                 "cumulative":            False
             }
         }
