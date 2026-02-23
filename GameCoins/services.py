@@ -29,7 +29,6 @@ async def sync_users_to_db(db: Session):
                     
                     user = db.query(Gampoint).filter(Gampoint.email == email).first()
                     if not user:
-                        # CREACIÓN CON NOMBRE Y APELLIDO
                         db.add(Gampoint(
                             email=email, 
                             name=cust.get('name'), 

@@ -2,13 +2,10 @@
 {% render 'theme_breadcrumbs' %}
 {% if customer %}
 <div class="gq-account-wrapper">
-    <!-- Hero Header -->
     <div class="gq-account-hero">
         <div class="gq-hero-content">
             <div class="gq-avatar">
-                <div class="gq-avatar-circle">
-                    {{ customer.name | slice: 0, 2 | upcase }}
-                </div>
+                <div class="gq-avatar-circle">{{ customer.name | slice: 0, 2 | upcase }}</div>
             </div>
             <div class="gq-hero-info">
                 <h1 class="gq-welcome">Bienvenido de vuelta</h1>
@@ -17,7 +14,6 @@
         </div>
     </div>
 
-    <!-- QuestPoints Card -->
     <div class="gq-points-card">
         <div class="gq-card-header">
             <div class="gq-card-icon">
@@ -41,7 +37,7 @@
             <span class="gq-balance-subtitle">Puntos acumulados en tus compras</span>
         </div>
 
-        <div class="gq-action-zone" id="gq-action-zone">
+        <div class="gq-action-zone">
             <button class="gq-btn-primary" id="gq-btn-redeem" onclick="gqRedeemPoints()" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -49,11 +45,9 @@
                 </svg>
                 <span id="gq-btn-text">Cargando...</span>
             </button>
-            
             <p class="gq-info-text">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 16v-4M12 8h.01"/>
+                    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                 </svg>
                 Mínimo para canjear: $3.000 CLP
             </p>
@@ -62,6 +56,7 @@
         <div class="gq-stats-grid">
             <div class="gq-stat-item">
                 <span class="gq-stat-label">Total Canjeado</span>
+                <!-- ✅ FIX: Ahora se rellena con historico_canjeado de la API -->
                 <span class="gq-stat-value" id="gq-total-redeemed">$0</span>
             </div>
             <div class="gq-stat-item">
@@ -74,7 +69,6 @@
         </div>
     </div>
 
-    <!-- How it works -->
     <div class="gq-info-section">
         <h3 class="gq-section-title">¿Cómo funcionan los QuestPoints?</h3>
         <div class="gq-info-grid">
@@ -98,376 +92,99 @@
 </div>
 
 <style>
-.gq-account-wrapper {
-    max-width: 900px;
-    margin: 40px auto;
-    padding: 0 20px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-/* Hero Header */
-.gq-account-hero {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-    border-radius: 20px;
-    padding: 30px;
-    margin-bottom: 30px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-}
-
-.gq-hero-content {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-}
-
-.gq-avatar {
-    flex-shrink: 0;
-}
-
-.gq-avatar-circle {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FFC107 0%, #FF9800 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 32px;
-    font-weight: 800;
-    color: #1a1a1a;
-    box-shadow: 0 4px 20px rgba(255, 193, 7, 0.4);
-}
-
-.gq-hero-info {
-    flex-grow: 1;
-}
-
-.gq-welcome {
-    font-size: 14px;
-    font-weight: 600;
-    color: #999;
-    margin: 0 0 8px 0;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-.gq-customer-name {
-    font-size: 28px;
-    font-weight: 800;
-    color: white;
-    margin: 0;
-}
-
-/* Points Card */
-.gq-points-card {
-    background: white;
-    border-radius: 20px;
-    padding: 40px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    margin-bottom: 30px;
-}
-
-.gq-card-header {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    margin-bottom: 30px;
-    padding-bottom: 30px;
-    border-bottom: 2px solid #f0f0f0;
-}
-
-.gq-card-icon {
-    flex-shrink: 0;
-}
-
-.gq-card-title h2 {
-    font-size: 24px;
-    font-weight: 800;
-    color: #1a1a1a;
-    margin: 0 0 5px 0;
-}
-
-.gq-card-title p {
-    font-size: 14px;
-    color: #666;
-    margin: 0;
-}
-
-/* Balance Display */
-.gq-balance-display {
-    text-align: center;
-    margin: 40px 0;
-}
-
-.gq-balance-label {
-    display: block;
-    font-size: 12px;
-    font-weight: 700;
-    color: #999;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 15px;
-}
-
-.gq-balance-amount {
-    font-size: 64px;
-    font-weight: 900;
-    color: #1a1a1a;
-    line-height: 1;
-    margin-bottom: 10px;
-    font-family: 'Courier New', monospace;
-}
-
-.gq-loading {
-    font-size: 32px;
-    color: #ccc;
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-.gq-balance-subtitle {
-    display: block;
-    font-size: 14px;
-    color: #666;
-}
-
-/* Action Zone */
-.gq-action-zone {
-    margin: 40px 0;
-    text-align: center;
-}
-
-.gq-btn-primary {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-    color: white;
-    border: none;
-    padding: 18px 40px;
-    font-size: 16px;
-    font-weight: 700;
-    border-radius: 12px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-}
-
-.gq-btn-primary:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-}
-
-.gq-btn-primary:disabled {
-    background: #e0e0e0;
-    color: #999;
-    cursor: not-allowed;
-    box-shadow: none;
-}
-
-.gq-info-text {
-    margin-top: 15px;
-    font-size: 13px;
-    color: #666;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-/* Stats Grid */
-.gq-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-    margin-top: 30px;
-    padding-top: 30px;
-    border-top: 2px solid #f0f0f0;
-}
-
-.gq-stat-item {
-    text-align: center;
-}
-
-.gq-stat-label {
-    display: block;
-    font-size: 12px;
-    color: #999;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-}
-
-.gq-stat-value {
-    display: block;
-    font-size: 24px;
-    font-weight: 800;
-    color: #1a1a1a;
-}
-
-.gq-stat-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 16px;
-    background: #e8f5e9;
-    color: #2e7d32;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.gq-badge-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4caf50;
-    animation: blink 2s ease-in-out infinite;
-}
-
-/* Info Section */
-.gq-info-section {
-    margin-top: 40px;
-}
-
-.gq-section-title {
-    font-size: 20px;
-    font-weight: 800;
-    color: #1a1a1a;
-    margin-bottom: 25px;
-    text-align: center;
-}
-
-.gq-info-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-}
-
-.gq-info-card {
-    background: white;
-    padding: 30px;
-    border-radius: 16px;
-    text-align: center;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-    border: 1px solid #f0f0f0;
-    transition: all 0.3s ease;
-}
-
-.gq-info-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-}
-
-.gq-info-number {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FFC107 0%, #FF9800 100%);
-    color: white;
-    font-size: 24px;
-    font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto 20px;
-}
-
-.gq-info-card h4 {
-    font-size: 16px;
-    font-weight: 700;
-    color: #1a1a1a;
-    margin: 0 0 10px 0;
-}
-
-.gq-info-card p {
-    font-size: 14px;
-    color: #666;
-    line-height: 1.6;
-    margin: 0;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .gq-account-hero {
-        padding: 20px;
-    }
-    
-    .gq-avatar-circle {
-        width: 60px;
-        height: 60px;
-        font-size: 24px;
-    }
-    
-    .gq-customer-name {
-        font-size: 20px;
-    }
-    
-    .gq-points-card {
-        padding: 25px;
-    }
-    
-    .gq-balance-amount {
-        font-size: 48px;
-    }
-    
-    .gq-info-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .gq-stats-grid {
-        grid-template-columns: 1fr;
-    }
+.gq-account-wrapper { max-width: 900px; margin: 40px auto; padding: 0 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.gq-account-hero { background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 20px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+.gq-hero-content { display: flex; align-items: center; gap: 20px; }
+.gq-avatar { flex-shrink: 0; }
+.gq-avatar-circle { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg,#FFC107,#FF9800); display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 800; color: #1a1a1a; box-shadow: 0 4px 20px rgba(255,193,7,.4); }
+.gq-hero-info { flex-grow: 1; }
+.gq-welcome { font-size: 14px; font-weight: 600; color: #999; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 1px; }
+.gq-customer-name { font-size: 28px; font-weight: 800; color: #fff; margin: 0; }
+.gq-points-card { background: #fff; border-radius: 20px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,.08); margin-bottom: 30px; }
+.gq-card-header { display: flex; align-items: center; gap: 20px; margin-bottom: 30px; padding-bottom: 30px; border-bottom: 2px solid #f0f0f0; }
+.gq-card-icon { flex-shrink: 0; }
+.gq-card-title h2 { font-size: 24px; font-weight: 800; color: #1a1a1a; margin: 0 0 5px; }
+.gq-card-title p { font-size: 14px; color: #666; margin: 0; }
+.gq-balance-display { text-align: center; margin: 40px 0; }
+.gq-balance-label { display: block; font-size: 12px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px; }
+.gq-balance-amount { font-size: 64px; font-weight: 900; color: #1a1a1a; line-height: 1; margin-bottom: 10px; font-family: 'Courier New', monospace; }
+.gq-loading { font-size: 32px; color: #ccc; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.gq-balance-subtitle { display: block; font-size: 14px; color: #666; }
+.gq-action-zone { margin: 40px 0; text-align: center; }
+.gq-btn-primary { background: linear-gradient(135deg,#1a1a1a,#2d2d2d); color: #fff; border: none; padding: 18px 40px; font-size: 16px; font-weight: 700; border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 10px; transition: all .3s; box-shadow: 0 4px 15px rgba(0,0,0,.2); }
+.gq-btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,.3); }
+.gq-btn-primary:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; box-shadow: none; }
+.gq-info-text { margin-top: 15px; font-size: 13px; color: #666; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.gq-stats-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 20px; margin-top: 30px; padding-top: 30px; border-top: 2px solid #f0f0f0; }
+.gq-stat-item { text-align: center; }
+.gq-stat-label { display: block; font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+.gq-stat-value { display: block; font-size: 24px; font-weight: 800; color: #1a1a1a; }
+.gq-stat-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: #e8f5e9; color: #2e7d32; border-radius: 20px; font-size: 14px; font-weight: 600; }
+.gq-badge-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; animation: blink 2s ease-in-out infinite; }
+.gq-info-section { margin-top: 40px; }
+.gq-section-title { font-size: 20px; font-weight: 800; color: #1a1a1a; margin-bottom: 25px; text-align: center; }
+.gq-info-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+.gq-info-card { background: #fff; padding: 30px; border-radius: 16px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.05); border: 1px solid #f0f0f0; transition: all .3s; }
+.gq-info-card:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0,0,0,.1); }
+.gq-info-number { width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg,#FFC107,#FF9800); color: #fff; font-size: 24px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; }
+.gq-info-card h4 { font-size: 16px; font-weight: 700; color: #1a1a1a; margin: 0 0 10px; }
+.gq-info-card p { font-size: 14px; color: #666; line-height: 1.6; margin: 0; }
+@media(max-width:768px){
+    .gq-account-hero{padding:20px}
+    .gq-avatar-circle{width:60px;height:60px;font-size:24px}
+    .gq-customer-name{font-size:20px}
+    .gq-points-card{padding:25px}
+    .gq-balance-amount{font-size:48px}
+    .gq-info-grid,.gq-stats-grid{grid-template-columns:1fr}
 }
 </style>
 
 <script>
-const GQ_API = "https://gamecoins.onrender.com";
+const GQ_API   = "https://gamecoins.onrender.com";
 const GQ_EMAIL = "{{ customer.email | downcase | strip }}";
-const GQ_TOKEN = "gq_public_key_2025_secure";
-const MIN_REDEEM = 3000;
 
+const GQ_TOKEN = "gq_public_key_2025_secure";
+
+const MIN_REDEEM = 3000;
 let currentBalance = 0;
-let totalRedeemed = 0;
+
+const fmt = (n) => new Intl.NumberFormat('es-CL', {
+    style: 'currency', currency: 'CLP', minimumFractionDigits: 0
+}).format(n);
 
 async function gqLoadBalance() {
     try {
-        const response = await fetch(`${GQ_API}/api/public/balance/${GQ_EMAIL}`);
-        
-        if (!response.ok) throw new Error('Error al cargar saldo');
-        
-        const data = await response.json();
+        const res = await fetch(`${GQ_API}/api/public/balance/${encodeURIComponent(GQ_EMAIL)}`);
+        if (!res.ok) throw new Error('Error al cargar saldo');
+        const data = await res.json();
+
         currentBalance = data.saldo;
-        
-        // Mostrar balance
-        const balanceDisplay = document.getElementById('gq-balance-display');
-        const formatted = new Intl.NumberFormat('es-CL', {
-            style: 'currency',
-            currency: 'CLP',
-            minimumFractionDigits: 0
-        }).format(currentBalance);
-        
-        balanceDisplay.innerHTML = formatted;
-        
+
+        // Mostrar saldo principal
+        document.getElementById('gq-balance-display').innerHTML = fmt(currentBalance);
+
+        // ✅ FIX: Mostrar histórico canjeado (antes siempre mostraba $0)
+        const redeemedEl = document.getElementById('gq-total-redeemed');
+        if (redeemedEl) redeemedEl.textContent = fmt(data.historico_canjeado || 0);
+
         // Actualizar botón
-        const btn = document.getElementById('gq-btn-redeem');
+        const btn     = document.getElementById('gq-btn-redeem');
         const btnText = document.getElementById('gq-btn-text');
-        
+
         if (currentBalance >= MIN_REDEEM) {
-            btn.disabled = false;
-            btnText.textContent = 'Canjear Todo';
+            btn.disabled    = false;
+            btnText.textContent = `Canjear ${fmt(currentBalance)}`;
         } else {
-            btn.disabled = true;
+            btn.disabled    = true;
             btnText.textContent = 'Saldo Insuficiente';
         }
-        
-    } catch (error) {
-        console.error('Error cargando saldo:', error);
+
+    } catch (err) {
+        console.error('Error cargando saldo:', err);
         document.getElementById('gq-balance-display').innerHTML = '$0';
+        document.getElementById('gq-btn-text').textContent = 'Sin datos';
     }
 }
 
@@ -476,25 +193,19 @@ async function gqRedeemPoints() {
         alert('Necesitas al menos $3.000 para canjear puntos.');
         return;
     }
-    
-    const formatted = new Intl.NumberFormat('es-CL', {
-        style: 'currency',
-        currency: 'CLP',
-        minimumFractionDigits: 0
-    }).format(currentBalance);
-    
-    if (!confirm(`¿Estás seguro de canjear ${formatted} por un cupón de descuento?`)) {
-        return;
-    }
-    
-    const btn = document.getElementById('gq-btn-redeem');
+
+    if (!confirm(
+        `¿Estás seguro de canjear ${fmt(currentBalance)} por un cupón de descuento?\n\n` +
+        `Esta acción no se puede deshacer.`
+    )) return;
+
+    const btn     = document.getElementById('gq-btn-redeem');
     const btnText = document.getElementById('gq-btn-text');
-    
-    btn.disabled = true;
+    btn.disabled    = true;
     btnText.textContent = 'Procesando...';
-    
+
     try {
-        const response = await fetch(`${GQ_API}/api/canje`, {
+        const res = await fetch(`${GQ_API}/api/canje`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -502,40 +213,35 @@ async function gqRedeemPoints() {
             },
             body: JSON.stringify({
                 email: GQ_EMAIL,
-                monto: currentBalance
+                monto: Math.floor(currentBalance)  // entero puro, sin decimales
             })
         });
-        
-        const data = await response.json();
-        
-        if (data.status === 'ok') {
-            alert(`¡Éxito!
 
-Cupón creado: ${data.cupon_codigo}
+        const data = await res.json();
 
-Cópialo y úsalo en tu próxima compra en el checkout.
-
-Tu nuevo saldo será actualizado en unos segundos.`);
-            
-            // Recargar después de 2 segundos
-            setTimeout(() => {
-                location.reload();
-            }, 2000);
+        if (res.ok && data.status === 'ok') {
+            alert(
+                `✅ ¡Canje exitoso!\n\n` +
+                `Tu cupón de descuento es:\n\n` +
+                `  ► ${data.cupon_codigo} ◄\n\n` +
+                `Úsalo en el checkout de tu próxima compra.`
+            );
+            setTimeout(() => location.reload(), 1500);
         } else {
-            alert(data.detail || 'Error al procesar el canje. Por favor intenta nuevamente.');
-            btn.disabled = false;
+            alert(`❌ Error: ${data.detail || 'Error al procesar el canje.'}`);
+            btn.disabled    = false;
             btnText.textContent = 'Reintentar';
         }
-        
-    } catch (error) {
-        console.error('Error canjeando puntos:', error);
-        alert('Error de conexión. Por favor verifica tu internet e intenta nuevamente.');
-        btn.disabled = false;
+
+    } catch (err) {
+        console.error('Error canjeando:', err);
+        alert('Error de conexión. Verifica tu internet e intenta nuevamente.');
+        btn.disabled    = false;
         btnText.textContent = 'Reintentar';
     }
 }
 
-// Cargar balance al inicio
+// ✅ FIX #8: Tags de Jumpseller duplicados eliminados (ver final del archivo)
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', gqLoadBalance);
 } else {
@@ -544,9 +250,4 @@ if (document.readyState === 'loading') {
 </script>
 {% endif %}
 
-<!-- Contenido original de account.liquid de Jumpseller -->
-{{ index_for_top_components }}
-{% render 'theme_breadcrumbs' %}
-{{ index_for_components }}
-
-{{ index_for_components }}
+{{- index_for_components -}}
