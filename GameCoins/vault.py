@@ -28,47 +28,49 @@ class VaultController:
 
         payload = {
             "promotion": {
-                "name":                  f"Canje QuestPoints - {email}",
-                "code":                  code,
-                "enabled":               True,
-                "discount_target":       "order",
-                "type":                  "fix",
-                "discount_amount_fix":   val,
-                "begins_at":             today,
-                "expires_at":            expires,
+                "name": f"Canje QP - {email}",
+                "code": code,
+                "enabled": True,
+                "discount_target": "order",
+                "type": "fix",
+                "discount_amount_fix": val,
+                "begins_at": today,
+                "expires_at": expires,
+                "cumulative": False,
                 
-                # --- BLOQUEO DE USOS TOTALES (Desmarca el primer infinito) ---
-                "usage_limit":           1,
-                "max_times_used":        1,
-                "max_uses":              1,
+                # --- INTENTOS: LÍMITE DE CONSUMO TOTAL ---
+                "limit": 1,
+                "usage_limit": 1,
+                "max_usage": 1,
+                "total_usage_limit": 1,
+                "quantity": 1,
+                "uses": 1,
+                "max_times_used": 1,
                 
-                # --- BLOQUEO POR CLIENTE (Desmarca el segundo infinito) ---
+                # --- INTENTOS: LÍMITE POR CLIENTE ---
+                "customer_limit": 1,
+                "limit_per_customer": 1,
                 "customers_usage_limit": 1,
-                "customer_usage_limit":  1,
-                "max_uses_per_customer": 1,
-                
-                "cumulative":            False
+                "customer_usage_limit": 1,
+                "max_uses_per_customer": 1
             }
         }
 
-        logger.info(f"[JS_COUPON] email={email} | monto={val} | payload={json.dumps(payload)}")
+        logger.info(f"[JS_COUPON] Intentando crear cupón: {code} para {email}")
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, params=params, json=payload) as resp:
-                    response_text = await resp.text()
-                    logger.info(f"[JS_COUPON] Jumpseller [{resp.status}] → {response_text}")
-
                     if resp.status in [200, 201]:
-                        data = json.loads(response_text)
+                        data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
-                        logger.info(f"[JS_COUPON] ✅ Cupón creado: {created_code}")
                         return created_code
                     else:
-                        logger.error(f"[JS_COUPON] ❌ Rechazado [{resp.status}]: {response_text}")
+                        err = await resp.text()
+                        logger.error(f"[JS_COUPON] Error {resp.status}: {err}")
                         return None
             except Exception as e:
-                logger.error(f"[JS_COUPON] ❌ Error de conexión: {e}")
+                logger.error(f"[JS_COUPON] Conexión fallida: {e}")
                 return None
     @staticmethod
     def sync_user(db: Session, customer_data: dict):
