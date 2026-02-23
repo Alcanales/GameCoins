@@ -1,5 +1,4 @@
 import uuid
-import json
 import aiohttp
 import logging
 import datetime
@@ -17,7 +16,6 @@ class VaultController:
 
     @staticmethod
     async def create_js_coupon(email: str, amount: int):
-        # Genera un código único: Ej. QP-8F3E1A
         code = f"QP-{uuid.uuid4().hex[:6].upper()}"
         url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
@@ -25,7 +23,7 @@ class VaultController:
         val = int(amount)
         now = datetime.datetime.now()
         today = now.strftime('%Y-%m-%d')
-        expires = today
+        expires_at = today
         payload = {
             "promotion": {
                 "name":                f"Canje QuestPoints - {email}",
@@ -34,16 +32,17 @@ class VaultController:
                 "discount_target":     "order",
                 "type":                "fix",
                 "discount_amount_fix": val,
-                "begins_at":           today,
-                "expires_at":          expires,
                 "cumulative":          False,
-                # --- Límite de 1 uso global (campos reales según OpenAPI spec) ---
-                "lasts":               "max_times_used",
-                "max_times_used":      1,
+
+                "begins_at":           today,
+                "expires_at":          expires_at,  
+
+                "lasts":               "max_times_used",  
+                "max_times_used":      1,                
             }
         }
 
-        logger.info(f"[JS_COUPON] Creando cupón de 1 uso para: {code} (expira hoy: {expires})")
+        logger.info(f"[JS_COUPON] Creando cupón 1-uso para {email}: {code} (expira: {expires_at})")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -51,8 +50,7 @@ class VaultController:
                     if resp.status in [200, 201]:
                         data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
-                        logger.info(f"[JS_COUPON] ✅ Cupón creado en JS: {created_code}")
-                        # Programar destrucción automática en ~2 horas
+                        logger.info(f"[JS_COUPON] ✅ Cupón creado: {created_code}")
                         return created_code
                     else:
                         err = await resp.text()
@@ -65,17 +63,18 @@ class VaultController:
     @staticmethod
     async def burn_coupon(code_to_burn: str):
         """
-        Busca IMPLACABLEMENTE el cupón en Jumpseller y lo ELIMINA.
-        Seguridad: Solo procede si el código cumple el patrón de GameCoins.
+        Busca el cupón en Jumpseller y lo elimina activamente.
+        Esta es la capa de seguridad que implementa el límite de ~2 horas:
+        al dispararse el webhook de orden, el cupón se destruye inmediatamente,
+        imposibilitando cualquier reutilización sin importar el tiempo.
         """
-        # CANDADO 1: Si por error llega un código que no es nuestro, aborta inmediatamente.
         if not re.fullmatch(r"QP-[A-F0-9]{6}", code_to_burn):
             logger.warning(f"[SEGURIDAD] Intento de borrar cupón ajeno abortado: {code_to_burn}")
             return False
 
         url_get = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
         params_base = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
-        
+
         async with aiohttp.ClientSession() as session:
             try:
                 page = 1
@@ -84,25 +83,20 @@ class VaultController:
                     async with session.get(url_get, params=params_get) as resp:
                         if resp.status != 200:
                             break
-                        
                         promotions = await resp.json()
                         if not promotions:
-                            break 
-                            
+                            break
                         for p in promotions:
                             promo = p.get("promotion", {})
-                            
-                            # CANDADO 2: Coincidencia exacta de texto
                             if promo.get("code") == code_to_burn:
                                 promo_id = promo.get("id")
                                 url_del = f"{settings.JUMPSELLER_API_BASE}/promotions/{promo_id}.json"
                                 await session.delete(url_del, params=params_base)
                                 logger.info(f"[WEBHOOK] 🔥 Cupón {code_to_burn} DESTRUIDO.")
                                 return True
-                                
-                        page += 1 
-                        
-                logger.warning(f"[WEBHOOK] ⚠️ Cupón {code_to_burn} no encontrado (probablemente ya fue borrado).")
+                        page += 1
+
+                logger.warning(f"[WEBHOOK] ⚠️ Cupón {code_to_burn} no encontrado (ya fue borrado).")
                 return False
             except Exception as e:
                 logger.error(f"[WEBHOOK] ❌ Error quemando cupón: {e}")
@@ -111,11 +105,12 @@ class VaultController:
     @staticmethod
     async def sweep_used_coupons():
         """
-        Revisa ventas recientes. Si hay un cupón que coincide con el patrón exacto, lo borra.
+        Barredora de emergencia: revisa órdenes recientes y destruye
+        cualquier cupón QP- que haya sido usado.
         """
         url_orders = f"{settings.JUMPSELLER_API_BASE}/orders.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN, "limit": 50}
-        
+
         burned_codes = []
         async with aiohttp.ClientSession() as session:
             try:
@@ -127,8 +122,6 @@ class VaultController:
                             coupons = order.get("coupons", [])
                             for c in coupons:
                                 code = c.get("code", "")
-                                
-                                # CANDADO 3: Solo barre si cumple la regla estricta QP- + 6 caracteres Hex
                                 if re.fullmatch(r"QP-[A-F0-9]{6}", code):
                                     success = await VaultController.burn_coupon(code)
                                     if success:
