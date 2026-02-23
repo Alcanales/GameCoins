@@ -23,26 +23,26 @@ class VaultController:
         val = int(amount)
         now = datetime.datetime.now()
         today = now.strftime('%Y-%m-%d')
-        expires_at = today
+        expires_at = today 
         payload = {
             "promotion": {
-                "name":                f"Canje QuestPoints - {email}",
-                "code":                code,
-                "enabled":             True,
-                "discount_target":     "order",
-                "type":                "fix",
-                "discount_amount_fix": val,
-                "cumulative":          False,
+                "name":                    f"Canje QuestPoints - {email}",
+                "code":                    code,
+                "enabled":                 True,
+                "discount_target":         "order",
+                "type":                    "fix",
+                "discount_amount_fix":     val,
+                "cumulative":              False,
+                "begins_at":               today,
+                "expires_at":              expires_at,
 
-                "begins_at":           today,
-                "expires_at":          expires_at,  
-
-                "lasts":               "max_times_used",  
-                "max_times_used":      1,                
+                "lasts":                   "max_times_used",
+                "max_times_used":          1,
+                "max_times_per_customer":  1,
             }
         }
 
-        logger.info(f"[JS_COUPON] Creando cupón 1-uso para {email}: {code} (expira: {expires_at})")
+        logger.info(f"[JS_COUPON] Creando cupón 1/1 para {email}: {code} (expira: {expires_at})")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -50,7 +50,7 @@ class VaultController:
                     if resp.status in [200, 201]:
                         data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
-                        logger.info(f"[JS_COUPON] ✅ Cupón creado: {created_code}")
+                        logger.info(f"[JS_COUPON] ✅ Cupón 1/1 creado: {created_code}")
                         return created_code
                     else:
                         err = await resp.text()
@@ -63,10 +63,10 @@ class VaultController:
     @staticmethod
     async def burn_coupon(code_to_burn: str):
         """
-        Busca el cupón en Jumpseller y lo elimina activamente.
-        Esta es la capa de seguridad que implementa el límite de ~2 horas:
-        al dispararse el webhook de orden, el cupón se destruye inmediatamente,
-        imposibilitando cualquier reutilización sin importar el tiempo.
+        Destruye activamente el cupón en Jumpseller tras su primer uso.
+        Es la capa de seguridad final: aunque max_times_used=1 ya lo bloquea
+        en checkout, el webhook lo elimina físicamente para que no quede
+        ningún rastro reutilizable.
         """
         if not re.fullmatch(r"QP-[A-F0-9]{6}", code_to_burn):
             logger.warning(f"[SEGURIDAD] Intento de borrar cupón ajeno abortado: {code_to_burn}")
@@ -106,7 +106,7 @@ class VaultController:
     async def sweep_used_coupons():
         """
         Barredora de emergencia: revisa órdenes recientes y destruye
-        cualquier cupón QP- que haya sido usado.
+        cualquier cupón QP- que haya sido aplicado.
         """
         url_orders = f"{settings.JUMPSELLER_API_BASE}/orders.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN, "limit": 50}
