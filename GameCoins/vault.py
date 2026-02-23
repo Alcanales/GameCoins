@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 class VaultController:
 
-    
     @staticmethod
     async def create_js_coupon(email: str, amount: int):
         # Genera un código único: Ej. QP-8F3E1A
@@ -24,9 +23,9 @@ class VaultController:
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
 
         val = int(amount)
-        today = datetime.datetime.now().strftime('%Y-%m-%d')
-        expires = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-
+        now = datetime.datetime.now()
+        today = now.strftime('%Y-%m-%d')
+        expires = today
         payload = {
             "promotion": {
                 "name":                f"Canje QuestPoints - {email}",
@@ -38,37 +37,13 @@ class VaultController:
                 "begins_at":           today,
                 "expires_at":          expires,
                 "cumulative":          False,
-                
-                # =========================================================
-                # 🔥 FUERZA BRUTA DE DICCIONARIO: LÍMITES DE USO GLOBAL 🔥
-                # =========================================================
-                "usage_limit": 1,
-                "max_times_used": 1,
-                "max_uses": 1,
-                "uses": 1,
-                "limit": 1,
-                "quantity": 1,
-                "total_usage_limit": 1,
-                "usage_count": 1,
-                "max_applications": 1,
-                "times_used": 0,
-                
-                # =========================================================
-                # 🔥 FUERZA BRUTA DE DICCIONARIO: LÍMITES POR CLIENTE 🔥
-                # =========================================================
-                "customer_usage_limit": 1,
-                "customers_usage_limit": 1,
-                "max_uses_per_customer": 1,
-                "customer_limit": 1,
-                "limit_per_customer": 1,
-                "per_customer": 1,
-                "once_per_customer": True,
-                "customer_gets": 1,
-                "single_use": True
+                # --- Límite de 1 uso global (campos reales según OpenAPI spec) ---
+                "lasts":               "max_times_used",
+                "max_times_used":      1,
             }
         }
 
-        logger.info(f"[JS_COUPON] Lanzando ataque de variables para el cupón: {code}")
+        logger.info(f"[JS_COUPON] Creando cupón de 1 uso para: {code} (expira hoy: {expires})")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -77,6 +52,7 @@ class VaultController:
                         data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
                         logger.info(f"[JS_COUPON] ✅ Cupón creado en JS: {created_code}")
+                        # Programar destrucción automática en ~2 horas
                         return created_code
                     else:
                         err = await resp.text()
