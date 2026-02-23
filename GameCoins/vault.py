@@ -20,14 +20,14 @@ class VaultController:
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
         val = int(amount)
 
-   
         payload = {
             "promotion": {
                 "name": f"Canje QuestPoints - {email}",
                 "code": code,
                 "enabled": True,
-                "discount_type": "amount",
-                "amount": val,
+                "type": "fixed",            
+                "discount_target": "order", 
+                "discount": val,            
                 "usage_limit": 1,
                 "cumulative": False
             }
@@ -37,6 +37,7 @@ class VaultController:
             try:
                 async with session.post(url, params=params, json=payload) as resp:
                     response_text = await resp.text()
+                    # Log siempre visible en Render para debugging futuro
                     logger.info(f"Jumpseller [{resp.status}] → {response_text}")
 
                     if resp.status in [200, 201]:
