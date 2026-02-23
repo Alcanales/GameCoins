@@ -86,7 +86,6 @@ def login(req: LoginRequest):
 def get_users(
     db: Session = Depends(get_db),
     search: Optional[str] = None,
-    limit: int = 100,
     only_balance: bool = False
 ):
     from .models import Gampoint
@@ -102,7 +101,7 @@ def get_users(
     if only_balance:
         query = query.filter(Gampoint.saldo > 0)
 
-    users = query.order_by(Gampoint.saldo.desc()).limit(limit).all()
+    users = query.order_by(Gampoint.saldo.desc()).all()
 
     total_circulante = db.query(func.sum(Gampoint.saldo)).scalar() or 0
     total_canjeado = db.query(func.sum(Gampoint.historico_canjeado)).scalar() or 0
