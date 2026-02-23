@@ -1,5 +1,5 @@
 import re
-from fastapi import FastAPI, Depends, HTTPException, Header, Request
+from fastapi import FastAPI, Depends, HTTPException, Header, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from decimal import Decimal
 from typing import Optional
 
-from .database import get_db, engine, Base
+# IMPORTANTE: Asegúrate de que SessionLocal esté exportado en tu database.py
+from .database import get_db, engine, Base, SessionLocal
 from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse
 from .config import settings
@@ -21,7 +22,7 @@ try:
 except Exception as e:
     print(f"[WARN] DB init: {e}")
 
-app = FastAPI(title="GameCoins API", version="2.2")
+app = FastAPI(title="GameCoins API", version="2.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +49,10 @@ def verify_store_token(x_store_token: Optional[str] = Header(default=None)):
         raise HTTPException(status_code=401, detail="Token de tienda inválido")
     return True
 
+# =====================================================================
+# 💰 ENDPOINTS DE SALDO Y CANJES 💰
+# =====================================================================
+
 @app.get("/api/balance/{email}")
 @app.get("/api/saldo/{email}")
 @app.get("/api/public/balance/{email}")
@@ -66,6 +71,10 @@ def get_balance(email: str, db: Session = Depends(get_db)):
 async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     return await VaultController.process_canje(db, req.email, req.monto)
 
+# =====================================================================
+# 🛡️ ENDPOINTS DEL PANEL DE ADMINISTRACIÓN 🛡️
+# =====================================================================
+
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(req: LoginRequest):
     if req.username == settings.ADMIN_USER and req.password == settings.ADMIN_PASS:
@@ -74,7 +83,12 @@ def login(req: LoginRequest):
 
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 @app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
-def get_users(db: Session = Depends(get_db), search: Optional[str] = None, limit: int = 100, only_balance: bool = False):
+def get_users(
+    db: Session = Depends(get_db),
+    search: Optional[str] = None,
+    limit: int = 100,
+    only_balance: bool = False
+):
     from .models import Gampoint
     query = db.query(Gampoint)
 
@@ -154,28 +168,74 @@ def get_metrics(db: Session = Depends(get_db)):
         "total_users": total_users
     }
 
+# =====================================================================
+# 🔥 TAREAS EN SEGUNDO PLANO (EL TRABAJO PESADO) 🔥
+# =====================================================================
+
+async def background_burn_coupons(payload_str: str):
+    """Busca el cupón en Jumpseller y lo destruye sin hacer esperar al webhook"""
+    try:
+        qp_codes = re.findall(r"QP-[A-F0-9]{6}\b", payload_str)
+        if qp_codes:
+            from .vault import VaultController
+            for code in set(qp_codes):
+                await VaultController.burn_coupon(code)
+    except Exception as e:
+        print(f"Error quemando cupones en background: {e}")
+
+def background_sync_customer(customer_data: dict):
+    """Guarda/Actualiza al cliente en tu base de datos en silencio"""
+    db = SessionLocal()
+    try:
+        from .vault import VaultController
+        VaultController.sync_user(db, customer_data)
+    except Exception as e:
+        print(f"Error sincronizando cliente en background: {e}")
+    finally:
+        db.close() # Importante cerrar la conexión
+
+# =====================================================================
+# ⚡ WEBHOOKS (LOS RECEPTORES ULTRARRÁPIDOS PARA JUMPSELLER) ⚡
+# =====================================================================
+
 @app.post("/api/webhooks/jumpseller/order")
-async def jumpseller_order_webhook(request: Request):
+async def jumpseller_order_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Se dispara al crear una orden (Pedido pendiente de pago)"""
     try:
         payload_bytes = await request.body()
         payload_str = payload_bytes.decode('utf-8')
         
-        qp_codes = re.findall(r"QP-[A-F0-9]{6}\b", payload_str)
+        background_tasks.add_task(background_burn_coupons, payload_str)
         
-        burned_list = []
-        if qp_codes:
-            for code in set(qp_codes):
-                success = await VaultController.burn_coupon(code)
-                if success:
-                    burned_list.append(code)
-                
-        return {"status": "received", "burned_coupons": burned_list}
+        return {"status": "received", "message": "Procesando eliminación en background."}
     except Exception as e:
-        print(f"Error procesando webhook de Jumpseller: {e}")
+        print(f"Error recibiendo webhook de órdenes: {e}")
         return {"status": "error", "detail": str(e)}
+
+@app.post("/api/webhooks/jumpseller/customer")
+async def jumpseller_customer_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Se dispara al crear o actualizar un cliente"""
+    try:
+        payload = await request.json()
+        customer_data = payload.get("customer", {})
+        
+        if customer_data and customer_data.get("email"):
+            # Mandamos a actualizar la BD en segundo plano
+            background_tasks.add_task(background_sync_customer, customer_data)
+            
+        return {"status": "received", "message": "Sincronizando cliente en background."}
+    except Exception as e:
+        print(f"Error en webhook de cliente: {e}")
+        return {"status": "error", "detail": str(e)}
+
+# =====================================================================
+# 🛠️ RUTAS DE EMERGENCIA Y SALUD 🛠️
+# =====================================================================
 
 @app.post("/api/admin/clean_coupons", dependencies=[Depends(verify_admin)])
 async def clean_used_coupons():
+    """Endpoint del botón de pánico en la bóveda para barrer cupones recientes"""
+    from .vault import VaultController
     burned = await VaultController.sweep_used_coupons()
     return {"status": "success", "message": f"Se eliminaron {len(burned)} cupones usados.", "burned": burned}
 
