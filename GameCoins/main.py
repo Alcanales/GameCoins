@@ -1,3 +1,4 @@
+import re
 from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -20,7 +21,7 @@ try:
 except Exception as e:
     print(f"[WARN] DB init: {e}")
 
-app = FastAPI(title="GameCoins API", version="2.1")
+app = FastAPI(title="GameCoins API", version="2.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,7 +47,6 @@ def verify_store_token(x_store_token: Optional[str] = Header(default=None)):
     if x_store_token != settings.STORE_TOKEN:
         raise HTTPException(status_code=401, detail="Token de tienda inválido")
     return True
-
 
 @app.get("/api/balance/{email}")
 @app.get("/api/saldo/{email}")
@@ -74,12 +74,7 @@ def login(req: LoginRequest):
 
 @app.get("/admin/users", dependencies=[Depends(verify_admin)])
 @app.get("/api/admin/users", dependencies=[Depends(verify_admin)])
-def get_users(
-    db: Session = Depends(get_db),
-    search: Optional[str] = None,
-    limit: int = 100,
-    only_balance: bool = False
-):
+def get_users(db: Session = Depends(get_db), search: Optional[str] = None, limit: int = 100, only_balance: bool = False):
     from .models import Gampoint
     query = db.query(Gampoint)
 
@@ -161,26 +156,28 @@ def get_metrics(db: Session = Depends(get_db)):
 
 @app.post("/api/webhooks/jumpseller/order")
 async def jumpseller_order_webhook(request: Request):
-    """
-    Webhook que escucha cuando se crea una orden en Jumpseller.
-    Si el cliente usó un cupón de QuestPoints, lo desactiva inmediatamente.
-    """
     try:
-        payload = await request.json()
-        order = payload.get("order", {})
+        payload_bytes = await request.body()
+        payload_str = payload_bytes.decode('utf-8')
         
-        coupons = order.get("coupons", [])
+        qp_codes = re.findall(r"QP-[A-F0-9]{6}\b", payload_str)
         
-        for coupon in coupons:
-            code = coupon.get("code", "")
-            
-            if code.startswith("QP-"):
-                await VaultController.disable_js_coupon(code)
+        burned_list = []
+        if qp_codes:
+            for code in set(qp_codes):
+                success = await VaultController.burn_coupon(code)
+                if success:
+                    burned_list.append(code)
                 
-        return {"status": "received"}
+        return {"status": "received", "burned_coupons": burned_list}
     except Exception as e:
         print(f"Error procesando webhook de Jumpseller: {e}")
         return {"status": "error", "detail": str(e)}
+
+@app.post("/api/admin/clean_coupons", dependencies=[Depends(verify_admin)])
+async def clean_used_coupons():
+    burned = await VaultController.sweep_used_coupons()
+    return {"status": "success", "message": f"Se eliminaron {len(burned)} cupones usados.", "burned": burned}
 
 @app.get("/health")
 def health():

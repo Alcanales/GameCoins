@@ -3,6 +3,7 @@ import json
 import aiohttp
 import logging
 import datetime
+import re
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -16,13 +17,12 @@ class VaultController:
 
     @staticmethod
     async def create_js_coupon(email: str, amount: int):
+        # Genera un código único: Ej. QP-8F3E1A
         code = f"QP-{uuid.uuid4().hex[:6].upper()}"
         url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
 
         val = int(amount)
-        
-        # --- 1 DÍA DE VIGENCIA MÁXIMA ---
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         expires = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -40,52 +40,98 @@ class VaultController:
             }
         }
 
-        logger.info(f"[JS_COUPON] email={email} | monto={val} | payload={json.dumps(payload)}")
+        logger.info(f"[JS_COUPON] Creando: {code} | {email} | ${val}")
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, params=params, json=payload) as resp:
-                    response_text = await resp.text()
-                    logger.info(f"[JS_COUPON] Jumpseller [{resp.status}] → {response_text}")
-
                     if resp.status in [200, 201]:
-                        data = json.loads(response_text)
+                        data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
-                        logger.info(f"[JS_COUPON] ✅ Cupón creado: {created_code}")
+                        logger.info(f"[JS_COUPON] ✅ Cupón creado en JS: {created_code}")
                         return created_code
                     else:
-                        logger.error(f"[JS_COUPON] ❌ Rechazado [{resp.status}]: {response_text}")
+                        err = await resp.text()
+                        logger.error(f"[JS_COUPON] ❌ Error JS [{resp.status}]: {err}")
                         return None
             except Exception as e:
                 logger.error(f"[JS_COUPON] ❌ Error de conexión: {e}")
                 return None
 
     @staticmethod
-    async def disable_js_coupon(code_to_disable: str):
+    async def burn_coupon(code_to_burn: str):
+        """
+        Busca IMPLACABLEMENTE el cupón en Jumpseller y lo ELIMINA.
+        Seguridad: Solo procede si el código cumple el patrón de GameCoins.
+        """
+        # CANDADO 1: Si por error llega un código que no es nuestro, aborta inmediatamente.
+        if not re.fullmatch(r"QP-[A-F0-9]{6}", code_to_burn):
+            logger.warning(f"[SEGURIDAD] Intento de borrar cupón ajeno abortado: {code_to_burn}")
+            return False
+
         url_get = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-        params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
+        params_base = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
         
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(url_get, params=params) as resp:
-                    if resp.status == 200:
+                page = 1
+                while True:
+                    params_get = {**params_base, "limit": 100, "page": page}
+                    async with session.get(url_get, params=params_get) as resp:
+                        if resp.status != 200:
+                            break
+                        
                         promotions = await resp.json()
-                        promo_id = None
+                        if not promotions:
+                            break 
+                            
                         for p in promotions:
                             promo = p.get("promotion", {})
-                            if promo.get("code") == code_to_disable:
+                            
+                            # CANDADO 2: Coincidencia exacta de texto
+                            if promo.get("code") == code_to_burn:
                                 promo_id = promo.get("id")
-                                break
+                                url_del = f"{settings.JUMPSELLER_API_BASE}/promotions/{promo_id}.json"
+                                await session.delete(url_del, params=params_base)
+                                logger.info(f"[WEBHOOK] 🔥 Cupón {code_to_burn} DESTRUIDO.")
+                                return True
+                                
+                        page += 1 
                         
-                        if promo_id:
-                            url_put = f"{settings.JUMPSELLER_API_BASE}/promotions/{promo_id}.json"
-                            payload = {"promotion": {"enabled": False}}
-                            await session.put(url_put, params=params, json=payload)
-                            logger.info(f"[WEBHOOK] ✅ Cupón {code_to_disable} apagado y bloqueado exitosamente.")
-                        else:
-                            logger.warning(f"[WEBHOOK] ⚠️ Cupón {code_to_disable} no encontrado para apagar.")
+                logger.warning(f"[WEBHOOK] ⚠️ Cupón {code_to_burn} no encontrado (probablemente ya fue borrado).")
+                return False
             except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Error apagando cupón: {e}")
+                logger.error(f"[WEBHOOK] ❌ Error quemando cupón: {e}")
+                return False
+
+    @staticmethod
+    async def sweep_used_coupons():
+        """
+        Revisa ventas recientes. Si hay un cupón que coincide con el patrón exacto, lo borra.
+        """
+        url_orders = f"{settings.JUMPSELLER_API_BASE}/orders.json"
+        params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN, "limit": 50}
+        
+        burned_codes = []
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url_orders, params=params) as resp:
+                    if resp.status == 200:
+                        orders = await resp.json()
+                        for o in orders:
+                            order = o.get("order", {})
+                            coupons = order.get("coupons", [])
+                            for c in coupons:
+                                code = c.get("code", "")
+                                
+                                # CANDADO 3: Solo barre si cumple la regla estricta QP- + 6 caracteres Hex
+                                if re.fullmatch(r"QP-[A-F0-9]{6}", code):
+                                    success = await VaultController.burn_coupon(code)
+                                    if success:
+                                        burned_codes.append(code)
+            except Exception as e:
+                logger.error(f"Error en barredora de cupones: {e}")
+        return list(set(burned_codes))
 
     @staticmethod
     def sync_user(db: Session, customer_data: dict):
@@ -115,24 +161,15 @@ class VaultController:
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        logger.info(f"[CANJE] Usuario={email} | saldo_db={user.saldo} | monto={amount}")
-
         if user.saldo < amount:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Saldo insuficiente. Tienes ${float(user.saldo):,.0f} QP, intentas canjear ${amount:,} QP"
-            )
+            raise HTTPException(status_code=400, detail=f"Saldo insuficiente. Tienes ${float(user.saldo):,.0f} QP.")
 
         coupon_code = await VaultController.create_js_coupon(email, amount)
         if not coupon_code:
-            raise HTTPException(
-                status_code=502,
-                detail="Error creando cupón en Jumpseller. Revisa los logs."
-            )
+            raise HTTPException(status_code=502, detail="Error creando cupón en Jumpseller.")
 
         user.saldo -= Decimal(amount)
         user.historico_canjeado += Decimal(amount)
         db.commit()
 
-        logger.info(f"[CANJE] ✅ OK | cupon={coupon_code} | nuevo_saldo={float(user.saldo)}")
         return {"status": "ok", "cupon_codigo": coupon_code}
