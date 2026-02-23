@@ -27,16 +27,17 @@ class VaultController:
 
         payload = {
             "promotion": {
-                "name":                f"Canje QuestPoints - {email}",
-                "code":                code,
-                "enabled":             True,
-                "discount_target":     "order",
-                "type":                "fix",
-                "discount_amount_fix": val,
-                "begins_at":           today,
-                "expires_at":          expires,
-                "usage_limit":         1,
-                "cumulative":          False
+                "name":                  f"Canje QuestPoints - {email}",
+                "code":                  code,
+                "enabled":               True,
+                "discount_target":       "order",
+                "type":                  "fix",
+                "discount_amount_fix":   val,
+                "begins_at":             today,
+                "expires_at":            expires,
+                "usage_limit":           1,  
+                "customers_usage_limit": 1,  
+                "cumulative":            False
             }
         }
 
@@ -59,7 +60,6 @@ class VaultController:
             except Exception as e:
                 logger.error(f"[JS_COUPON] ❌ Error de conexión: {e}")
                 return None
-
     @staticmethod
     def sync_user(db: Session, customer_data: dict):
         email = customer_data.get('email', '').lower().strip()
