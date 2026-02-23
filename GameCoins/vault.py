@@ -2,6 +2,7 @@ import uuid
 import json
 import aiohttp
 import logging
+import datetime
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -20,40 +21,43 @@ class VaultController:
         url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
         params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN}
 
-        val_int   = int(amount)
-        val_float = float(amount)
-
-        logger.info(f"[CANJE] email={email} | amount recibido={amount} | tipo={type(amount)} | val_int={val_int} | val_float={val_float}")
+        val = int(amount)
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        expires = (datetime.datetime.now() + datetime.timedelta(days=365)).strftime('%Y-%m-%d')
 
         payload = {
             "promotion": {
-                "name":             f"Canje QuestPoints - {email}",
-                "code":             code,
-                "enabled":          True,
-                "type":             "fixed",
-                "discount_target":  "order",
-                "discount":         val_float, 
-                "usage_limit":      1,
-                "cumulative":       False
+                "name":                f"Canje QuestPoints - {email}",
+                "code":                code,
+                "enabled":             True,
+                "discount_target":     "order",
+                "type":                "fix",
+                "discount_amount_fix": val,
+                "begins_at":           today,
+                "expires_at":          expires,
+                "usage_limit":         1,
+                "cumulative":          False
             }
         }
 
-        logger.info(f"[CANJE] Payload → {json.dumps(payload)}")
+        logger.info(f"[JS_COUPON] email={email} | monto={val} | payload={json.dumps(payload)}")
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, params=params, json=payload) as resp:
                     response_text = await resp.text()
-                    logger.info(f"[CANJE] Jumpseller [{resp.status}] → {response_text}")
+                    logger.info(f"[JS_COUPON] Jumpseller [{resp.status}] → {response_text}")
 
                     if resp.status in [200, 201]:
                         data = json.loads(response_text)
-                        return data.get("promotion", {}).get("code")
+                        created_code = data.get("promotion", {}).get("code")
+                        logger.info(f"[JS_COUPON] ✅ Cupón creado: {created_code}")
+                        return created_code
                     else:
-                        logger.error(f"[CANJE] Rechazado ({resp.status}): {response_text}")
+                        logger.error(f"[JS_COUPON] ❌ Rechazado [{resp.status}]: {response_text}")
                         return None
             except Exception as e:
-                logger.error(f"[CANJE] Error de conexión: {e}")
+                logger.error(f"[JS_COUPON] ❌ Error de conexión: {e}")
                 return None
 
     @staticmethod
@@ -84,7 +88,7 @@ class VaultController:
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        logger.info(f"[CANJE] Usuario {email} — saldo en DB: {user.saldo} | solicitado: {amount}")
+        logger.info(f"[CANJE] Usuario={email} | saldo_db={user.saldo} | monto={amount}")
 
         if user.saldo < amount:
             raise HTTPException(
@@ -103,4 +107,5 @@ class VaultController:
         user.historico_canjeado += Decimal(amount)
         db.commit()
 
+        logger.info(f"[CANJE] ✅ OK | cupon={coupon_code} | nuevo_saldo={float(user.saldo)}")
         return {"status": "ok", "cupon_codigo": coupon_code}
