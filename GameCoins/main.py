@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from decimal import Decimal
 from typing import Optional
 
-# IMPORTANTE: Asegúrate de que SessionLocal esté exportado en tu database.py
 from .database import get_db, engine, Base, SessionLocal
 from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse
