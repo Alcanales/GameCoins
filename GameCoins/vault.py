@@ -23,26 +23,29 @@ class VaultController:
         val = int(amount)
         now = datetime.datetime.now()
         today = now.strftime('%Y-%m-%d')
-        expires_at = today 
+        expires_at = today
+
+        promo_name = f"Canje QuestPoints - {email}"
+
         payload = {
             "promotion": {
-                "name":                    f"Canje QuestPoints - {email}",
-                "code":                    code,
-                "enabled":                 True,
-                "discount_target":         "order",
-                "type":                    "fix",
-                "discount_amount_fix":     val,
-                "cumulative":              False,
-                "begins_at":               today,
-                "expires_at":              expires_at,
+                "name":                promo_name,
+                "code":                code,
+                "enabled":             True,
+                "discount_target":     "order",
+                "type":                "fix",
+                "discount_amount_fix": val,
+                "cumulative":          False,
+                "begins_at":           today,
+                "expires_at":          expires_at,
 
-                "lasts":                   "max_times_used",
-                "max_times_used":          1,
-                "max_times_per_customer":  1,
+                # ✅ CAMPO CONFIRMADO: límite total de uso = 1 (UI: "Límite total de consumo")
+                "lasts":               "max_times_used",
+                "max_times_used":      1,
             }
         }
 
-        logger.info(f"[JS_COUPON] Creando cupón 1/1 para {email}: {code} (expira: {expires_at})")
+        logger.info(f"[JS_COUPON] Creando cupón para {email}: {code} (expira: {expires_at})")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -62,12 +65,7 @@ class VaultController:
 
     @staticmethod
     async def burn_coupon(code_to_burn: str):
-        """
-        Destruye activamente el cupón en Jumpseller tras su primer uso.
-        Es la capa de seguridad final: aunque max_times_used=1 ya lo bloquea
-        en checkout, el webhook lo elimina físicamente para que no quede
-        ningún rastro reutilizable.
-        """
+  
         if not re.fullmatch(r"QP-[A-F0-9]{6}", code_to_burn):
             logger.warning(f"[SEGURIDAD] Intento de borrar cupón ajeno abortado: {code_to_burn}")
             return False
@@ -82,34 +80,93 @@ class VaultController:
                     params_get = {**params_base, "limit": 100, "page": page}
                     async with session.get(url_get, params=params_get) as resp:
                         if resp.status != 200:
+                            logger.error(f"[WEBHOOK] Error al listar promotions: {resp.status}")
                             break
                         promotions = await resp.json()
                         if not promotions:
                             break
+
                         for p in promotions:
                             promo = p.get("promotion", {})
-                            if promo.get("code") == code_to_burn:
-                                promo_id = promo.get("id")
+                            promo_name = promo.get("name", "")
+                            promo_id = promo.get("id")
+
+                            if not promo_name.startswith("Canje QuestPoints -"):
+                                continue
+
+                            coupons_in_promo = promo.get("coupons", []) or []
+                            coupon_match = any(
+                                c.get("coupon", {}).get("name") == code_to_burn or
+                                c.get("name") == code_to_burn
+                                for c in coupons_in_promo
+                                if isinstance(c, dict)
+                            )
+
+                            direct_match = promo.get("code") == code_to_burn
+
+                            if coupon_match or direct_match:
                                 url_del = f"{settings.JUMPSELLER_API_BASE}/promotions/{promo_id}.json"
-                                await session.delete(url_del, params=params_base)
-                                logger.info(f"[WEBHOOK] 🔥 Cupón {code_to_burn} DESTRUIDO.")
-                                return True
+                                async with session.delete(url_del, params=params_base) as del_resp:
+                                    if del_resp.status in [200, 204]:
+                                        logger.info(
+                                            f"[WEBHOOK] 🔥 Promotion '{promo_name}' "
+                                            f"(id={promo_id}) DESTRUIDA. Cupón: {code_to_burn}"
+                                        )
+                                        return True
+                                    else:
+                                        err = await del_resp.text()
+                                        logger.error(
+                                            f"[WEBHOOK] Error eliminando promotion "
+                                            f"{promo_id}: {del_resp.status} - {err}"
+                                        )
+                                        return False
+
                         page += 1
 
-                logger.warning(f"[WEBHOOK] ⚠️ Cupón {code_to_burn} no encontrado (ya fue borrado).")
+                logger.warning(
+                    f"[WEBHOOK] ⚠️ Promotion con cupón {code_to_burn} no encontrada "
+                    f"(ya fue eliminada o no existe)."
+                )
                 return False
+
             except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Error quemando cupón: {e}")
+                logger.error(f"[WEBHOOK] ❌ Error quemando cupón {code_to_burn}: {e}")
                 return False
+
+    @staticmethod
+    async def burn_coupon_by_order(order_data: dict) -> list[str]:
+        order = order_data.get("order", order_data)  
+        coupons = order.get("coupons") or []
+        burned = []
+
+        for c in coupons:
+            if isinstance(c, dict):
+                code = c.get("code", "") or c.get("name", "")
+            else:
+                code = str(c)
+
+            if re.fullmatch(r"QP-[A-F0-9]{6}", code):
+                success = await VaultController.burn_coupon(code)
+                if success:
+                    burned.append(code)
+
+        return burned
 
     @staticmethod
     async def sweep_used_coupons():
         """
         Barredora de emergencia: revisa órdenes recientes y destruye
         cualquier cupón QP- que haya sido aplicado.
+        
+        Ejecutar periódicamente (ej: cada 5 minutos via cron/scheduler)
+        como red de seguridad adicional.
         """
         url_orders = f"{settings.JUMPSELLER_API_BASE}/orders.json"
-        params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN, "limit": 50}
+        params = {
+            "login": settings.JS_LOGIN_CODE,
+            "authtoken": settings.JS_AUTH_TOKEN,
+            "limit": 50
+        }
 
         burned_codes = []
         async with aiohttp.ClientSession() as session:
@@ -119,9 +176,12 @@ class VaultController:
                         orders = await resp.json()
                         for o in orders:
                             order = o.get("order", {})
-                            coupons = order.get("coupons", [])
+                            coupons = order.get("coupons") or []
                             for c in coupons:
-                                code = c.get("code", "")
+                                if isinstance(c, dict):
+                                    code = c.get("code", "") or c.get("name", "")
+                                else:
+                                    code = str(c)
                                 if re.fullmatch(r"QP-[A-F0-9]{6}", code):
                                     success = await VaultController.burn_coupon(code)
                                     if success:
@@ -159,7 +219,10 @@ class VaultController:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
         if user.saldo < amount:
-            raise HTTPException(status_code=400, detail=f"Saldo insuficiente. Tienes ${float(user.saldo):,.0f} QP.")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Saldo insuficiente. Tienes ${float(user.saldo):,.0f} QP."
+            )
 
         coupon_code = await VaultController.create_js_coupon(email, amount)
         if not coupon_code:
