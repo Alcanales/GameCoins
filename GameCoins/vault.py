@@ -23,29 +23,39 @@ class VaultController:
         val = int(amount)
         now = datetime.datetime.now()
         today = now.strftime('%Y-%m-%d')
-        expires_at = today
+        expires_at = today 
+
 
         promo_name = f"Canje QuestPoints - {email}"
+        SINGLES_CATEGORY_ID = 2491665
 
         payload = {
             "promotion": {
                 "name":                promo_name,
                 "code":                code,
                 "enabled":             True,
-                "discount_target":     "order",
+
+                "discount_target":     "categories",
+                "categories_ids":      [SINGLES_CATEGORY_ID],
+
                 "type":                "fix",
                 "discount_amount_fix": val,
                 "cumulative":          False,
                 "begins_at":           today,
                 "expires_at":          expires_at,
 
-                # ✅ CAMPO CONFIRMADO: límite total de uso = 1 (UI: "Límite total de consumo")
                 "lasts":               "max_times_used",
                 "max_times_used":      1,
+
+                "once_per_customer":   True,
             }
         }
 
-        logger.info(f"[JS_COUPON] Creando cupón para {email}: {code} (expira: {expires_at})")
+        logger.info(
+            f"[JS_COUPON] 🎟️  Creando cupón | Cliente: {email} | "
+            f"Monto: ${val:,} CLP | Código: {code} | Vence: {expires_at} | "
+            f"Categoría: Singles (id={SINGLES_CATEGORY_ID})"
+        )
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -53,7 +63,16 @@ class VaultController:
                     if resp.status in [200, 201]:
                         data = await resp.json()
                         created_code = data.get("promotion", {}).get("code")
-                        logger.info(f"[JS_COUPON] ✅ Cupón 1/1 creado: {created_code}")
+                        promo_id = data.get("promotion", {}).get("id")
+                        logger.info(
+                            f"[JS_COUPON] ✅ CUPÓN CREADO | "
+                            f"Código: {created_code} | "
+                            f"Cliente: {email} | "
+                            f"Monto canjeado: ${val:,} CLP | "
+                            f"Promotion ID: {promo_id} | "
+                            f"Vence: {expires_at} | "
+                            f"Solo Singles"
+                        )
                         return created_code
                     else:
                         err = await resp.text()
@@ -65,7 +84,6 @@ class VaultController:
 
     @staticmethod
     async def burn_coupon(code_to_burn: str):
-  
         if not re.fullmatch(r"QP-[A-F0-9]{6}", code_to_burn):
             logger.warning(f"[SEGURIDAD] Intento de borrar cupón ajeno abortado: {code_to_burn}")
             return False
@@ -94,6 +112,7 @@ class VaultController:
                             if not promo_name.startswith("Canje QuestPoints -"):
                                 continue
 
+                            # Verificar si el código está en los coupons de esta promotion
                             coupons_in_promo = promo.get("coupons", []) or []
                             coupon_match = any(
                                 c.get("coupon", {}).get("name") == code_to_burn or
@@ -102,6 +121,7 @@ class VaultController:
                                 if isinstance(c, dict)
                             )
 
+                            # También verificar code directo (por si la API lo retorna así)
                             direct_match = promo.get("code") == code_to_burn
 
                             if coupon_match or direct_match:
@@ -135,10 +155,21 @@ class VaultController:
 
     @staticmethod
     async def burn_coupon_by_order(order_data: dict) -> list[str]:
-        order = order_data.get("order", order_data)  
+        """
+        Extrae todos los cupones QP- de una orden y los destruye.
+        
+        Llamar desde el webhook handler con el payload de la orden.
+        Retorna lista de códigos quemados.
+        
+        Ejemplo uso en webhook:
+            order = payload.get("order", {})
+            burned = await VaultController.burn_coupon_by_order(order)
+        """
+        order = order_data.get("order", order_data)  # flexibilidad de formato
         coupons = order.get("coupons") or []
         burned = []
 
+        # A veces viene como lista de strings, a veces como lista de dicts
         for c in coupons:
             if isinstance(c, dict):
                 code = c.get("code", "") or c.get("name", "")
