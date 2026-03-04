@@ -38,8 +38,6 @@ class VaultController:
                 "cumulative":          False,
                 "begins_at":           today,
                 "expires_at":          expires_at,
-
-                # ✅ CAMPO CONFIRMADO: límite total de uso = 1 (UI: "Límite total de consumo")
                 "lasts":               "max_times_used",
                 "max_times_used":      1,
             }
