@@ -27,7 +27,10 @@
     .badge-warning { background:#451a03;color:#fcd34d; }
     .badge-info    { background:#0c2340;color:#93c5fd; }
     .badge-ok      { background:#052e16;color:#86efac; }
-    .badge-staple  { background:#3b0764;color:#e9d5ff; }
+    .badge-staple   { background:#3b0764;color:#e9d5ff; }
+    .badge-muyalta  { background:#78350f;color:#fde68a; }
+    .badge-alta     { background:#14532d;color:#86efac; }
+    .badge-bnormal  { background:#1e293b;color:#94a3b8;border:1px solid #334155; }
 
     .input-dark { background:#1e293b;border:1px solid #334155;color:#e2e8f0;
                   border-radius:8px;padding:8px 12px;font-size:13px; }
@@ -280,7 +283,7 @@
 </div><!-- /app -->
 
 <script>
-const API   = "";
+const API   = "https://gamecoins.onrender.com";
 let TOKEN   = null;
 let allCards = [];
 let staples  = [];
@@ -420,9 +423,12 @@ function renderTable(source) {
       `<span class="badge badge-${a.type}">${a.msg}</span>`
     ).join(' ');
 
-    const stapleHtml = c.is_staple
-      ? '<span class="badge badge-staple">⭐ Staple</span>'
-      : '<span class="text-slate-600 text-xs">Normal</span>';
+    const tierBadgeMap = {
+      muy_alta: '<span class="badge badge-muyalta">⭐ Muy Alta</span>',
+      alta:     '<span class="badge badge-alta">🟢 Alta</span>',
+      normal:   '<span class="badge badge-bnormal">📄 Normal</span>',
+    };
+    const stapleHtml = tierBadgeMap[c.tier] || '<span class="text-slate-600 text-xs">—</span>';
 
     const priceClass = (c.price_js > 0 && c.price_js < c.min_price_venta)
       ? 'text-red-400 font-bold' : 'text-white';
@@ -464,9 +470,13 @@ function renderTable(source) {
       <td class="px-4 py-3 text-center">
         <div class="flex gap-1 justify-center">
           <button onclick="markAsStaple('${c.name.replace(/'/g,"\\'")}')"
-            title="Marcar como Staple"
-            class="w-7 h-7 rounded-lg bg-purple-900/40 text-purple-400 hover:bg-purple-800/60 text-xs transition flex items-center justify-center">
-            <i class="fas fa-star"></i>
+            title="Agregar / cambiar lista de demanda"
+            class="w-7 h-7 rounded-lg text-xs transition flex items-center justify-center
+              ${c.tier==='muy_alta' ? 'bg-amber-700/50 text-amber-300 hover:bg-amber-600/70'
+              : c.tier==='alta'    ? 'bg-green-800/50 text-green-300 hover:bg-green-700/60'
+              : c.tier==='normal'  ? 'bg-slate-600/50 text-slate-300 hover:bg-slate-500/70'
+              : 'bg-purple-900/40 text-purple-400 hover:bg-purple-800/60'}">
+            <i class="fas fa-layer-group"></i>
           </button>
         </div>
       </td>
@@ -534,23 +544,55 @@ async function editPrice(jsId, currentPrice, name, cardIdx) {
 }
 
 async function markAsStaple(name) {
-  const { isConfirmed } = await Swal.fire({
-    title: `¿Marcar como Staple?`,
-    html: `<strong>${name}</strong><br><span class="text-sm text-slate-500">Stock mínimo: 8 unidades</span>`,
-    icon: 'question', showCancelButton: true,
-    confirmButtonColor: '#7c3aed', confirmButtonText: '⭐ Sí, Staple'
+  const tierOpts = [
+    { value:'muy_alta', label:'⭐ Muy Alta Demanda', desc:'Comprar siempre — sin límite de stock' },
+    { value:'alta',     label:'🟢 Alta Demanda',     desc:'Stock mínimo: 8 unidades' },
+    { value:'normal',   label:'📄 Normal',           desc:'Stock mínimo: 4 unidades' },
+    { value:'quitar',   label:'— Quitar de lista',   desc:'No aparece en filtros de demanda' },
+  ];
+  let selectedTier = null;
+  await Swal.fire({
+    title: 'Lista de Demanda',
+    html: `<p class="text-sm mb-3" style="color:#94a3b8"><strong style="color:#fff">${name}</strong></p>
+           <div style="display:flex;flex-direction:column;gap:8px">
+             ${tierOpts.map(t => `
+               <button class="tier-opt-sc" data-tier="${t.value}"
+                 style="width:100%;text-align:left;padding:12px 16px;border-radius:12px;
+                        background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);
+                        color:#cbd5e1;font-weight:700;font-size:13px;cursor:pointer;transition:background .15s">
+                 ${t.label}<br>
+                 <span style="font-size:10px;font-weight:400;color:#64748b">${t.desc}</span>
+               </button>`).join('')}
+           </div>`,
+    showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Cancelar',
+    didOpen: () => {
+      document.querySelectorAll('.tier-opt-sc').forEach(btn => {
+        btn.addEventListener('mouseover', () => btn.style.background = 'rgba(255,255,255,0.12)');
+        btn.addEventListener('mouseout',  () => btn.style.background = 'rgba(255,255,255,0.05)');
+        btn.addEventListener('click', () => { selectedTier = btn.dataset.tier; Swal.close(); });
+      });
+    }
   });
-  if (!isConfirmed) return;
+  if (!selectedTier) return;
   try {
-    const res = await fetch(`${API}/api/admin/staples`, {
-      method:'POST', headers: authHeaders(),
-      body: JSON.stringify({ name, is_staple: true, margin_factor: 2.5 })
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    // Actualizar localmente
-    allCards.forEach(c => { if(c.name === name) c.is_staple = true; });
+    if (selectedTier === 'quitar') {
+      const listRes = await fetch(`${API}/api/admin/staples`, { headers: authHeaders() });
+      const list    = await listRes.json();
+      const ex = list.find(s => s.name.toLowerCase() === name.toLowerCase());
+      if (ex) {
+        await fetch(`${API}/api/admin/staples/${ex.id}`, { method:'DELETE', headers: authHeaders() });
+      }
+      allCards.forEach(c => { if (c.name === name) { c.tier = null; c.is_staple = false; } });
+    } else {
+      const res = await fetch(`${API}/api/admin/staples`, {
+        method:'POST', headers: authHeaders(),
+        body: JSON.stringify({ name, tier: selectedTier, margin_factor: 2.5 })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      allCards.forEach(c => { if (c.name === name) { c.tier = selectedTier; c.is_staple = true; } });
+    }
     renderTable(allCards);
-    Swal.fire({ icon:'success', title:'Staple registrado', timer:1200, showConfirmButton:false });
+    Swal.fire({ icon:'success', title:'Lista actualizada', timer:1200, showConfirmButton:false });
   } catch(e) {
     Swal.fire('Error', e.message, 'error');
   }
@@ -561,11 +603,11 @@ function exportApproved() {
   if (!approved.length) return Swal.fire('Sin aprobados','Selecciona al menos una carta','warning');
 
   const rows = [
-    ['Nombre','Cantidad','USD Compra','Precio Credito CLP','Precio Cash CLP','Stock Actual JS','Stock Final','Es Staple'],
+    ['Nombre','Cantidad','USD Compra','Precio Credito CLP','Precio Cash CLP','Stock Actual JS','Stock Final','Tier'],
     ...approved.map(c => [
       c.name, c.qty_csv, c.price_usd.toFixed(2),
       c.price_credito, c.price_cash,
-      c.stock_actual ?? 'N/A', c.stock_proyectado, c.is_staple ? 'Si' : 'No'
+      c.stock_actual ?? 'N/A', c.stock_proyectado, c.tier || 'sin_lista'
     ])
   ];
   const csv = rows.map(r => r.join(',')).join('\n');
@@ -595,21 +637,25 @@ function renderStaples(list) {
   document.getElementById('staples-empty').classList.toggle('hidden', list.length > 0);
   if (!list.length) { tbody.innerHTML = ''; return; }
 
+  const TIER_BADGE = {
+    muy_alta: '<span class="badge badge-muyalta">⭐ Muy Alta</span>',
+    alta:     '<span class="badge badge-alta">🟢 Alta</span>',
+    normal:   '<span class="badge badge-bnormal">📄 Normal</span>',
+  };
+  const DEF_STOCK = { muy_alta:'∞', alta:8, normal:4 };
   tbody.innerHTML = list.map(s => `
     <tr class="glass-hover border-b border-white/5">
       <td class="px-5 py-3 font-bold text-white">${s.name}</td>
       <td class="px-5 py-3 text-center">
-        ${s.is_staple
-          ? '<span class="badge badge-staple">⭐ Staple</span>'
-          : '<span class="badge badge-info">📄 Normal</span>'}
+        ${TIER_BADGE[s.tier] || '<span class="badge badge-bnormal">📄 Normal</span>'}
       </td>
       <td class="px-5 py-3 text-center text-slate-300">
-        ${s.min_stock_override ?? (s.is_staple ? 8 : 4)}
+        ${s.min_stock_override ?? DEF_STOCK[s.tier] ?? 4}
         ${s.min_stock_override ? '<span class="text-yellow-500 text-[10px] ml-1">(custom)</span>' : ''}
       </td>
       <td class="px-5 py-3 text-center text-slate-300">×${s.margin_factor}</td>
       <td class="px-5 py-3 text-center">
-        <button onclick="editStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}', ${s.is_staple}, ${s.min_stock_override ?? 'null'}, ${s.margin_factor})"
+        <button onclick="editStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}', '${s.tier||'normal'}', ${s.min_stock_override ?? 'null'}, ${s.margin_factor})"
           class="w-7 h-7 rounded-lg bg-yellow-900/30 text-yellow-400 hover:bg-yellow-800/50 text-xs transition mr-1">
           <i class="fas fa-pencil"></i>
         </button>
@@ -622,18 +668,18 @@ function renderStaples(list) {
 }
 
 async function saveSingle() {
-  const name      = document.getElementById('s-name').value.trim();
-  const is_staple = document.getElementById('s-type').value === 'true';
-  const minStock  = document.getElementById('s-minstock').value;
-  const margin    = parseFloat(document.getElementById('s-margin').value) || 2.5;
+  const name     = document.getElementById('s-name').value.trim();
+  const tier     = document.getElementById('s-type').value;
+  const minStock = document.getElementById('s-minstock').value;
+  const margin   = parseFloat(document.getElementById('s-margin').value) || 2.5;
   if (!name) return Swal.fire('Falta nombre','Escribe el nombre de la carta','warning');
-  await upsertStaple({ name, is_staple, min_stock_override: minStock ? parseInt(minStock) : null, margin_factor: margin });
+  await upsertStaple({ name, tier, min_stock_override: minStock ? parseInt(minStock) : null, margin_factor: margin });
   document.getElementById('s-name').value = '';
 }
 
 async function saveBulk() {
-  const lines    = document.getElementById('bulk-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
-  const isStaple = document.getElementById('bulk-type').value === 'true';
+  const lines = document.getElementById('bulk-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  const tier  = document.getElementById('bulk-type').value;
   if (!lines.length) return Swal.fire('Sin cartas','Escribe al menos una carta','warning');
 
   Swal.fire({ title:`Guardando ${lines.length} cartas...`, didOpen:()=>Swal.showLoading() });
@@ -641,7 +687,7 @@ async function saveBulk() {
   for (const name of lines) {
     const res = await fetch(`${API}/api/admin/staples`, {
       method:'POST', headers: authHeaders(),
-      body: JSON.stringify({ name, is_staple: isStaple, margin_factor: 2.5 })
+      body: JSON.stringify({ name, tier, margin_factor: 2.5 })
     });
     if (res.ok) ok++;
   }
@@ -663,11 +709,11 @@ async function upsertStaple(payload) {
   }
 }
 
-function editStaple(id, name, isStaple, minStock, margin) {
-  document.getElementById('s-name').value    = name;
-  document.getElementById('s-type').value    = String(isStaple);
+function editStaple(id, name, tier, minStock, margin) {
+  document.getElementById('s-name').value     = name;
+  document.getElementById('s-type').value     = tier || 'normal';
   document.getElementById('s-minstock').value = minStock ?? '';
-  document.getElementById('s-margin').value  = margin;
+  document.getElementById('s-margin').value   = margin;
   window.scrollTo(0,0);
   document.getElementById('s-name').focus();
 }

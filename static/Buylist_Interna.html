@@ -211,7 +211,7 @@
 </div>
 
 <script>
-const API = ""; let TOKEN = null; let cards = []; let curF = "all";
+const API = "https://gamecoins.onrender.com"; let TOKEN = null; let cards = []; let curF = "all"; let curTierF = "all";
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 async function doLogin() {
@@ -297,13 +297,27 @@ function setFilter(f) {
   });
   renderTable();
 }
+function setTierFilter(f) {
+  curTierF = curTierF === f ? 'all' : f;
+  ['muy_alta','alta','normal','sin_lista'].forEach(k => {
+    const b = document.getElementById(`ft-${k}`);
+    if (!b) return;
+    b.className = b.className.replace(/btn-f-(on|off)/,'') + (k===curTierF?' btn-f-on':' btn-f-off');
+  });
+  renderTable();
+}
 
 function getVisible() {
   const q = (document.getElementById('search')?.value||'').toLowerCase();
-  return cards.filter(c =>
-    (curF==='all' || c.status===curF) &&
-    (!q || c.name.toLowerCase().includes(q))
-  );
+  return cards.filter(c => {
+    if (curF !== 'all' && c.status !== curF) return false;
+    if (curTierF !== 'all') {
+      const t = c.tier || 'sin_lista';
+      if (curTierF === 'sin_lista' ? t !== 'sin_lista' : t !== curTierF) return false;
+    }
+    if (q && !c.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
 }
 
 // ── Tabla ──────────────────────────────────────────────────────────────────────
@@ -371,9 +385,10 @@ function renderTable() {
       </td>
       <td class="px-4 py-3 text-center">
         <div class="flex flex-col gap-1 items-center">
-          ${c.is_staple
-            ? '<span class="badge b-staple">⭐ Staple</span>'
-            : '<span class="text-slate-600 text-xs">Normal</span>'}
+          ${c.tier === 'muy_alta' ? '<span class="badge b-muyalta">⭐ Muy Alta</span>'
+          : c.tier === 'alta'    ? '<span class="badge b-alta">🟢 Alta</span>'
+          : c.tier === 'normal'  ? '<span class="badge b-normal">📄 Normal</span>'
+          : '<span class="badge b-sinlista">— Sin lista</span>'}
           ${c.is_estaca
             ? `<span class="badge b-estaca" title="Base × ${c.stake_mult}">✦ ×${c.stake_mult}</span>`
             : ''}
@@ -408,13 +423,14 @@ function renderTable() {
         </div>
       </td>
       <td class="px-4 py-3 text-center">
-        <button onclick="markStaple('${c.name.replace(/'/g,"\\'")}', ${idx})"
-          title="${c.is_staple ? 'Quitar Staple' : 'Marcar Staple'}"
+        <button onclick="changeTier('${c.name.replace(/'/g,"\\'")}', '${c.tier||'sin_lista'}', ${idx})"
+          title="Cambiar lista de demanda"
           class="w-7 h-7 rounded-lg flex items-center justify-center mx-auto transition
-                 ${c.is_staple
-                   ? 'bg-purple-600/60 text-purple-200 hover:bg-purple-800'
-                   : 'bg-purple-900/30 text-purple-500 hover:bg-purple-700/60'}">
-          <i class="fas fa-star text-[10px]"></i>
+                 ${c.tier==='muy_alta' ? 'bg-amber-600/60 text-amber-200 hover:bg-amber-800'
+                 : c.tier==='alta'    ? 'bg-green-700/50 text-green-300 hover:bg-green-800'
+                 : c.tier==='normal'  ? 'bg-slate-600/50 text-slate-300 hover:bg-slate-700'
+                 : 'bg-slate-800/50 text-slate-600 hover:bg-slate-700'}">
+          <i class="fas fa-layer-group text-[10px]"></i>
         </button>
       </td>
     </tr>`;
@@ -426,38 +442,52 @@ function renderTable() {
   document.getElementById('footer-cash').textContent    = `$${th.toLocaleString()}`;
 }
 
-// ── Marcar Staple ──────────────────────────────────────────────────────────────
-async function markStaple(name, idx) {
-  const cur = cards[idx].is_staple;
-  const {isConfirmed} = await Swal.fire({
-    title: cur ? 'Quitar Staple' : 'Marcar como Staple',
-    html: `<strong>${name}</strong><br>
-           <span class="text-sm text-slate-400">
-             Stock mínimo: ${cur ? '4 (normal)' : '8 (staple)'}
-           </span>`,
-    icon: 'question', showCancelButton: true,
-    confirmButtonColor: '#7c3aed',
-    confirmButtonText: cur ? 'Quitar' : 'Confirmar Staple',
+// ── Cambiar Tier ───────────────────────────────────────────────────────────────
+async function changeTier(name, currentTier, idx) {
+  const tierOpts = [
+    { value:'muy_alta',  label:'⭐ Muy Alta Demanda', desc:'Comprar siempre, sin límite de stock' },
+    { value:'alta',      label:'🟢 Alta Demanda',     desc:'Stock mínimo: 8 unidades' },
+    { value:'normal',    label:'📄 Normal',           desc:'Stock mínimo: 4 unidades' },
+    { value:'sin_lista', label:'— Quitar de la lista',desc:'Sin restricción de stock' },
+  ];
+  let selectedTier = null;
+  await Swal.fire({
+    title: 'Lista de Demanda',
+    html: `<p class="text-sm text-slate-400 mb-3"><strong class="text-white">${name}</strong></p>
+           <div class="space-y-2">${tierOpts.map(t =>
+             `<button class="tier-opt w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition
+               ${currentTier===t.value ? 'bg-yellow-500/20 border border-yellow-500/50 text-yellow-300' : 'bg-white/5 hover:bg-white/10 text-slate-300'}"
+               data-tier="${t.value}">${t.label}<br>
+               <span style="font-size:10px;font-weight:400;color:#64748b">${t.desc}</span>
+             </button>`).join('')}
+           </div>`,
+    showConfirmButton: false, showCancelButton: true,
     cancelButtonText: 'Cancelar',
-    background: '#1e293b', color: '#e2e8f0'
+    background: '#1e293b', color: '#e2e8f0',
+    didOpen: () => {
+      document.querySelectorAll('.tier-opt').forEach(btn => {
+        btn.addEventListener('click', () => { selectedTier = btn.dataset.tier; Swal.close(); });
+      });
+    }
   });
-  if (!isConfirmed) return;
-
+  if (!selectedTier) return;
   try {
-    const res = await fetch(`${API}/api/admin/staples`, {
-      method: 'POST', headers: ah(),
-      body: JSON.stringify({name, is_staple: !cur, margin_factor: 2.5})
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    cards[idx].is_staple = !cur;
-    cards[idx].min_stock  = !cur ? 8 : 4;
+    if (selectedTier === 'sin_lista') {
+      const listRes = await fetch(`${API}/api/admin/staples`, {headers: ah()});
+      const list    = await listRes.json();
+      const ex = list.find(s => s.name.toLowerCase() === name.toLowerCase());
+      if (ex) await fetch(`${API}/api/admin/staples/${ex.id}`, {method:'DELETE', headers: ah()});
+      cards[idx].tier = 'sin_lista';
+    } else {
+      const res = await fetch(`${API}/api/admin/staples`, {
+        method:'POST', headers: ah(),
+        body: JSON.stringify({name, tier: selectedTier, margin_factor: 2.5})
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      cards[idx].tier = selectedTier;
+    }
     renderTable();
-    Swal.fire({
-      icon: 'success',
-      title: cur ? 'Staple quitado' : '⭐ Staple registrado',
-      timer: 1300, showConfirmButton: false,
-      background: '#1e293b', color: '#e2e8f0'
-    });
+    Swal.fire({ icon:'success', title:'Lista actualizada', timer:1200, showConfirmButton:false, background:'#1e293b', color:'#e2e8f0' });
   } catch(e) { Swal.fire('Error', e.message, 'error'); }
 }
 
