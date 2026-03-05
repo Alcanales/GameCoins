@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buylist Interna — GameQuest</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    body { background:#0f172a; font-family:'Inter',sans-serif; color:#e2e8f0; }
+    .glass { background:rgba(255,255,255,0.04); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.08); }
+    .glass-row:hover { background:rgba(255,255,255,0.03); }
+    .row-danger  { border-left:3px solid #ef4444; }
+    .row-warning { border-left:3px solid #f59e0b; }
+    .row-info    { border-left:3px solid #3b82f6; }
+    .row-ok      { border-left:3px solid #22c55e; }
+    .badge { display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap; }
+    .b-danger  { background:#450a0a;color:#fca5a5; }
+    .b-warning { background:#451a03;color:#fcd34d; }
+    .b-info    { background:#0c2340;color:#93c5fd; }
+    .b-ok      { background:#052e16;color:#86efac; }
+    .b-staple  { background:#3b0764;color:#e9d5ff; }
+    .input-dark { background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px; }
+    .input-dark:focus { outline:none;border-color:#eab308; }
+    .btn-f { padding:4px 14px;border-radius:8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;transition:all .15s; }
+    .btn-f-on  { background:#eab308;color:#0f172a; }
+    .btn-f-off { background:rgba(255,255,255,0.05);color:#64748b; }
+    .btn-f-off:hover { color:#cbd5e1;background:rgba(255,255,255,0.09); }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+    .fade-in { animation:fadeIn .25s ease both; }
+    .foil-tag { color:#a78bfa;font-size:10px;font-weight:700; }
+    .cond-tag { color:#f59e0b;font-size:10px;font-weight:700; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- LOGIN -->
+<div id="login-view" class="flex min-h-screen items-center justify-center p-4">
+  <div class="glass rounded-2xl p-8 w-full max-w-sm">
+    <div class="text-center mb-6">
+      <div class="inline-flex w-12 h-12 bg-yellow-500/10 rounded-xl items-center justify-center mb-3">
+        <i class="fas fa-vault text-yellow-400 text-xl"></i>
+      </div>
+      <h1 class="text-xl font-black text-white">Buylist Interna</h1>
+      <p class="text-xs text-slate-500 mt-1">Análisis de Compra — GameQuest</p>
+    </div>
+    <div class="space-y-3">
+      <input id="lu" type="text"     class="input-dark w-full" placeholder="Usuario">
+      <input id="lp" type="password" class="input-dark w-full" placeholder="Contraseña">
+      <button onclick="doLogin()"
+        class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-3 rounded-xl uppercase tracking-wider text-xs transition">
+        INGRESAR
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden flex-col min-h-screen">
+
+  <!-- Header con botón de email visible -->
+  <header class="glass border-b border-white/5 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+        <i class="fas fa-magnifying-glass-chart text-yellow-400 text-sm"></i>
+      </div>
+      <div>
+        <span class="font-black text-white text-sm">Buylist Interna</span>
+        <span class="text-slate-500 text-xs ml-2">CSV vs Jumpseller</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <!-- Botón email — visible siempre, habilitado cuando hay datos -->
+      <button id="btn-email" onclick="emailReport()" disabled
+        title="Enviar reporte completo por email"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider
+               border border-purple-500/30 bg-purple-900/30 text-purple-400
+               hover:bg-purple-700/50 hover:text-purple-200 transition
+               disabled:opacity-30 disabled:cursor-not-allowed">
+        <i class="fas fa-envelope"></i>
+        <span class="hidden md:inline">Email Reporte</span>
+      </button>
+      <button onclick="doLogout()"
+        class="text-slate-500 text-xs font-bold hover:text-white transition px-3 py-1.5">
+        <i class="fas fa-sign-out-alt mr-1"></i> SALIR
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 p-4 md:p-6 space-y-5 max-w-[1500px] mx-auto w-full">
+
+    <!-- Upload + config -->
+    <div class="glass rounded-2xl p-5">
+      <div class="flex flex-col md:flex-row gap-4 items-center">
+        <div onclick="document.getElementById('csv-in').click()"
+          class="flex-1 border-2 border-dashed border-slate-700 hover:border-yellow-500
+                 rounded-xl p-5 text-center cursor-pointer transition group">
+          <i class="fas fa-file-csv text-2xl text-slate-600 group-hover:text-yellow-400 mb-2 block"></i>
+          <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Subir CSV Manabox</p>
+          <p id="fname" class="text-[10px] text-slate-600 mt-1">Ningún archivo seleccionado</p>
+          <input type="file" id="csv-in" class="hidden" accept=".csv" onchange="onFile()">
+        </div>
+        <!-- Parámetros -->
+        <div class="flex flex-wrap gap-3 text-center justify-center">
+          <div class="glass rounded-xl px-4 py-3">
+            <p class="text-[9px] text-slate-500 uppercase">Mín. CK</p>
+            <p class="text-base font-black text-yellow-400">$3 USD</p>
+          </div>
+          <div class="glass rounded-xl px-4 py-3">
+            <p class="text-[9px] text-slate-500 uppercase">Normal stock</p>
+            <p class="text-base font-black text-slate-300">x4</p>
+          </div>
+          <div class="glass rounded-xl px-4 py-3">
+            <p class="text-[9px] text-purple-400 uppercase">Staple stock</p>
+            <p class="text-base font-black text-purple-400">x8</p>
+          </div>
+          <div class="glass rounded-xl px-4 py-3">
+            <p class="text-[9px] text-blue-400 uppercase">Precio ref.</p>
+            <p class="text-base font-black text-blue-400">CK BL</p>
+          </div>
+        </div>
+
+        <button id="btn-run" onclick="analyze()" disabled
+          class="px-8 py-4 rounded-xl font-black uppercase tracking-wider text-xs transition
+                 bg-yellow-500/20 text-yellow-600 border border-yellow-500/30
+                 disabled:opacity-30 disabled:cursor-not-allowed
+                 hover:bg-yellow-500 hover:text-slate-900">
+          <i class="fas fa-bolt mr-2"></i> ANALIZAR
+        </button>
+      </div>
+    </div>
+
+    <!-- Resumen cards -->
+    <div id="summary" class="hidden grid grid-cols-3 md:grid-cols-6 gap-3 fade-in">
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-slate-500 uppercase">Cartas</p>
+        <p id="s-total" class="text-2xl font-black text-white mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-red-500">
+        <p class="text-[10px] text-red-400 uppercase">Peligro</p>
+        <p id="s-danger" class="text-2xl font-black text-red-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-amber-400">
+        <p class="text-[10px] text-amber-400 uppercase">Alerta</p>
+        <p id="s-warning" class="text-2xl font-black text-amber-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-green-500">
+        <p class="text-[10px] text-green-400 uppercase">OK</p>
+        <p id="s-ok" class="text-2xl font-black text-green-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-slate-500 uppercase">USD Total</p>
+        <p id="s-usd" class="text-2xl font-black text-white mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-yellow-400 uppercase">CLP Cash</p>
+        <p id="s-clp" class="text-2xl font-black text-yellow-400 mt-1">—</p>
+      </div>
+    </div>
+
+    <!-- Filtros + búsqueda -->
+    <div id="filters" class="hidden glass rounded-xl px-4 py-3 flex flex-wrap gap-2 items-center justify-between fade-in">
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="setFilter('all')"     id="f-all"     class="btn-f btn-f-on">Todas</button>
+        <button onclick="setFilter('danger')"  id="f-danger"  class="btn-f btn-f-off">🔴 Peligro</button>
+        <button onclick="setFilter('warning')" id="f-warning" class="btn-f btn-f-off">🟡 Alerta</button>
+        <button onclick="setFilter('info')"    id="f-info"    class="btn-f btn-f-off">🔵 Sin JS</button>
+        <button onclick="setFilter('ok')"      id="f-ok"      class="btn-f btn-f-off">🟢 OK</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="search" type="text" class="input-dark text-xs py-1.5 w-44"
+          placeholder="Buscar carta..." oninput="renderTable()">
+        <span id="count-label" class="text-xs text-slate-500 whitespace-nowrap">0 resultados</span>
+      </div>
+    </div>
+
+    <!-- Tabla de análisis -->
+    <div id="table-wrap" class="hidden glass rounded-2xl overflow-hidden fade-in">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-white/5 text-[10px] text-slate-400 uppercase tracking-wider sticky top-0">
+            <tr>
+              <th class="px-4 py-3 text-left min-w-[180px]">Carta</th>
+              <th class="px-4 py-3 text-center">Tag</th>
+              <th class="px-4 py-3 text-center">Cant.</th>
+              <th class="px-4 py-3 text-right">CK Buylist</th>
+              <th class="px-4 py-3 text-right">💎 Crédito</th>
+              <th class="px-4 py-3 text-right">💵 Cash</th>
+              <th class="px-4 py-3 text-right">Stock JS</th>
+              <th class="px-4 py-3 text-right">Proyectado</th>
+              <th class="px-4 py-3 text-right">Precio JS</th>
+              <th class="px-4 py-3 text-right">Mín. Venta</th>
+              <th class="px-4 py-3 text-left min-w-[250px]">Alertas</th>
+              <th class="px-4 py-3 text-center">⭐</th>
+            </tr>
+          </thead>
+          <tbody id="tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+      <div class="px-5 py-3 border-t border-white/5 flex flex-wrap justify-between items-center gap-3">
+        <span id="footer-count" class="text-xs text-slate-600">—</span>
+        <div class="flex gap-4 text-xs">
+          <span class="text-yellow-400">💎 Crédito total: <strong id="footer-credito">—</strong></span>
+          <span class="text-green-400">💵 Cash total: <strong id="footer-cash">—</strong></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = ""; let TOKEN = null; let cards = []; let curF = "all";
+
+// ── Auth ───────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById('lu').value.trim();
+  const p = document.getElementById('lp').value.trim();
+  try {
+    const res = await fetch(`${API}/api/auth/login`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username:u, password:p})
+    });
+    if (!res.ok) return Swal.fire('Error','Credenciales inválidas','error');
+    TOKEN = (await res.json()).access_token;
+    document.getElementById('login-view').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('app').classList.add('flex');
+  } catch(e) { Swal.fire('Error','Sin conexión con el servidor','error'); }
+}
+document.addEventListener('keydown', e => { if (e.key==='Enter'&&!TOKEN) doLogin(); });
+function doLogout() { TOKEN=null; location.reload(); }
+function ah() { return {'Authorization':`Bearer ${TOKEN}`,'Content-Type':'application/json'}; }
+
+// ── Archivo ────────────────────────────────────────────────────────────────────
+function onFile() {
+  const f = document.getElementById('csv-in').files[0];
+  document.getElementById('fname').textContent = f ? f.name : 'Ningún archivo seleccionado';
+  document.getElementById('btn-run').disabled  = !f;
+}
+
+// ── Análisis ───────────────────────────────────────────────────────────────────
+async function analyze() {
+  const file = document.getElementById('csv-in').files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+
+  Swal.fire({
+    title: 'Analizando...',
+    html: 'Consultando stock Jumpseller · Precios Card Kingdom via Manabox',
+    didOpen: () => Swal.showLoading(),
+    background: '#1e293b', color: '#e2e8f0'
+  });
+
+  try {
+    const res = await fetch(`${API}/api/admin/stock_check`, {
+      method: 'POST',
+      headers: {'Authorization': `Bearer ${TOKEN}`},
+      body: fd
+    });
+    if (!res.ok) {
+      const e = await res.json();
+      throw new Error(e.detail || 'Error del servidor');
+    }
+    const data = await res.json();
+    cards = data.cards;
+
+    // Resumen
+    document.getElementById('s-total').textContent   = data.summary.total_cards;
+    document.getElementById('s-danger').textContent  = data.summary.danger_count;
+    document.getElementById('s-warning').textContent = data.summary.warning_count;
+    document.getElementById('s-ok').textContent      = data.summary.ok_count;
+    document.getElementById('s-usd').textContent     = `$${data.summary.total_usd_compra.toFixed(2)}`;
+    document.getElementById('s-clp').textContent     = `$${data.summary.total_clp_cash.toLocaleString()}`;
+
+    renderTable();
+    ['summary','filters','table-wrap'].forEach(id =>
+      document.getElementById(id).classList.remove('hidden'));
+
+    // Habilitar botón de email
+    document.getElementById('btn-email').disabled = false;
+
+    Swal.close();
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+// ── Filtros ────────────────────────────────────────────────────────────────────
+function setFilter(f) {
+  curF = f;
+  ['all','danger','warning','info','ok'].forEach(k => {
+    const b = document.getElementById(`f-${k}`);
+    b.className = b.className.replace(/btn-f-(on|off)/,'') + (k===f?' btn-f-on':' btn-f-off');
+  });
+  renderTable();
+}
+
+function getVisible() {
+  const q = (document.getElementById('search')?.value||'').toLowerCase();
+  return cards.filter(c =>
+    (curF==='all' || c.status===curF) &&
+    (!q || c.name.toLowerCase().includes(q))
+  );
+}
+
+// ── Tabla ──────────────────────────────────────────────────────────────────────
+const FOIL_TAG  = {foil:'✨ Foil', etched:'⬡ Etched', normal:''};
+const COND_TAG  = {
+  near_mint:'', lightly_played:'LP', moderately_played:'MP',
+  heavily_played:'HP', damaged:'DMG'
+};
+
+function renderTable() {
+  const vis   = getVisible();
+  const tbody = document.getElementById('tbody');
+  let tc = 0, th = 0;
+
+  if (!vis.length) {
+    tbody.innerHTML = `<tr><td colspan="12"
+      class="text-center py-12 text-slate-600 italic">
+      Sin resultados para este filtro</td></tr>`;
+    document.getElementById('count-label').textContent    = '0 resultados';
+    document.getElementById('footer-count').textContent   = '0 cartas';
+    document.getElementById('footer-credito').textContent = '$0';
+    document.getElementById('footer-cash').textContent    = '$0';
+    return;
+  }
+
+  tbody.innerHTML = vis.map(c => {
+    const idx   = cards.indexOf(c);
+    const foilT = FOIL_TAG[c.foil||'normal']  || '';
+    const condT = COND_TAG[c.condition||'near_mint'] || '';
+    const tagHtml = [
+      foilT ? `<span class="foil-tag ml-1">${foilT}</span>` : '',
+      condT ? `<span class="cond-tag ml-1">${condT}</span>` : '',
+    ].join('');
+
+    const alertHtml = c.alerts.map(a =>
+      `<span class="badge b-${a.type}">${a.msg}</span>`
+    ).join(' ');
+
+    const priceJsCls = (c.price_js > 0 && c.price_js < c.min_price_venta)
+      ? 'text-red-400 font-bold' : 'text-slate-300';
+
+    const stockActualHtml = (c.stock_actual !== null && c.stock_actual !== undefined)
+      ? `<span class="${c.stock_actual < c.min_stock
+            ? 'text-amber-400 font-bold' : 'text-slate-300'}">${c.stock_actual}</span>
+         <span class="text-slate-600 text-[10px] block">mín:${c.min_stock}</span>`
+      : '<span class="text-slate-600 text-xs italic">N/A</span>';
+
+    const stockFinalCls = c.stock_proyectado > c.min_stock*3
+      ? 'text-red-400 font-bold'
+      : c.stock_proyectado > c.min_stock*2
+        ? 'text-amber-400 font-bold'
+        : 'text-green-400 font-bold';
+
+    // Precio referencia: Card Kingdom Buylist (ya viene en el CSV desde Manabox)
+
+    const sc = (c.price_credito||0) * (c.qty_csv||1);
+    const sh = (c.price_cash||0)    * (c.qty_csv||1);
+    tc += sc; th += sh;
+
+    return `
+    <tr class="glass-row transition row-${c.status}${c.is_estaca ? ' outline outline-1 outline-indigo-500/25' : ''}">
+      <td class="px-4 py-3 font-bold text-white min-w-[180px]">
+        <span class="truncate block max-w-[175px]" title="${c.name}">${c.name}</span>
+        ${tagHtml}
+      </td>
+      <td class="px-4 py-3 text-center">
+        <div class="flex flex-col gap-1 items-center">
+          ${c.is_staple
+            ? '<span class="badge b-staple">⭐ Staple</span>'
+            : '<span class="text-slate-600 text-xs">Normal</span>'}
+          ${c.is_estaca
+            ? `<span class="badge b-estaca" title="Base × ${c.stake_mult}">✦ ×${c.stake_mult}</span>`
+            : ''}
+        </div>
+      </td>
+      <td class="px-4 py-3 text-center text-slate-300 font-mono font-bold">${c.qty_csv||1}</td>
+      <td class="px-4 py-3 text-right font-mono text-xs">
+        <span class="${(c.price_usd_raw||0) < 3 ? 'text-amber-400 font-bold' : 'text-slate-400'}">
+          $${(c.price_usd_raw||0).toFixed(2)}
+        </span>
+        ${c.is_estaca
+          ? `<span class="text-[10px] text-indigo-400 block leading-tight">→ $${(c.price_usd_eff||c.price_usd||0).toFixed(2)} eff.</span>`
+          : ''}
+      </td>
+      <td class="px-4 py-3 text-right font-black text-yellow-400">$${sc.toLocaleString()}</td>
+      <td class="px-4 py-3 text-right font-black text-green-400">$${sh.toLocaleString()}</td>
+      <td class="px-4 py-3 text-right">${stockActualHtml}</td>
+      <td class="px-4 py-3 text-right">
+        <span class="${stockFinalCls}">${c.stock_proyectado||0}</span>
+      </td>
+      <td class="px-4 py-3 text-right">
+        ${c.price_js > 0
+          ? `<span class="${priceJsCls}">$${c.price_js.toLocaleString()}</span>`
+          : '<span class="text-slate-600 text-xs italic">—</span>'}
+      </td>
+      <td class="px-4 py-3 text-right text-xs text-slate-500">
+        $${(c.min_price_venta||0).toLocaleString()}
+      </td>
+      <td class="px-4 py-3 min-w-[250px]">
+        <div class="flex flex-wrap gap-1">
+          ${alertHtml || '<span class="badge b-ok">Sin alertas</span>'}
+        </div>
+      </td>
+      <td class="px-4 py-3 text-center">
+        <button onclick="markStaple('${c.name.replace(/'/g,"\\'")}', ${idx})"
+          title="${c.is_staple ? 'Quitar Staple' : 'Marcar Staple'}"
+          class="w-7 h-7 rounded-lg flex items-center justify-center mx-auto transition
+                 ${c.is_staple
+                   ? 'bg-purple-600/60 text-purple-200 hover:bg-purple-800'
+                   : 'bg-purple-900/30 text-purple-500 hover:bg-purple-700/60'}">
+          <i class="fas fa-star text-[10px]"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('count-label').textContent    = `${vis.length} resultado${vis.length!==1?'s':''}`;
+  document.getElementById('footer-count').textContent   = `${vis.length} cartas`;
+  document.getElementById('footer-credito').textContent = `$${tc.toLocaleString()}`;
+  document.getElementById('footer-cash').textContent    = `$${th.toLocaleString()}`;
+}
+
+// ── Marcar Staple ──────────────────────────────────────────────────────────────
+async function markStaple(name, idx) {
+  const cur = cards[idx].is_staple;
+  const {isConfirmed} = await Swal.fire({
+    title: cur ? 'Quitar Staple' : 'Marcar como Staple',
+    html: `<strong>${name}</strong><br>
+           <span class="text-sm text-slate-400">
+             Stock mínimo: ${cur ? '4 (normal)' : '8 (staple)'}
+           </span>`,
+    icon: 'question', showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+    confirmButtonText: cur ? 'Quitar' : 'Confirmar Staple',
+    cancelButtonText: 'Cancelar',
+    background: '#1e293b', color: '#e2e8f0'
+  });
+  if (!isConfirmed) return;
+
+  try {
+    const res = await fetch(`${API}/api/admin/staples`, {
+      method: 'POST', headers: ah(),
+      body: JSON.stringify({name, is_staple: !cur, margin_factor: 2.5})
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    cards[idx].is_staple = !cur;
+    cards[idx].min_stock  = !cur ? 8 : 4;
+    renderTable();
+    Swal.fire({
+      icon: 'success',
+      title: cur ? 'Staple quitado' : '⭐ Staple registrado',
+      timer: 1300, showConfirmButton: false,
+      background: '#1e293b', color: '#e2e8f0'
+    });
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
+
+// ── Email Reporte ──────────────────────────────────────────────────────────────
+async function emailReport() {
+  if (!cards.length) return Swal.fire('Sin datos','Analiza un CSV primero','warning');
+
+  const danger  = cards.filter(c => c.status === 'danger').length;
+  const warning = cards.filter(c => c.status === 'warning').length;
+  const fname   = document.getElementById('csv-in').files[0]?.name || 'análisis';
+
+  const {isConfirmed} = await Swal.fire({
+    title: 'Enviar Reporte por Email',
+    html: `
+      <div style="text-align:left;font-size:13px;color:#cbd5e1">
+        <p style="margin-bottom:12px">Se enviará el análisis completo a <strong style="color:#eab308">contacto@gamequest.cl</strong></p>
+        <table style="width:100%;font-size:12px">
+          <tr><td>Total cartas:</td><td style="text-align:right;font-weight:700">${cards.length}</td></tr>
+          <tr><td style="color:#f87171">Peligro:</td><td style="text-align:right;color:#f87171;font-weight:700">${danger}</td></tr>
+          <tr><td style="color:#fbbf24">Alerta:</td><td style="text-align:right;color:#fbbf24;font-weight:700">${warning}</td></tr>
+          <tr><td>Archivo:</td><td style="text-align:right;color:#94a3b8">${fname}</td></tr>
+        </table>
+      </div>`,
+    icon: 'question', showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+    confirmButtonText: '<i class="fas fa-envelope mr-1"></i> Enviar',
+    cancelButtonText: 'Cancelar',
+    background: '#1e293b', color: '#e2e8f0'
+  });
+  if (!isConfirmed) return;
+
+  Swal.fire({
+    title: 'Enviando reporte...',
+    html: 'Generando email con tabla completa de alertas',
+    didOpen: () => Swal.showLoading(),
+    background: '#1e293b', color: '#e2e8f0'
+  });
+
+  try {
+    const summary = {
+      total_cards:       cards.length,
+      danger_count:      cards.filter(c => c.status === 'danger').length,
+      warning_count:     cards.filter(c => c.status === 'warning').length,
+      ok_count:          cards.filter(c => c.status === 'ok').length,
+      total_usd_compra:  cards.reduce((s,c) => s + (c.price_usd_raw||c.price_usd||0)*(c.qty_csv||1), 0),
+      total_clp_cash:    cards.reduce((s,c) => s + (c.price_cash||0)*(c.qty_csv||1), 0),
+      total_clp_credito: cards.reduce((s,c) => s + (c.price_credito||0)*(c.qty_csv||1), 0),
+    };
+    const res = await fetch(`${API}/api/admin/email_analysis`, {
+      method: 'POST', headers: ah(),
+      body: JSON.stringify({ cards, summary, filename: fname })
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Error SMTP');
+    Swal.fire({
+      icon: 'success', title: '✅ Reporte enviado',
+      text: 'Revisa contacto@gamequest.cl',
+      timer: 2500, showConfirmButton: false,
+      background: '#1e293b', color: '#e2e8f0'
+    });
+  } catch(e) {
+    Swal.fire('Error al enviar', e.message + '\nVerifica configuración SMTP en servidor.', 'error');
+  }
+}
+</script>
+</body>
+</html>

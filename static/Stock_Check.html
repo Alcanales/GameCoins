@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stock Check — GameQuest</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    body { background:#0f172a; font-family:'Inter',sans-serif; color:#e2e8f0; }
+    .glass       { background:rgba(255,255,255,0.04); backdrop-filter:blur(10px);
+                   border:1px solid rgba(255,255,255,0.08); }
+    .glass-hover { transition:all .2s; }
+    .glass-hover:hover { background:rgba(255,255,255,0.07); }
+
+    /* Status row colors */
+    .row-danger  { border-left:3px solid #ef4444; }
+    .row-warning { border-left:3px solid #f59e0b; }
+    .row-info    { border-left:3px solid #3b82f6; }
+    .row-ok      { border-left:3px solid #22c55e; }
+
+    /* Badge pills */
+    .badge        { display:inline-flex;align-items:center;gap:4px;
+                    padding:2px 10px;border-radius:999px;font-size:10px;font-weight:700; }
+    .badge-danger  { background:#450a0a;color:#fca5a5; }
+    .badge-warning { background:#451a03;color:#fcd34d; }
+    .badge-info    { background:#0c2340;color:#93c5fd; }
+    .badge-ok      { background:#052e16;color:#86efac; }
+    .badge-staple  { background:#3b0764;color:#e9d5ff; }
+
+    .input-dark { background:#1e293b;border:1px solid #334155;color:#e2e8f0;
+                  border-radius:8px;padding:8px 12px;font-size:13px; }
+    .input-dark:focus { outline:none;border-color:#eab308; }
+
+    .tab-btn         { padding:8px 20px;border-radius:8px;font-size:12px;font-weight:700;
+                       text-transform:uppercase;letter-spacing:.05em;transition:all .15s;
+                       cursor:pointer; }
+    .tab-active      { background:#eab308;color:#0f172a; }
+    .tab-inactive    { background:transparent;color:#64748b; }
+    .tab-inactive:hover { color:#cbd5e1; }
+
+    .spin { animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* Checkbox custom */
+    input[type=checkbox].approve-check {
+      width:18px;height:18px;accent-color:#22c55e;cursor:pointer;
+    }
+    .sortable { cursor:pointer;user-select:none; }
+    .sortable:hover { color:#eab308; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- ── LOGIN ────────────────────────────────────────────────────────── -->
+<div id="login-view" class="flex min-h-screen items-center justify-center p-4">
+  <div class="glass rounded-2xl p-8 w-full max-w-sm">
+    <div class="text-center mb-6">
+      <div class="inline-flex w-12 h-12 bg-yellow-500/10 rounded-xl items-center justify-center mb-3">
+        <i class="fas fa-boxes-stacked text-yellow-400 text-xl"></i>
+      </div>
+      <h1 class="text-xl font-black text-white">Stock Check</h1>
+      <p class="text-xs text-slate-500 mt-1">Panel de Análisis — GameQuest</p>
+    </div>
+    <div class="space-y-3">
+      <input id="login-user" type="text"     class="input-dark w-full" placeholder="Usuario">
+      <input id="login-pass" type="password" class="input-dark w-full" placeholder="Contraseña">
+      <button onclick="doLogin()"
+        class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-3 rounded-xl uppercase tracking-wider text-xs transition">
+        INGRESAR
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── DASHBOARD ─────────────────────────────────────────────────────── -->
+<div id="app" class="hidden flex-col min-h-screen">
+
+  <!-- Header -->
+  <header class="glass border-b border-white/5 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+        <i class="fas fa-chart-bar text-yellow-400 text-sm"></i>
+      </div>
+      <div>
+        <span class="font-black text-white text-sm">GameQuest</span>
+        <span class="text-slate-500 text-xs ml-2">Stock Check v2</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="showTab('analysis')" id="tab-analysis" class="tab-btn tab-active">
+        <i class="fas fa-magnifying-glass-chart mr-1"></i> Análisis
+      </button>
+      <button onclick="showTab('staples')"  id="tab-staples"  class="tab-btn tab-inactive">
+        <i class="fas fa-star mr-1"></i> Staples
+      </button>
+      <button onclick="doLogout()" class="tab-btn tab-inactive ml-4">
+        <i class="fas fa-sign-out-alt"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── TAB: ANÁLISIS ────────────────────────────────────────────────── -->
+  <div id="panel-analysis" class="flex-1 p-6 space-y-6">
+
+    <!-- Upload zone -->
+    <div class="glass rounded-2xl p-6">
+      <div class="flex flex-col md:flex-row gap-4 items-center">
+        <div id="drop-zone"
+          onclick="document.getElementById('csv-input').click()"
+          class="flex-1 border-2 border-dashed border-slate-700 hover:border-yellow-500
+                 rounded-xl p-6 text-center cursor-pointer transition-all group">
+          <i class="fas fa-file-csv text-2xl text-slate-600 group-hover:text-yellow-400 mb-2"></i>
+          <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Subir CSV Manabox</p>
+          <p id="csv-filename" class="text-[10px] text-slate-600 mt-1">Ningún archivo seleccionado</p>
+          <input type="file" id="csv-input" class="hidden" accept=".csv" onchange="onFileSelected()">
+        </div>
+        <button id="btn-analyze" onclick="runAnalysis()" disabled
+          class="px-8 py-4 bg-yellow-500/20 text-yellow-600 font-black uppercase tracking-wider
+                 text-xs rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed
+                 hover:bg-yellow-500 hover:text-slate-900 border border-yellow-500/30">
+          <i class="fas fa-bolt mr-2"></i> ANALIZAR
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary cards (hidden until analysis) -->
+    <div id="summary-row" class="hidden grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total Cartas</p>
+        <p id="s-total" class="text-2xl font-black text-white mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-red-500">
+        <p class="text-[10px] text-red-400 uppercase tracking-wider">⚠ Peligro</p>
+        <p id="s-danger" class="text-2xl font-black text-red-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-amber-400">
+        <p class="text-[10px] text-amber-400 uppercase tracking-wider">⚡ Alertas</p>
+        <p id="s-warning" class="text-2xl font-black text-amber-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4 border-l-2 border-green-500">
+        <p class="text-[10px] text-green-400 uppercase tracking-wider">✓ OK</p>
+        <p id="s-ok" class="text-2xl font-black text-green-400 mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total USD</p>
+        <p id="s-usd" class="text-2xl font-black text-white mt-1">—</p>
+      </div>
+      <div class="glass rounded-xl p-4">
+        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total CLP (Cash)</p>
+        <p id="s-clp" class="text-2xl font-black text-yellow-400 mt-1">—</p>
+      </div>
+    </div>
+
+    <!-- Filtros + acciones -->
+    <div id="filter-row" class="hidden glass rounded-xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="setFilter('all')"     id="f-all"     class="tab-btn tab-active text-[10px] py-1 px-3">Todo</button>
+        <button onclick="setFilter('danger')"  id="f-danger"  class="tab-btn tab-inactive text-[10px] py-1 px-3">🔴 Peligro</button>
+        <button onclick="setFilter('warning')" id="f-warning" class="tab-btn tab-inactive text-[10px] py-1 px-3">🟡 Alerta</button>
+        <button onclick="setFilter('ok')"      id="f-ok"      class="tab-btn tab-inactive text-[10px] py-1 px-3">🟢 OK</button>
+        <button onclick="setFilter('info')"    id="f-info"    class="tab-btn tab-inactive text-[10px] py-1 px-3">🔵 Sin JS</button>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="approveFiltered(true)"  class="text-[10px] px-3 py-1 rounded-lg bg-green-900/40 text-green-400 font-bold hover:bg-green-800/60 transition">✓ Aprobar visibles</button>
+        <button onclick="approveFiltered(false)" class="text-[10px] px-3 py-1 rounded-lg bg-red-900/40 text-red-400 font-bold hover:bg-red-800/60 transition">✗ Rechazar visibles</button>
+        <button onclick="exportApproved()"       class="text-[10px] px-3 py-1 rounded-lg bg-yellow-900/40 text-yellow-400 font-bold hover:bg-yellow-800/60 transition">
+          <i class="fas fa-download mr-1"></i> Exportar aprobados
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabla resultados -->
+    <div id="results-wrap" class="hidden glass rounded-2xl overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-white/5 text-[10px] text-slate-400 uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3 w-8"><input type="checkbox" id="check-all" onchange="toggleAll(this)" class="approve-check"></th>
+              <th class="px-4 py-3 text-left sortable" onclick="sortBy('name')">Carta <i class="fas fa-sort ml-1 opacity-40"></i></th>
+              <th class="px-4 py-3 text-center">Staple</th>
+              <th class="px-4 py-3 text-center sortable" onclick="sortBy('qty_csv')">Cant. CSV <i class="fas fa-sort ml-1 opacity-40"></i></th>
+              <th class="px-4 py-3 text-right">USD Compra</th>
+              <th class="px-4 py-3 text-right">Stock JS</th>
+              <th class="px-4 py-3 text-right sortable" onclick="sortBy('stock_proyectado')">Stock Final <i class="fas fa-sort ml-1 opacity-40"></i></th>
+              <th class="px-4 py-3 text-right">Precio JS</th>
+              <th class="px-4 py-3 text-right">Precio Mín.</th>
+              <th class="px-4 py-3 text-left">Alertas</th>
+              <th class="px-4 py-3 text-center">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+      <div class="px-4 py-3 flex justify-between items-center text-xs text-slate-500 border-t border-white/5">
+        <span id="results-count">0 resultados</span>
+        <span id="approved-count" class="text-green-400 font-bold">0 aprobados</span>
+      </div>
+    </div>
+
+  </div><!-- /panel-analysis -->
+
+  <!-- ── TAB: STAPLES ─────────────────────────────────────────────────── -->
+  <div id="panel-staples" class="hidden flex-1 p-6 space-y-6">
+
+    <!-- Agregar staple -->
+    <div class="glass rounded-2xl p-6">
+      <h2 class="text-sm font-black text-white uppercase tracking-wider mb-4">
+        <i class="fas fa-plus-circle text-yellow-400 mr-2"></i>Agregar / Editar Carta
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div class="md:col-span-2">
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Nombre de la carta</label>
+          <input id="s-name" type="text" class="input-dark w-full" placeholder="Ej: Lightning Bolt">
+        </div>
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Tipo</label>
+          <select id="s-type" class="input-dark w-full">
+            <option value="true">⭐ Staple (mín. 8)</option>
+            <option value="false">📄 Normal (mín. 4)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Stock mín. personalizado</label>
+          <input id="s-minstock" type="number" class="input-dark w-full" placeholder="Dejar vacío = default">
+        </div>
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Factor margen mínimo</label>
+          <input id="s-margin" type="number" step="0.1" value="2.5" class="input-dark w-full" placeholder="2.5">
+        </div>
+        <div>
+          <button onclick="saveSingle()" class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-2 rounded-xl text-xs uppercase transition">
+            <i class="fas fa-save mr-1"></i> Guardar
+          </button>
+        </div>
+      </div>
+      <div class="mt-4 border-t border-white/5 pt-4">
+        <p class="text-[10px] text-slate-500 mb-2 uppercase tracking-wider">O importar múltiples desde texto (una carta por línea):</p>
+        <textarea id="bulk-input" class="input-dark w-full h-24 resize-none text-xs" placeholder="Lightning Bolt&#10;Force of Will&#10;Thoughtseize"></textarea>
+        <div class="flex gap-2 mt-2">
+          <select id="bulk-type" class="input-dark">
+            <option value="true">⭐ Staple</option>
+            <option value="false">📄 Normal</option>
+          </select>
+          <button onclick="saveBulk()" class="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs transition">
+            <i class="fas fa-upload mr-1"></i> Importar en lote
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista de staples -->
+    <div class="glass rounded-2xl overflow-hidden">
+      <div class="px-5 py-3 flex items-center justify-between border-b border-white/5">
+        <span class="text-sm font-black text-white">Lista de Cartas Registradas</span>
+        <input id="staple-search" type="text" class="input-dark text-xs py-1.5 w-48" placeholder="Buscar..." oninput="filterStaples()">
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-white/5 text-[10px] text-slate-400 uppercase tracking-wider">
+            <tr>
+              <th class="px-5 py-3 text-left">Carta</th>
+              <th class="px-5 py-3 text-center">Tipo</th>
+              <th class="px-5 py-3 text-center">Stock Mín.</th>
+              <th class="px-5 py-3 text-center">Margen</th>
+              <th class="px-5 py-3 text-center">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="staples-tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+      <div id="staples-empty" class="hidden p-8 text-center text-slate-600 text-sm italic">
+        No hay cartas registradas. Agrega staples arriba.
+      </div>
+    </div>
+
+  </div><!-- /panel-staples -->
+
+</div><!-- /app -->
+
+<script>
+const API   = "";
+let TOKEN   = null;
+let allCards = [];
+let staples  = [];
+let currentFilter = "all";
+let sortKey = null;
+let sortAsc = true;
+
+// ── AUTH ──────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById('login-user').value.trim();
+  const p = document.getElementById('login-pass').value.trim();
+  try {
+    const res  = await fetch(`${API}/api/auth/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username:u, password:p })
+    });
+    if (!res.ok) return Swal.fire('Error','Credenciales inválidas','error');
+    const data = await res.json();
+    TOKEN = data.access_token;
+    document.getElementById('login-view').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('app').classList.add('flex','flex-col');
+    loadStaples();
+  } catch(e) {
+    Swal.fire('Error','Sin conexión con el servidor','error');
+  }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !TOKEN) doLogin();
+});
+
+function doLogout() { TOKEN = null; location.reload(); }
+
+function authHeaders() {
+  return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+}
+
+// ── TABS ──────────────────────────────────────────────────────────────────
+function showTab(tab) {
+  ['analysis','staples'].forEach(t => {
+    document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById(`tab-${t}`);
+    btn.className = btn.className.replace(/tab-(active|inactive)/g, '');
+    btn.className += t === tab ? ' tab-active' : ' tab-inactive';
+  });
+  if (tab === 'staples') loadStaples();
+}
+
+// ── CSV ANÁLISIS ──────────────────────────────────────────────────────────
+function onFileSelected() {
+  const file = document.getElementById('csv-input').files[0];
+  document.getElementById('csv-filename').textContent = file ? file.name : 'Ningún archivo seleccionado';
+  document.getElementById('btn-analyze').disabled = !file;
+}
+
+async function runAnalysis() {
+  const file = document.getElementById('csv-input').files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+
+  Swal.fire({ title:'Analizando...', html:'Consultando Jumpseller y procesando CSV', didOpen:() => Swal.showLoading() });
+
+  try {
+    const res = await fetch(`${API}/api/admin/stock_check`, {
+      method:'POST',
+      headers:{ 'Authorization': `Bearer ${TOKEN}` },
+      body: fd
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      return Swal.fire('Error', err.detail || 'Error del servidor', 'error');
+    }
+    const data = await res.json();
+    allCards = data.cards;
+    renderSummary(data.summary);
+    renderTable(allCards);
+    document.getElementById('summary-row').classList.remove('hidden');
+    document.getElementById('filter-row').classList.remove('hidden');
+    document.getElementById('results-wrap').classList.remove('hidden');
+    Swal.close();
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+function renderSummary(s) {
+  document.getElementById('s-total').textContent   = s.total_cards.toLocaleString();
+  document.getElementById('s-danger').textContent  = s.danger_count.toLocaleString();
+  document.getElementById('s-warning').textContent = s.warning_count.toLocaleString();
+  document.getElementById('s-ok').textContent      = s.ok_count.toLocaleString();
+  document.getElementById('s-usd').textContent     = `$${s.total_usd_compra.toFixed(2)}`;
+  document.getElementById('s-clp').textContent     = `$${s.total_clp_cash.toLocaleString()}`;
+}
+
+// ── FILTRO + SORT ─────────────────────────────────────────────────────────
+function setFilter(f) {
+  currentFilter = f;
+  ['all','danger','warning','ok','info'].forEach(k => {
+    const b = document.getElementById(`f-${k}`);
+    b.className = b.className.replace(/tab-(active|inactive)/g,'') + (k===f?' tab-active':' tab-inactive');
+  });
+  renderTable(allCards);
+}
+
+function sortBy(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  renderTable(allCards);
+}
+
+function getVisible() {
+  let cards = [...allCards];
+  if (currentFilter !== 'all') cards = cards.filter(c => c.status === currentFilter);
+  if (sortKey) {
+    cards.sort((a,b) => {
+      const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
+      if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? av - bv : bv - av;
+    });
+  }
+  return cards;
+}
+
+function renderTable(source) {
+  const cards = getVisible();
+  const tbody = document.getElementById('results-tbody');
+  let html = '';
+
+  cards.forEach((c, i) => {
+    const rowClass = `row-${c.status}`;
+    const stockActual = c.stock_actual !== null && c.stock_actual !== undefined
+      ? c.stock_actual
+      : '<span class="text-slate-600 italic text-xs">N/A</span>';
+
+    const alertsHtml = c.alerts.map(a =>
+      `<span class="badge badge-${a.type}">${a.msg}</span>`
+    ).join(' ');
+
+    const stapleHtml = c.is_staple
+      ? '<span class="badge badge-staple">⭐ Staple</span>'
+      : '<span class="text-slate-600 text-xs">Normal</span>';
+
+    const priceClass = (c.price_js > 0 && c.price_js < c.min_price_venta)
+      ? 'text-red-400 font-bold' : 'text-white';
+
+    html += `
+    <tr class="glass-hover ${rowClass}" data-idx="${allCards.indexOf(c)}">
+      <td class="px-4 py-3">
+        <input type="checkbox" class="approve-check card-check"
+          ${c.approved ? 'checked' : ''}
+          onchange="toggleCard(${allCards.indexOf(c)}, this.checked)">
+      </td>
+      <td class="px-4 py-3 font-bold text-white max-w-[200px] truncate" title="${c.name}">${c.name}</td>
+      <td class="px-4 py-3 text-center">${stapleHtml}</td>
+      <td class="px-4 py-3 text-center text-slate-300">${c.qty_csv}</td>
+      <td class="px-4 py-3 text-right text-slate-400 font-mono text-xs">$${c.price_usd.toFixed(2)}</td>
+      <td class="px-4 py-3 text-right">
+        ${c.stock_actual !== null && c.stock_actual !== undefined
+          ? `<span class="${c.stock_actual < c.min_stock ? 'text-amber-400 font-bold' : 'text-slate-300'}">${c.stock_actual}</span>`
+          : '<span class="text-slate-600 text-xs italic">—</span>'}
+        <span class="text-slate-600 text-[10px] block">mín:${c.min_stock}</span>
+      </td>
+      <td class="px-4 py-3 text-right">
+        <span class="${c.stock_proyectado > c.min_stock * 3 ? 'text-red-400 font-bold' : c.stock_proyectado > c.min_stock * 2 ? 'text-amber-400' : 'text-green-400'} font-bold">
+          ${c.stock_proyectado}
+        </span>
+      </td>
+      <td class="px-4 py-3 text-right">
+        ${c.price_js > 0
+          ? `<span class="${priceClass}">$${c.price_js.toLocaleString()}</span>
+             ${c.js_id ? `<button onclick="editPrice(${c.js_id}, ${c.price_js}, '${c.name.replace(/'/g,"\\'")}', ${allCards.indexOf(c)})"
+               class="ml-1 text-[10px] text-yellow-500 hover:text-yellow-300 transition">
+               <i class="fas fa-pencil"></i></button>` : ''}`
+          : '<span class="text-slate-600 italic text-xs">—</span>'}
+      </td>
+      <td class="px-4 py-3 text-right text-xs text-slate-400">$${c.min_price_venta.toLocaleString()}</td>
+      <td class="px-4 py-3 max-w-[280px]">
+        <div class="flex flex-wrap gap-1">${alertsHtml || '<span class="text-green-500 text-xs">Sin alertas</span>'}</div>
+      </td>
+      <td class="px-4 py-3 text-center">
+        <div class="flex gap-1 justify-center">
+          <button onclick="markAsStaple('${c.name.replace(/'/g,"\\'")}')"
+            title="Marcar como Staple"
+            class="w-7 h-7 rounded-lg bg-purple-900/40 text-purple-400 hover:bg-purple-800/60 text-xs transition flex items-center justify-center">
+            <i class="fas fa-star"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  tbody.innerHTML = html || '<tr><td colspan="11" class="text-center py-8 text-slate-600 italic">No hay resultados para este filtro</td></tr>';
+  document.getElementById('results-count').textContent    = `${cards.length} resultados`;
+  document.getElementById('approved-count').textContent   = `${allCards.filter(c=>c.approved).length} aprobados`;
+}
+
+// ── ACCIONES TABLA ────────────────────────────────────────────────────────
+function toggleCard(idx, checked) {
+  allCards[idx].approved = checked;
+  document.getElementById('approved-count').textContent = `${allCards.filter(c=>c.approved).length} aprobados`;
+}
+
+function toggleAll(el) {
+  getVisible().forEach(c => {
+    const i = allCards.indexOf(c);
+    allCards[i].approved = el.checked;
+  });
+  renderTable(allCards);
+}
+
+function approveFiltered(val) {
+  getVisible().forEach(c => { allCards[allCards.indexOf(c)].approved = val; });
+  renderTable(allCards);
+}
+
+async function editPrice(jsId, currentPrice, name, cardIdx) {
+  const { value: newPrice } = await Swal.fire({
+    title: `Editar precio: ${name}`,
+    input: 'number',
+    inputLabel: 'Nuevo precio en CLP',
+    inputValue: currentPrice,
+    inputAttributes: { min: 0, step: 100 },
+    showCancelButton: true,
+    confirmButtonColor: '#eab308',
+    confirmButtonText: 'Actualizar en Jumpseller',
+  });
+  if (!newPrice || parseFloat(newPrice) <= 0) return;
+
+  Swal.fire({ title:'Actualizando...', didOpen:()=>Swal.showLoading() });
+  try {
+    const res = await fetch(`${API}/api/admin/js_update_price`, {
+      method:'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ product_id: jsId, new_price: parseFloat(newPrice) })
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    allCards[cardIdx].price_js = parseFloat(newPrice);
+    // Recalcular alerta de precio
+    const c = allCards[cardIdx];
+    c.alerts = c.alerts.filter(a => !a.msg.includes('Precio JS'));
+    if (c.price_js < c.min_price_venta) {
+      c.alerts.push({ type:'danger', msg:`Precio JS $${c.price_js.toLocaleString()} aún bajo mínimo $${c.min_price_venta.toLocaleString()}` });
+      c.status = 'danger';
+    }
+    renderTable(allCards);
+    Swal.fire({ icon:'success', title:'Actualizado', timer:1500, showConfirmButton:false });
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+async function markAsStaple(name) {
+  const { isConfirmed } = await Swal.fire({
+    title: `¿Marcar como Staple?`,
+    html: `<strong>${name}</strong><br><span class="text-sm text-slate-500">Stock mínimo: 8 unidades</span>`,
+    icon: 'question', showCancelButton: true,
+    confirmButtonColor: '#7c3aed', confirmButtonText: '⭐ Sí, Staple'
+  });
+  if (!isConfirmed) return;
+  try {
+    const res = await fetch(`${API}/api/admin/staples`, {
+      method:'POST', headers: authHeaders(),
+      body: JSON.stringify({ name, is_staple: true, margin_factor: 2.5 })
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    // Actualizar localmente
+    allCards.forEach(c => { if(c.name === name) c.is_staple = true; });
+    renderTable(allCards);
+    Swal.fire({ icon:'success', title:'Staple registrado', timer:1200, showConfirmButton:false });
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+function exportApproved() {
+  const approved = allCards.filter(c => c.approved);
+  if (!approved.length) return Swal.fire('Sin aprobados','Selecciona al menos una carta','warning');
+
+  const rows = [
+    ['Nombre','Cantidad','USD Compra','Precio Credito CLP','Precio Cash CLP','Stock Actual JS','Stock Final','Es Staple'],
+    ...approved.map(c => [
+      c.name, c.qty_csv, c.price_usd.toFixed(2),
+      c.price_credito, c.price_cash,
+      c.stock_actual ?? 'N/A', c.stock_proyectado, c.is_staple ? 'Si' : 'No'
+    ])
+  ];
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `gamequest_compra_aprobada_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ── STAPLES CRUD ──────────────────────────────────────────────────────────
+async function loadStaples() {
+  try {
+    const res  = await fetch(`${API}/api/admin/staples`, { headers: authHeaders() });
+    staples    = await res.json();
+    renderStaples(staples);
+  } catch(e) { console.error(e); }
+}
+
+function filterStaples() {
+  const q = document.getElementById('staple-search').value.toLowerCase();
+  renderStaples(staples.filter(s => s.name.toLowerCase().includes(q)));
+}
+
+function renderStaples(list) {
+  const tbody = document.getElementById('staples-tbody');
+  document.getElementById('staples-empty').classList.toggle('hidden', list.length > 0);
+  if (!list.length) { tbody.innerHTML = ''; return; }
+
+  tbody.innerHTML = list.map(s => `
+    <tr class="glass-hover border-b border-white/5">
+      <td class="px-5 py-3 font-bold text-white">${s.name}</td>
+      <td class="px-5 py-3 text-center">
+        ${s.is_staple
+          ? '<span class="badge badge-staple">⭐ Staple</span>'
+          : '<span class="badge badge-info">📄 Normal</span>'}
+      </td>
+      <td class="px-5 py-3 text-center text-slate-300">
+        ${s.min_stock_override ?? (s.is_staple ? 8 : 4)}
+        ${s.min_stock_override ? '<span class="text-yellow-500 text-[10px] ml-1">(custom)</span>' : ''}
+      </td>
+      <td class="px-5 py-3 text-center text-slate-300">×${s.margin_factor}</td>
+      <td class="px-5 py-3 text-center">
+        <button onclick="editStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}', ${s.is_staple}, ${s.min_stock_override ?? 'null'}, ${s.margin_factor})"
+          class="w-7 h-7 rounded-lg bg-yellow-900/30 text-yellow-400 hover:bg-yellow-800/50 text-xs transition mr-1">
+          <i class="fas fa-pencil"></i>
+        </button>
+        <button onclick="deleteStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}')"
+          class="w-7 h-7 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-800/50 text-xs transition">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+async function saveSingle() {
+  const name      = document.getElementById('s-name').value.trim();
+  const is_staple = document.getElementById('s-type').value === 'true';
+  const minStock  = document.getElementById('s-minstock').value;
+  const margin    = parseFloat(document.getElementById('s-margin').value) || 2.5;
+  if (!name) return Swal.fire('Falta nombre','Escribe el nombre de la carta','warning');
+  await upsertStaple({ name, is_staple, min_stock_override: minStock ? parseInt(minStock) : null, margin_factor: margin });
+  document.getElementById('s-name').value = '';
+}
+
+async function saveBulk() {
+  const lines    = document.getElementById('bulk-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  const isStaple = document.getElementById('bulk-type').value === 'true';
+  if (!lines.length) return Swal.fire('Sin cartas','Escribe al menos una carta','warning');
+
+  Swal.fire({ title:`Guardando ${lines.length} cartas...`, didOpen:()=>Swal.showLoading() });
+  let ok = 0;
+  for (const name of lines) {
+    const res = await fetch(`${API}/api/admin/staples`, {
+      method:'POST', headers: authHeaders(),
+      body: JSON.stringify({ name, is_staple: isStaple, margin_factor: 2.5 })
+    });
+    if (res.ok) ok++;
+  }
+  document.getElementById('bulk-input').value = '';
+  await loadStaples();
+  Swal.fire({ icon:'success', title:`${ok}/${lines.length} guardadas`, timer:1500, showConfirmButton:false });
+}
+
+async function upsertStaple(payload) {
+  try {
+    const res = await fetch(`${API}/api/admin/staples`, {
+      method:'POST', headers: authHeaders(), body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    await loadStaples();
+    Swal.fire({ icon:'success', title:'Guardado', timer:1000, showConfirmButton:false });
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+function editStaple(id, name, isStaple, minStock, margin) {
+  document.getElementById('s-name').value    = name;
+  document.getElementById('s-type').value    = String(isStaple);
+  document.getElementById('s-minstock').value = minStock ?? '';
+  document.getElementById('s-margin').value  = margin;
+  window.scrollTo(0,0);
+  document.getElementById('s-name').focus();
+}
+
+async function deleteStaple(id, name) {
+  const { isConfirmed } = await Swal.fire({
+    title:`¿Eliminar ${name}?`, icon:'warning',
+    showCancelButton:true, confirmButtonColor:'#ef4444', confirmButtonText:'Eliminar'
+  });
+  if (!isConfirmed) return;
+  const res = await fetch(`${API}/api/admin/staples/${id}`, {
+    method:'DELETE', headers: authHeaders()
+  });
+  if (res.ok) { await loadStaples(); }
+  else Swal.fire('Error','No se pudo eliminar','error');
+}
+</script>
+</body>
+</html>

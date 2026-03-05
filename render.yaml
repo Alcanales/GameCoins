@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: gamecoins
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+      - key: STORE_TOKEN
+        sync: false
+      - key: JS_LOGIN_CODE
+        sync: false
+      - key: JS_AUTH_TOKEN
+        sync: false
+      - key: SMTP_EMAIL
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: TARGET_EMAIL
+        sync: false
+      # Moneda
+      - key: USD_TO_CLP
+        value: "1000"
+      - key: MIN_CANJE
+        value: "100"
+      - key: MIN_PURCHASE_USD
+        value: "3"
+      # Buylist factores
+      - key: BUYLIST_FACTOR_CREDITO
+        value: "500"
+      - key: BUYLIST_FACTOR_CASH
+        value: "450"
+      # Foil multipliers
+      - key: FOIL_MULTIPLIER
+        value: "1.5"
+      - key: ETCHED_MULTIPLIER
+        value: "1.3"
+      # Condition discounts
+      - key: COND_NM
+        value: "1.0"
+      - key: COND_LP
+        value: "0.85"
+      - key: COND_MP
+        value: "0.70"
+      - key: COND_HP
+        value: "0.50"
+      - key: COND_DMG
+        value: "0.25"
+      # Estaca — multiplicador para versiones especiales (Foil, Borderless, Extended Art, etc.)
+      # Se aplica sobre el precio base más barato de esa carta en el CSV.
+      - key: STAKE_MULTIPLIER
+        value: "1.5"
+      # Operación buylist
+      - key: BUYLIST_OPEN
+        value: "true"
+      - key: BUYLIST_DAILY_BUDGET_USD
+        value: "500"
+      - key: MAINTENANCE_MODE_CANJE
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.11.9"

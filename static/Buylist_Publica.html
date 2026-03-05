@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vende tus Cartas - GameQuest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f0f4f2; font-family: 'Inter', sans-serif; }
+        .pastel-card { background: white; border-radius: 24px; border: 1px solid #d1d9d4; box-shadow: 0 8px 30px rgba(0,0,0,0.05); }
+        .terms-box { background: #eef2f1; border-left: 4px solid #4a665a; }
+        .input-focus:focus { border-color: #dc2626; outline: none; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1); }
+        .price-col { transition: all 0.3s ease; }
+        .highlight-price { background: #fef9c3; border-radius: 6px; padding: 2px 8px; font-weight: 900; }
+    </style>
+</head>
+<body class="p-4 md:p-10 text-slate-800">
+    <div class="max-w-5xl mx-auto">
+
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-4xl font-black uppercase italic tracking-tighter text-slate-900">Buylist <span class="text-red-600">Quest</span></h1>
+                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Servicio de Cotización Profesional</p>
+            </div>
+            <div class="text-right text-[11px] font-bold text-slate-500">
+                <p><i class="fas fa-envelope text-red-500 mr-2"></i> contacto@gamequest.cl</p>
+            </div>
+        </div>
+
+        <!-- Banner estado buylist -->
+        <div id="closed-banner" class="hidden pastel-card p-6 mb-8 text-center border-2 border-red-200 bg-red-50">
+          <i class="fas fa-lock text-3xl text-red-400 mb-3 block"></i>
+          <h2 class="text-xl font-black text-red-700">Buylist Temporalmente Cerrada</h2>
+          <p class="text-sm text-red-500 mt-2">Vuelve pronto — estamos procesando las órdenes actuales.</p>
+        </div>
+        <div id="budget-banner" class="hidden pastel-card p-4 mb-8 text-center border-2 border-amber-200 bg-amber-50">
+          <i class="fas fa-clock text-xl text-amber-500 mr-2"></i>
+          <span class="text-sm font-bold text-amber-700">Presupuesto diario alcanzado — Buylist disponible mañana.</span>
+        </div>
+        <!-- Términos -->
+        <div class="pastel-card p-6 mb-8 terms-box">
+            <h3 class="font-bold text-slate-900 mb-4 flex items-center text-sm uppercase tracking-wider">
+                <i class="fas fa-file-contract mr-2 text-slate-700"></i>
+                Términos y Condiciones del Servicio
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-[11px] text-slate-600 leading-relaxed text-justify">
+                <div class="space-y-3">
+                    <p><strong>• Fuente de Precios:</strong> El CSV debe exportarse desde Manabox usando <strong>Card Kingdom Buylist</strong> como fuente de precios. Archivos con otras fuentes pueden generar cotizaciones incorrectas.</p>
+                    <p><strong>• Carácter de Cotización:</strong> Esta plataforma es una guía visual. No constituye una obligación de compra por la totalidad de los ítems.</p>
+                    <p><strong>• Presupuesto Mensual:</strong> Operamos con cupos limitados. Una vez cubierto el presupuesto mensual, las compras se limitarán hasta el mes siguiente.</p>
+                </div>
+                <div class="space-y-3">
+                    <p><strong>• Procesamiento:</strong> Las ofertas se revisan estrictamente por orden de llegada.</p>
+                    <p><strong>• Política de Precios:</strong> Los multiplicadores pueden variar sin previo aviso por políticas internas o eventos como Trading Days.</p>
+                    <p><strong>• Criterio NM:</strong> Se asume estado Near Mint para el cálculo base; desgastes físicos reducirán el valor final en la inspección presencial.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Factores informativos -->
+        <div class="pastel-card p-5 mb-8 flex flex-col md:flex-row gap-4 items-center justify-center">
+            <div class="flex items-center gap-3 px-6 py-3 bg-yellow-50 rounded-2xl border border-yellow-200">
+                <i class="fas fa-gem text-yellow-600 text-lg"></i>
+                <div>
+                    <p class="text-[10px] font-bold text-yellow-700 uppercase tracking-widest">Crédito QuestPoints</p>
+                    <p class="text-2xl font-black text-yellow-800">×500 <span class="text-sm font-normal">CLP/USD</span></p>
+                </div>
+            </div>
+            <div class="text-slate-300 text-2xl font-light hidden md:block">|</div>
+            <div class="flex items-center gap-3 px-6 py-3 bg-green-50 rounded-2xl border border-green-200">
+                <i class="fas fa-money-bill-wave text-green-600 text-lg"></i>
+                <div>
+                    <p class="text-[10px] font-bold text-green-700 uppercase tracking-widest">Cash / Transferencia</p>
+                    <p class="text-2xl font-black text-green-800">×450 <span class="text-sm font-normal">CLP/USD</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload CSV -->
+        <div class="pastel-card p-10 text-center mb-10">
+            <div id="drop-zone" class="border-4 border-dashed border-slate-100 rounded-3xl p-12 hover:border-red-500 cursor-pointer transition-all group" onclick="document.getElementById('csv').click()">
+                <i class="fas fa-cloud-upload-alt text-4xl text-slate-200 group-hover:text-red-500 mb-4"></i>
+                <p class="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Sube tu archivo .csv exportado de Manabox</p>
+                <input type="file" id="csv" class="hidden" accept=".csv" onchange="processFile()">
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div id="results-area" class="hidden space-y-10">
+            <div class="pastel-card p-8">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                    <h2 class="text-xl font-bold text-slate-900 uppercase tracking-tighter">Resultados del Análisis</h2>
+                    <!-- Selector de modo de precio -->
+                    <div id="price-mode-selector" class="flex gap-2">
+                        <button onclick="setPriceMode('credito')" id="btn-credito"
+                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
+                                   bg-yellow-400 text-yellow-900 shadow-md shadow-yellow-100">
+                            <i class="fas fa-gem mr-1"></i> Ver Crédito
+                        </button>
+                        <button onclick="setPriceMode('cash')" id="btn-cash"
+                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
+                                   bg-slate-100 text-slate-500 hover:bg-green-100 hover:text-green-800">
+                            <i class="fas fa-dollar-sign mr-1"></i> Ver Cash
+                        </button>
+                        <button onclick="setPriceMode('ambos')" id="btn-ambos"
+                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
+                                   bg-slate-100 text-slate-500 hover:bg-slate-200">
+                            <i class="fas fa-table mr-1"></i> Ver Ambos
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
+                            <tr>
+                                <th class="pb-4">Carta</th>
+                                <th class="pb-4 text-center">Cant.</th>
+                                <th class="pb-4 text-right text-slate-300">USD Compra</th>
+                                <th id="th-credito" class="pb-4 text-right text-yellow-600">💎 Crédito QP</th>
+                                <th id="th-cash" class="pb-4 text-right text-green-600 hidden">💵 Cash CLP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody" class="divide-y divide-slate-50"></tbody>
+                    </table>
+                </div>
+                <div class="mt-8 flex flex-col md:flex-row justify-end gap-6 items-end">
+                    <div class="text-right" id="total-credito-block">
+                        <p class="text-[10px] font-bold text-yellow-600 uppercase tracking-widest">Total Crédito QP</p>
+                        <p id="total-credito" class="text-3xl font-black text-yellow-700">$0</p>
+                    </div>
+                    <div class="text-right hidden" id="total-cash-block">
+                        <p class="text-[10px] font-bold text-green-600 uppercase tracking-widest">Total Cash CLP</p>
+                        <p id="total-cash" class="text-3xl font-black text-green-700">$0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Formulario de compromiso -->
+            <div class="pastel-card p-8 border-2 border-slate-200">
+                <h3 class="font-bold text-slate-900 mb-6 uppercase text-sm tracking-widest flex items-center">
+                    <i class="fas fa-user-check mr-3 text-red-600"></i> Identificación y Preferencia de Pago
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-2 uppercase">RUT Vendedor</label>
+                        <input type="text" id="v_rut" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm" placeholder="12.345.678-K">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-2 uppercase">Email de contacto</label>
+                        <input type="email" id="v_mail" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm" placeholder="ejemplo@correo.cl">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-widest">Preferencia de Pago</label>
+                        <select id="v_payment" onchange="onPaymentChange()" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm font-bold">
+                            <option value="" disabled selected>Selecciona una opción...</option>
+                            <option value="credito">💎 Crédito QuestPoints (Mayor valor — ×500)</option>
+                            <option value="cash">💵 Dinero en Efectivo / Transferencia (×450)</option>
+                            <option value="mixto">🔀 Combinación Crédito + Cash</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Resumen de pago -->
+                <div id="payment-summary" class="hidden mb-8 p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Resumen según preferencia</p>
+                    <div id="payment-detail" class="text-sm text-slate-700"></div>
+                </div>
+
+                <div class="flex items-start gap-3 mb-8">
+                    <input type="checkbox" id="v_terms" class="mt-1 w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <label for="v_terms" class="text-[11px] text-slate-500 leading-tight">
+                        He leído y acepto los <b>Términos y Condiciones</b> del servicio de cotización de GameQuest mencionados anteriormente. Entiendo que esta oferta es referencial y sujeta a revisión física.
+                    </label>
+                </div>
+
+                <button onclick="commitOrder()"
+                    class="w-full bg-slate-900 hover:bg-red-600 text-white font-black py-5 rounded-2xl shadow-xl uppercase tracking-[0.2em] text-xs transition-all transform active:scale-95">
+                    Confirmar y Comprometer Lista
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = "";   // mismo origen
+
+        // Verificar estado del buylist al cargar
+        (async function checkStatus() {
+          try {
+            const res  = await fetch(`${API}/api/public/buylist_status`);
+            const data = await res.json();
+            if (!data.open) {
+              document.getElementById('closed-banner').classList.remove('hidden');
+              document.getElementById('drop-zone').style.pointerEvents = 'none';
+              document.getElementById('drop-zone').style.opacity = '0.4';
+            } else if (data.budget_left <= 0) {
+              document.getElementById('budget-banner').classList.remove('hidden');
+              document.getElementById('drop-zone').style.pointerEvents = 'none';
+              document.getElementById('drop-zone').style.opacity = '0.4';
+            }
+          } catch(e) { /* silencioso */ }
+        })();
+
+ — FastAPI sirve este HTML
+        let analyzedData = [];
+        let priceMode    = "credito";  // credito | cash | ambos
+
+        // ── Procesar CSV ──────────────────────────────────────────────────────
+        async function processFile() {
+            const file = document.getElementById('csv').files[0];
+            if (!file) return;
+
+            const fd = new FormData();
+            fd.append('file', file);
+
+            Swal.fire({ title: 'Analizando Mercado...', didOpen: () => Swal.showLoading(), background: '#fff' });
+
+            try {
+                const res = await fetch(`${API}/api/public/analyze_buylist`, { method: 'POST', body: fd });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error del servidor');
+                }
+                analyzedData = await res.json();
+
+                if (analyzedData.length === 0) {
+                    return Swal.fire('Sin Resultados', 'No se encontraron cartas válidas en el CSV.', 'warning');
+                }
+
+                renderTable();
+                document.getElementById('results-area').classList.remove('hidden');
+                Swal.close();
+
+            } catch (e) {
+                Swal.fire('Error', e.message || 'Fallo al procesar archivo o conexión offline.', 'error');
+            }
+        }
+
+        // ── Renderizar tabla ──────────────────────────────────────────────────
+        function renderTable() {
+            const body       = document.getElementById('tbody');
+            const thCredito  = document.getElementById('th-credito');
+            const thCash     = document.getElementById('th-cash');
+            let totalCredito = 0;
+            let totalCash    = 0;
+            let html         = '';
+
+            analyzedData.forEach(c => {
+                const subtC = (c.price_credito || 0) * (c.qty || 1);
+                const subtH = (c.price_cash    || 0) * (c.qty || 1);
+                totalCredito += subtC;
+                totalCash    += subtH;
+
+                const creditoCell = `<td class="py-5 text-right font-black text-yellow-700 td-credito">$${subtC.toLocaleString()}</td>`;
+                const cashCell    = `<td class="py-5 text-right font-black text-green-700 td-cash ${priceMode === 'cash' ? '' : (priceMode === 'ambos' ? '' : 'hidden')}">$${subtH.toLocaleString()}</td>`;
+
+                const estacaBadge = c.is_estaca
+                    ? `<span class="badge-estaca ml-1" title="Estaca ×${c.stake_mult || 1}">estaca ×${c.stake_mult || 1}</span>`
+                    : '';
+                const foilTag = (c.foil && c.foil !== 'normal')
+                    ? `<span style="font-size:9px;color:#7c3aed;margin-left:4px;">✨ ${c.foil}</span>`
+                    : '';
+                html += `<tr class="hover:bg-slate-50 transition-colors ${c.is_estaca ? 'bg-purple-50/40' : ''}">
+                    <td class="py-5 font-bold text-slate-800">${c.name}${foilTag}${estacaBadge}</td>
+                    <td class="py-5 text-slate-500 font-medium text-center">${c.qty || 1}</td>
+                    <td class="py-5 text-right text-slate-300 text-xs font-mono">$${(c.price_usd_raw||c.price_usd||0).toFixed(2)}</td>
+                    ${creditoCell}
+                    ${cashCell}
+                </tr>`;
+            });
+
+            body.innerHTML = html;
+
+            // Totales
+            document.getElementById('total-credito').innerText = `$${totalCredito.toLocaleString()}`;
+            document.getElementById('total-cash').innerText    = `$${totalCash.toLocaleString()}`;
+
+            // Visibilidad columnas
+            const showCredito = priceMode === 'credito' || priceMode === 'ambos';
+            const showCash    = priceMode === 'cash'    || priceMode === 'ambos';
+
+            thCredito.classList.toggle('hidden', !showCredito);
+            thCash.classList.toggle('hidden', !showCash);
+
+            document.querySelectorAll('.td-credito').forEach(el => el.classList.toggle('hidden', !showCredito));
+            document.querySelectorAll('.td-cash').forEach(el    => el.classList.toggle('hidden', !showCash));
+
+            document.getElementById('total-credito-block').classList.toggle('hidden', !showCredito);
+            document.getElementById('total-cash-block').classList.toggle('hidden', !showCash);
+
+            updatePaymentSummary();
+        }
+
+        // ── Selector de modo precio ───────────────────────────────────────────
+        function setPriceMode(mode) {
+            priceMode = mode;
+            ['credito','cash','ambos'].forEach(m => {
+                const btn = document.getElementById(`btn-${m}`);
+                if (m === mode) {
+                    btn.className = btn.className.replace(/bg-slate-100 text-slate-500[^"]*/, '');
+                    if (m === 'credito') btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-yellow-400 text-yellow-900 shadow-md shadow-yellow-100';
+                    if (m === 'cash')    btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-green-400 text-green-900 shadow-md shadow-green-100';
+                    if (m === 'ambos')   btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-slate-800 text-white shadow-md';
+                } else {
+                    btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-slate-200';
+                }
+            });
+            if (analyzedData.length) renderTable();
+        }
+
+        // ── Actualizar resumen de pago ────────────────────────────────────────
+        function onPaymentChange() {
+            updatePaymentSummary();
+        }
+
+        function updatePaymentSummary() {
+            const pref = document.getElementById('v_payment').value;
+            if (!pref || !analyzedData.length) return;
+
+            let totalC = analyzedData.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
+            let totalH = analyzedData.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
+
+            const block  = document.getElementById('payment-summary');
+            const detail = document.getElementById('payment-detail');
+            block.classList.remove('hidden');
+
+            if (pref === 'credito') {
+                detail.innerHTML = `<p>Recibirás <strong class="text-yellow-700 text-lg">$${totalC.toLocaleString()} QuestPoints</strong> en crédito de tienda.</p>`;
+                block.className = block.className.replace('bg-slate-50 border-slate-200', 'bg-yellow-50 border-yellow-200');
+            } else if (pref === 'cash') {
+                detail.innerHTML = `<p>Recibirás <strong class="text-green-700 text-lg">$${totalH.toLocaleString()} CLP</strong> por transferencia bancaria.</p>`;
+                block.className = block.className.replace('bg-yellow-50 border-yellow-200', 'bg-slate-50 border-slate-200');
+            } else {
+                detail.innerHTML = `
+                    <p>Combinarás ambas modalidades:</p>
+                    <ul class="mt-2 space-y-1">
+                        <li>💎 Hasta <strong class="text-yellow-700">$${totalC.toLocaleString()} QP</strong> en crédito</li>
+                        <li>💵 O hasta <strong class="text-green-700">$${totalH.toLocaleString()} CLP</strong> en cash</li>
+                    </ul>
+                    <p class="text-xs text-slate-400 mt-2">La distribución exacta se coordina en tienda.</p>`;
+                block.className = block.className.replace('bg-yellow-50 border-yellow-200', 'bg-slate-50 border-slate-200');
+            }
+        }
+
+        // ── Confirmar y enviar ────────────────────────────────────────────────
+        async function commitOrder() {
+            const rut   = document.getElementById('v_rut').value.trim();
+            const mail  = document.getElementById('v_mail').value.trim();
+            const pay   = document.getElementById('v_payment').value;
+            const terms = document.getElementById('v_terms').checked;
+
+            if (!rut || !mail || !pay)
+                return Swal.fire('Faltan Datos', 'Completa el RUT, Email y Preferencia de Pago.', 'warning');
+            if (!terms)
+                return Swal.fire('Aceptar Términos', 'Debes aceptar los términos y condiciones para continuar.', 'info');
+            if (analyzedData.length === 0)
+                return Swal.fire('Sin Cartas', 'Carga un CSV primero.', 'warning');
+
+            const confirm = await Swal.fire({
+                title: '¿Confirmar Compromiso?',
+                text: "Tu solicitud será procesada por orden de llegada. Se enviará un email de confirmación.",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#1e293b',
+                cancelButtonText: 'Cancelar',
+                confirmButtonText: 'SÍ, CONFIRMAR'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            Swal.fire({ title: 'Enviando cotización...', didOpen: () => Swal.showLoading() });
+
+            const totalCredito = analyzedData.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
+            const totalCash    = analyzedData.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
+
+            try {
+                const res = await fetch(`${API}/api/public/commit_buylist`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rut:                rut,
+                        email:              mail,
+                        payment_preference: pay,
+                        items:              analyzedData,
+                        total_credito:      totalCredito,
+                        total_cash:         totalCash,
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error del servidor');
+                }
+
+                const data = await res.json();
+                Swal.fire({
+                    title: '¡Recibido!',
+                    html: `<p>Tu cotización <strong>#${data.order_id}</strong> fue registrada.</p>
+                           <p class="text-sm text-slate-500 mt-2">Instrucciones enviadas a <strong>${mail}</strong></p>`,
+                    icon: 'success',
+                    confirmButtonColor: '#1e293b'
+                });
+
+            } catch (e) {
+                Swal.fire('Error', e.message || 'Fallo al enviar la cotización.', 'error');
+            }
+        }
+    </script>
+</body>
+</html>

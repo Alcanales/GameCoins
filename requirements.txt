@@ -1,26 +1,27 @@
 # ==========================================
-# ÁREA 1: CORE WEB & API (El Motor del Servidor)
+# ÁREA 1: CORE WEB & API
 # ==========================================
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 gunicorn==21.2.0
 
 # ==========================================
-# ÁREA 2: BASE DE DATOS (La Memoria)
+# ÁREA 2: BASE DE DATOS
 # ==========================================
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
 
 # ==========================================
-# ÁREA 3: VALIDACIÓN Y SEGURIDAD (El Escudo)
+# ÁREA 3: VALIDACIÓN Y SEGURIDAD
 # ==========================================
 pydantic==2.5.3
 pydantic-settings>=2.1.0
 email-validator>=2.0.0
 python-dotenv==1.0.0
+python-multipart==0.0.9
 
 # ==========================================
-# ÁREA 4: INTEGRACIONES EXTERNAS (Jumpseller)
+# ÁREA 4: INTEGRACIONES EXTERNAS
 # ==========================================
 requests==2.31.0
 aiohttp==3.9.1
