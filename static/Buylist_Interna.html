@@ -715,7 +715,7 @@ async function confirmOrder(){
   btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin me-2"></i>Registrando…';
 
   try{
-    const r=await fetch(`${API}/api/public/commit_buylist`,{
+    const r=await fetch(`${API}/api/admin/commit_buylist`,{
       method:'POST',headers:ah(),
       body:JSON.stringify({email:email||`admin-${Date.now()}@gq.internal`,rut,nombre,notas,
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash,

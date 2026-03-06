@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional, List, Literal
+import re
 
 
 class LoginRequest(BaseModel):
@@ -37,10 +38,26 @@ class BuylistItem(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+# Regex RUT chileno: acepta con o sin puntos, con dígito o K verificador
+# Ejemplos válidos: 12.345.678-9  /  12345678-9  /  12.345.678-K
+_RUT_RE = re.compile(r"^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$")
+
+
 class BuylistCommitRequest(BaseModel):
     rut:                str
     email:              EmailStr
-    payment_preference: str           # credito | cash | mixto
+    payment_preference: Literal["credito", "cash", "mixto"]   # #14: solo valores válidos
     items:              List[BuylistItem]
     total_credito:      float
     total_cash:         float
+
+    @field_validator("rut")
+    @classmethod
+    def validate_rut(cls, v: str) -> str:
+        """#15: Valida formato RUT chileno. Acepta con/sin puntos separadores."""
+        cleaned = v.strip()
+        if not _RUT_RE.match(cleaned):
+            raise ValueError(
+                "RUT inválido. Formato esperado: 12.345.678-9 o 12345678-9"
+            )
+        return cleaned.upper()   # normaliza K verificador a mayúscula

@@ -71,6 +71,18 @@ async def _background_cache_refresh():
             await _fetch_js_stock_cached(force=True)
         except Exception as e:
             logger.warning(f"[PREFETCH] Error en background refresh: {e}")
+        # ── Limpiar _rate_store: eliminar buckets vacíos o con entradas expiradas
+        # Evita memory leak con IPs rotativas en producción (bots, móviles, etc.)
+        try:
+            cutoff = time.monotonic() - 3600   # ventana máxima usada (1 hora)
+            stale  = [k for k, dq in list(_rate_store.items())
+                      if not dq or dq[-1] < cutoff]
+            for k in stale:
+                del _rate_store[k]
+            if stale:
+                logger.debug(f"[RATE] Limpiadas {len(stale)} entradas antiguas de _rate_store")
+        except Exception as e:
+            logger.warning(f"[RATE] Error en limpieza _rate_store: {e}")
 
 
 @asynccontextmanager
@@ -93,9 +105,15 @@ app = FastAPI(title="GameCoins API", version="5.2", lifespan=lifespan,
 app.add_middleware(GZipMiddleware, minimum_size=500)   # comprime JSON ≥500 bytes (~60-80% ahorro)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "https://gamequest.cl",
+        "https://www.gamequest.cl",
+        "https://gamecoins.onrender.com",   # dominio Render del propio backend
+        "http://localhost:10000",            # desarrollo local
+        "http://localhost:8000",
+    ],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Store-Token"],
 )
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -164,307 +182,6 @@ def _get_catalog_map(db) -> dict:
 def _invalidate_catalog_cache():
     global _catalog_cache_ts
     _catalog_cache_ts = 0.0
-
-# ── Scryfall Bulk Data enrichment ─────────────────────────────────────────────
-# Globals de progreso (en RAM — no persisten entre restarts)
-_enrich_running:   bool   = False
-_enrich_total:     int    = 0
-_enrich_done:      int    = 0
-_enrich_errors:    int    = 0
-_enrich_skipped:   int    = 0
-_enrich_last_card: str    = ""
-_enrich_phase:     str    = ""   # "download" | "parse" | "upsert" | "done"
-_enrich_bytes:     int    = 0    # bytes descargados hasta ahora
-_enrich_task:      object = None
-
-_SKIP_LAYOUTS = {"token", "emblem", "double_faced_token", "art_series",
-                 "planar", "scheme", "vanguard"}
-
-
-async def _do_bulk_enrich():
-    """
-    Enriquece card_catalog.scryfall_ids con una sola descarga masiva de Scryfall.
-
-    Flujo:
-      1. GET https://api.scryfall.com/bulk-data → obtener download_uri de "default_cards"
-      2. Descargar el JSON (~100MB) en streaming con aiohttp, parsear con ijson
-         → nunca se cargan los 100MB en RAM; se extrae solo lo necesario
-      3. Filtrar: excluir MTGO, oversized, tokens, emblems
-      4. Agrupar por _canonical(name) → dict {canonical: [sf_entries]}
-      5. Upsert en card_catalog en una sola transacción
-      6. Reconstruir _scryfall_map en RAM
-
-    RAM máxima: ~20MB (solo los 8 campos extraídos por carta, ~85k entradas × 200 bytes)
-    Tiempo estimado: ~50s total (vs ~9 min del approach carta-por-carta)
-    """
-    global _enrich_running, _enrich_total, _enrich_done, _enrich_errors
-    global _enrich_skipped, _enrich_last_card, _enrich_phase, _enrich_bytes
-
-    _enrich_running = True
-    _enrich_done = _enrich_errors = _enrich_skipped = _enrich_bytes = 0
-    _enrich_last_card = ""
-    _enrich_phase = "init"
-
-    BULK_INDEX  = "https://api.scryfall.com/bulk-data"
-    UA_HEADERS  = {"User-Agent": "GameQuestBuylist/1.0 (contacto@gamequest.cl)"}
-    CHUNK_SIZE  = 64 * 1024   # 64KB por chunk de lectura
-
-    db = SessionLocal()
-    try:
-        import ijson
-
-        async with aiohttp.ClientSession(
-            headers=UA_HEADERS,
-            timeout=aiohttp.ClientTimeout(total=300)   # 5 min — el JSON es grande
-        ) as session:
-
-            # ── Fase 1: obtener download_uri de default_cards ─────────────────
-            _enrich_phase = "index"
-            logger.info("[BULK_ENRICH] Obteniendo índice de bulk-data de Scryfall…")
-            async with session.get(BULK_INDEX) as resp:
-                if resp.status != 200:
-                    raise RuntimeError(f"bulk-data index HTTP {resp.status}")
-                index_data = await resp.json()
-
-            download_uri = None
-            for obj in index_data.get("data", []):
-                if obj.get("type") == "default_cards":
-                    download_uri = obj["download_uri"]
-                    size_mb = obj.get("size", 0) / 1024 / 1024
-                    logger.info(f"[BULK_ENRICH] download_uri obtenido — {size_mb:.0f} MB aprox")
-                    break
-
-            if not download_uri:
-                raise RuntimeError("No se encontró 'default_cards' en el índice de Scryfall")
-
-            # ── Fase 2: descarga streaming + parsing ijson ────────────────────
-            _enrich_phase = "download"
-            logger.info(f"[BULK_ENRICH] Descargando {download_uri}")
-
-            # sf_index: {canonical_name: [sf_entry_dict, ...]}
-            sf_index: dict[str, list] = {}
-
-            async with session.get(download_uri) as dl_resp:
-                if dl_resp.status != 200:
-                    raise RuntimeError(f"Descarga HTTP {dl_resp.status}")
-
-                # Buffer que iremos llenando chunk por chunk para alimentar a ijson
-                buf = bytearray()
-                parser = ijson.items_coro(bytearray(), "item", use_float=True)
-
-                # ijson.items_coro acepta bytes y emite objetos Python de forma incremental
-                # Alternativa más simple: acumular todo (arriesga OOM en free tier)
-                # Usamos sendfile-style: chunks → parser → emit objects
-
-                total_cards_parsed = 0
-                _enrich_phase = "parse"
-
-                async for chunk in dl_resp.content.iter_chunked(CHUNK_SIZE):
-                    if not _enrich_running:
-                        break
-                    _enrich_bytes += len(chunk)
-                    try:
-                        parser.send(chunk)
-                    except StopIteration:
-                        break
-                    except ijson.common.IncompleteJSONError:
-                        pass   # chunk incompleto — normal, esperar el siguiente
-
-                # Para ijson prefabricado que no soporta coro fácilmente,
-                # usamos el approach de pipe sync wrapped en executor
-                # ── APPROACH ROBUSTO: descargar completo en memoria por partes ──
-                # En free tier 512MB: 100MB JSON + ~20MB procesado = ~120MB → cabe
-                # Se descarga en chunks para poder trackear progreso
-                pass
-
-            # Re-hacer con approach pipe más compatible ──────────────────────
-            # ijson puede no soportar coro en todas las versiones
-            # Usamos: descargar a buffer, luego parsear sync en executor
-
-            logger.info(f"[BULK_ENRICH] Descargando en buffer ({_enrich_bytes/1024/1024:.1f} MB)…")
-
-            # Reset y segunda descarga correcta
-            _enrich_bytes = 0
-            _enrich_phase = "download"
-            full_content = bytearray()
-
-            async with session.get(download_uri) as dl_resp:
-                async for chunk in dl_resp.content.iter_chunked(CHUNK_SIZE):
-                    if not _enrich_running:
-                        raise asyncio.CancelledError()
-                    full_content.extend(chunk)
-                    _enrich_bytes += len(chunk)
-
-            logger.info(f"[BULK_ENRICH] Descarga completa: {_enrich_bytes/1024/1024:.1f} MB")
-
-            # ── Parsear en executor (sync, sin bloquear el event loop) ────────
-            _enrich_phase = "parse"
-
-            def _parse_bulk(raw_bytes: bytes) -> dict[str, list]:
-                """Parsing síncrono en un thread del executor para no bloquear asyncio."""
-                import ijson, io
-                result: dict[str, list] = {}
-                n = 0
-                for card in ijson.items(io.BytesIO(raw_bytes), "item", use_float=True):
-                    # Filtros de exclusión
-                    if card.get("digital"):         continue
-                    if card.get("oversized"):        continue
-                    if card.get("layout") in _SKIP_LAYOUTS: continue
-                    # Excluir idiomas que no sean inglés (excepto sets solo en otro idioma)
-                    if card.get("lang") not in ("en", "es", "pt"):  continue
-
-                    name = card.get("name", "")
-                    if not name:  continue
-
-                    canon = _canonical(name)
-                    if not canon: continue
-
-                    entry = {
-                        "scryfall_id":      card["id"],
-                        "set_code":         card.get("set", "").upper(),
-                        "set_name":         card.get("set_name", ""),
-                        "collector_number": card.get("collector_number", ""),
-                        "lang":             card.get("lang", "en"),
-                        "finishes":         list(card.get("finishes", [])),
-                    }
-                    if canon not in result:
-                        result[canon] = []
-                    result[canon].append(entry)
-                    n += 1
-                return result
-
-            loop = asyncio.get_event_loop()
-            sf_index = await loop.run_in_executor(None, _parse_bulk, bytes(full_content))
-            del full_content   # liberar RAM inmediatamente
-            logger.info(f"[BULK_ENRICH] Parseado: {len(sf_index)} nombres únicos en Scryfall")
-
-        # ── Fase 3: upsert en card_catalog ────────────────────────────────────
-        _enrich_phase = "upsert"
-        from .models import CardCatalog
-
-        cards = db.query(CardCatalog).all()
-        _enrich_total = len(cards)
-        matched = unmatched = 0
-
-        for card in cards:
-            if not _enrich_running:
-                break
-            canon = card.name_normalized
-            _enrich_last_card = card.name_display
-
-            sf_entries = sf_index.get(canon)
-            if sf_entries:
-                card.scryfall_ids = sf_entries
-                matched += 1
-            else:
-                # Intentar con el name_display sin normalizar (por si acaso)
-                for sf_canon, entries in sf_index.items():
-                    if sf_canon == canon:
-                        card.scryfall_ids = entries
-                        matched += 1
-                        break
-                else:
-                    _enrich_skipped += 1
-                    unmatched += 1
-
-            _enrich_done += 1
-
-        db.commit()
-        _invalidate_catalog_cache()
-        _get_catalog_map(db)   # reconstruye _scryfall_map en RAM
-
-        _enrich_phase = "done"
-        logger.info(
-            f"[BULK_ENRICH] ✅ Completado: {matched} cartas enriquecidas, "
-            f"{unmatched} sin match en Scryfall, "
-            f"{len(_scryfall_map)} UUIDs en índice RAM"
-        )
-
-    except asyncio.CancelledError:
-        logger.info("[BULK_ENRICH] Cancelado")
-        try: db.commit()
-        except: db.rollback()
-    except Exception as e:
-        logger.error(f"[BULK_ENRICH] Error fatal: {e}", exc_info=True)
-        _enrich_errors += 1
-        try: db.rollback()
-        except: pass
-    finally:
-        _enrich_running = False
-        db.close()
-
-
-@app.post("/api/admin/catalog/enrich_scryfall", dependencies=[Depends(verify_admin)])
-async def start_enrich_scryfall(only_empty: bool = True):
-    """
-    Arranca el enriquecimiento masivo de Scryfall en background.
-
-    Descarga el dataset completo de Scryfall (default_cards.json, ~100MB) en streaming,
-    parsea con ijson sin cargar todo en RAM (~20MB de RAM efectiva), y hace upsert
-    de todos los scryfall_ids en card_catalog de una vez.
-
-    Tiempo estimado: ~50 segundos (vs ~9 minutos del approach carta-por-carta).
-    El servidor sigue disponible durante el proceso.
-    Monitorear con GET /api/admin/catalog/enrich_status
-    """
-    global _enrich_running, _enrich_task
-
-    if _enrich_running:
-        return {
-            "status":  "already_running",
-            "phase":   _enrich_phase,
-            "done":    _enrich_done,
-            "total":   _enrich_total,
-            "pct":     round(100 * _enrich_done / max(_enrich_total, 1)),
-            "mb_down": round(_enrich_bytes / 1024 / 1024, 1),
-        }
-
-    _enrich_task = asyncio.create_task(_do_bulk_enrich())
-    return {
-        "status":  "started",
-        "message": "Descargando bulk data de Scryfall (~100MB). "
-                   "Usa GET /api/admin/catalog/enrich_status para monitorear.",
-    }
-
-
-@app.get("/api/admin/catalog/enrich_status", dependencies=[Depends(verify_admin)])
-def enrich_status():
-    """Polling del estado del enriquecimiento."""
-    pct = round(100 * _enrich_done / max(_enrich_total, 1)) if _enrich_total > 0 else 0
-    phase_label = {
-        "init":     "Iniciando…",
-        "index":    "Consultando índice Scryfall…",
-        "download": f"Descargando bulk data… {_enrich_bytes//1024//1024} MB",
-        "parse":    "Parseando JSON en background…",
-        "upsert":   f"Guardando en BD… {_enrich_done}/{_enrich_total}",
-        "done":     "Completado",
-    }.get(_enrich_phase, _enrich_phase)
-    return {
-        "running":     _enrich_running,
-        "phase":       _enrich_phase,
-        "phase_label": phase_label,
-        "done":        _enrich_done,
-        "total":       _enrich_total,
-        "errors":      _enrich_errors,
-        "skipped":     _enrich_skipped,
-        "pct":         pct,
-        "last_card":   _enrich_last_card,
-        "mb_downloaded": round(_enrich_bytes / 1024 / 1024, 1),
-        "scryfall_map_size": len(_scryfall_map),
-    }
-
-
-@app.post("/api/admin/catalog/enrich_cancel", dependencies=[Depends(verify_admin)])
-async def cancel_enrich():
-    """Detiene el enriquecimiento en curso."""
-    global _enrich_running, _enrich_task
-    if not _enrich_running:
-        return {"status": "not_running"}
-    _enrich_running = False
-    if _enrich_task and not _enrich_task.done():
-        _enrich_task.cancel()
-    return {"status": "cancelling", "done": _enrich_done, "total": _enrich_total}
-
 
 def _resolve_stock(canonical: str, js_stock: dict) -> dict:
     """
@@ -1013,7 +730,13 @@ async def analyze_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada. Vuelve pronto.")
 
-    ip = (request.client.host if request and request.client else "unknown")
+    # IP real del cliente: Render/Cloudflare envía la IP original en X-Forwarded-For.
+    # Sin esto, todos los usuarios comparten la IP del proxy y el rate limit
+    # bloquearía a todo el mundo cuando uno solo alcance el límite.
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request and request.client else "unknown")
+    )
     if not _rate_limit(f"analyze:{ip}", max_calls=20, window_sec=3600):
         raise HTTPException(429, "Demasiados análisis. Espera un momento e inténtalo de nuevo.")
 
@@ -1064,7 +787,7 @@ async def analyze_buylist(
             continue
 
         raw_usd  = float(pr_raw) * (1.10 if cur == "EUR" else 1.0)
-        qty      = int(qty_raw or 1)
+        qty      = max(1, int(qty_raw or 1))   # nunca negativo ni cero
         foil_raw = str(fo)
         cond_r   = str(cond_raw)
         version  = str(ve)
@@ -1126,7 +849,6 @@ async def analyze_buylist(
             "stake_mult":     settings.STAKE_MULTIPLIER if is_estaca_card else 1.0,
             "price_credito":  p_cred,
             "price_cash":     int(adjusted_price * fcash),
-            "price_normal":   p_cred,
             "tier":           tier_pub,
             "stock_actual":   stock_pub,
             "buying_status":  buying_status,
@@ -1152,8 +874,11 @@ async def commit_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada.")
 
-    # Rate limiting por IP
-    ip = request.client.host if request.client else "unknown"
+    # Rate limiting por IP real (ver nota en analyze_buylist sobre X-Forwarded-For)
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
     if not _rate_limit(f"buylist:{ip}", max_calls=3, window_sec=3600):
         raise HTTPException(429, "Demasiadas solicitudes. Intenta en 1 hora.")
 
@@ -1199,6 +924,74 @@ async def commit_buylist(
         "status":   "ok",
         "order_id": order.id,
         "message":  f"Cotización #{order.id} recibida. Enviaremos un resumen a {req.email}.",
+    }
+
+
+@app.post("/api/admin/commit_buylist", dependencies=[Depends(verify_admin)])
+async def admin_commit_buylist(
+    req: BuylistCommitRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Versión interna de commit_buylist para uso del operador en Buylist_Interna.
+
+    Diferencias respecto al endpoint público:
+      - Requiere token de admin (Bearer) → no accesible desde el exterior sin credenciales.
+      - Sin rate limit: el operador puede registrar N órdenes seguidas (feria, evento, etc.)
+        sin ser bloqueado por el límite de 3/hora del endpoint público.
+      - No verifica BUYLIST_OPEN: el operador puede registrar aunque la buylist esté cerrada.
+      - Misma lógica de BD y emails que el público.
+    """
+    # Verificar modalidad de pago permitida (igual que público)
+    if not settings.CASH_ENABLED and req.payment_preference in ("cash", "mixto"):
+        raise HTTPException(400,
+            "Por el momento solo estamos recibiendo cartas por QuestPoints.")
+
+    from .models import BuylistOrder
+    items_dict = [it.model_dump() for it in req.items]
+
+    order = BuylistOrder(
+        rut                = req.rut,
+        email              = req.email.lower(),
+        payment_preference = req.payment_preference,
+        items              = items_dict,
+        total_credito      = Decimal(str(req.total_credito)),
+        total_cash         = Decimal(str(req.total_cash)),
+        status             = "pending",
+    )
+    db.add(order)
+    db.commit()
+
+    # Enviar emails solo si hay un email real (no el placeholder interno)
+    if req.email and "@gq.internal" not in req.email:
+        background_tasks.add_task(
+            email_service.send_public_buylist_both,
+            vendor_email  = req.email,
+            rut           = req.rut,
+            payment_pref  = req.payment_preference,
+            items         = items_dict,
+            total_credito = req.total_credito,
+            total_cash    = req.total_cash,
+            order_id      = order.id,
+        )
+    else:
+        # Sin email del vendedor: solo notificar a la tienda
+        background_tasks.add_task(
+            email_service.send_public_buylist_store,
+            vendor_email  = req.email or "sin-email@gq.internal",
+            rut           = req.rut,
+            payment_pref  = req.payment_preference,
+            items         = items_dict,
+            total_credito = req.total_credito,
+            total_cash    = req.total_cash,
+            order_id      = order.id,
+        )
+
+    return {
+        "status":   "ok",
+        "order_id": order.id,
+        "message":  f"Orden interna #{order.id} registrada.",
     }
 
 
@@ -2069,11 +1862,16 @@ async def stock_check(
                            "msg": f"Precio JS ${price_js:,.0f} bajo mínimo recomendado ${min_price_venta:,.0f}"})
             status = "danger"
 
-        if not is_muy_alta and stock_actual is not None and stock_actual < min_stock:
-            alerts.append({"type": "warning",
-                           "msg": f"Stock actual ({stock_actual}) bajo mínimo ({min_stock})"})
-            if status == "ok":
-                status = "warning"
+        # ── Cupo disponible (semántica max_stock: compramos hasta llegar al objetivo) ───
+        # min_stock aquí es el MÁXIMO deseado (misma semántica que analyze_buylist).
+        # Si stock_actual < min_stock → hay cupo, podríamos comprar más.
+        # Es info, no warning: no penaliza el `approved` de la carta.
+        if not is_muy_alta and stock_actual is not None:
+            cupo_sc = max(0, min_stock - stock_actual)
+            if cupo_sc > 0:
+                alerts.append({"type": "info",
+                               "msg": f"Cupo disponible: {cupo_sc} u. "
+                                      f"(stock {stock_actual}/{min_stock} objetivo)"})
 
         total_compra += raw_usd * qty
 
