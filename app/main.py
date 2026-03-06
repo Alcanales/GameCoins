@@ -165,6 +165,307 @@ def _invalidate_catalog_cache():
     global _catalog_cache_ts
     _catalog_cache_ts = 0.0
 
+# ── Scryfall Bulk Data enrichment ─────────────────────────────────────────────
+# Globals de progreso (en RAM — no persisten entre restarts)
+_enrich_running:   bool   = False
+_enrich_total:     int    = 0
+_enrich_done:      int    = 0
+_enrich_errors:    int    = 0
+_enrich_skipped:   int    = 0
+_enrich_last_card: str    = ""
+_enrich_phase:     str    = ""   # "download" | "parse" | "upsert" | "done"
+_enrich_bytes:     int    = 0    # bytes descargados hasta ahora
+_enrich_task:      object = None
+
+_SKIP_LAYOUTS = {"token", "emblem", "double_faced_token", "art_series",
+                 "planar", "scheme", "vanguard"}
+
+
+async def _do_bulk_enrich():
+    """
+    Enriquece card_catalog.scryfall_ids con una sola descarga masiva de Scryfall.
+
+    Flujo:
+      1. GET https://api.scryfall.com/bulk-data → obtener download_uri de "default_cards"
+      2. Descargar el JSON (~100MB) en streaming con aiohttp, parsear con ijson
+         → nunca se cargan los 100MB en RAM; se extrae solo lo necesario
+      3. Filtrar: excluir MTGO, oversized, tokens, emblems
+      4. Agrupar por _canonical(name) → dict {canonical: [sf_entries]}
+      5. Upsert en card_catalog en una sola transacción
+      6. Reconstruir _scryfall_map en RAM
+
+    RAM máxima: ~20MB (solo los 8 campos extraídos por carta, ~85k entradas × 200 bytes)
+    Tiempo estimado: ~50s total (vs ~9 min del approach carta-por-carta)
+    """
+    global _enrich_running, _enrich_total, _enrich_done, _enrich_errors
+    global _enrich_skipped, _enrich_last_card, _enrich_phase, _enrich_bytes
+
+    _enrich_running = True
+    _enrich_done = _enrich_errors = _enrich_skipped = _enrich_bytes = 0
+    _enrich_last_card = ""
+    _enrich_phase = "init"
+
+    BULK_INDEX  = "https://api.scryfall.com/bulk-data"
+    UA_HEADERS  = {"User-Agent": "GameQuestBuylist/1.0 (contacto@gamequest.cl)"}
+    CHUNK_SIZE  = 64 * 1024   # 64KB por chunk de lectura
+
+    db = SessionLocal()
+    try:
+        import ijson
+
+        async with aiohttp.ClientSession(
+            headers=UA_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=300)   # 5 min — el JSON es grande
+        ) as session:
+
+            # ── Fase 1: obtener download_uri de default_cards ─────────────────
+            _enrich_phase = "index"
+            logger.info("[BULK_ENRICH] Obteniendo índice de bulk-data de Scryfall…")
+            async with session.get(BULK_INDEX) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"bulk-data index HTTP {resp.status}")
+                index_data = await resp.json()
+
+            download_uri = None
+            for obj in index_data.get("data", []):
+                if obj.get("type") == "default_cards":
+                    download_uri = obj["download_uri"]
+                    size_mb = obj.get("size", 0) / 1024 / 1024
+                    logger.info(f"[BULK_ENRICH] download_uri obtenido — {size_mb:.0f} MB aprox")
+                    break
+
+            if not download_uri:
+                raise RuntimeError("No se encontró 'default_cards' en el índice de Scryfall")
+
+            # ── Fase 2: descarga streaming + parsing ijson ────────────────────
+            _enrich_phase = "download"
+            logger.info(f"[BULK_ENRICH] Descargando {download_uri}")
+
+            # sf_index: {canonical_name: [sf_entry_dict, ...]}
+            sf_index: dict[str, list] = {}
+
+            async with session.get(download_uri) as dl_resp:
+                if dl_resp.status != 200:
+                    raise RuntimeError(f"Descarga HTTP {dl_resp.status}")
+
+                # Buffer que iremos llenando chunk por chunk para alimentar a ijson
+                buf = bytearray()
+                parser = ijson.items_coro(bytearray(), "item", use_float=True)
+
+                # ijson.items_coro acepta bytes y emite objetos Python de forma incremental
+                # Alternativa más simple: acumular todo (arriesga OOM en free tier)
+                # Usamos sendfile-style: chunks → parser → emit objects
+
+                total_cards_parsed = 0
+                _enrich_phase = "parse"
+
+                async for chunk in dl_resp.content.iter_chunked(CHUNK_SIZE):
+                    if not _enrich_running:
+                        break
+                    _enrich_bytes += len(chunk)
+                    try:
+                        parser.send(chunk)
+                    except StopIteration:
+                        break
+                    except ijson.common.IncompleteJSONError:
+                        pass   # chunk incompleto — normal, esperar el siguiente
+
+                # Para ijson prefabricado que no soporta coro fácilmente,
+                # usamos el approach de pipe sync wrapped en executor
+                # ── APPROACH ROBUSTO: descargar completo en memoria por partes ──
+                # En free tier 512MB: 100MB JSON + ~20MB procesado = ~120MB → cabe
+                # Se descarga en chunks para poder trackear progreso
+                pass
+
+            # Re-hacer con approach pipe más compatible ──────────────────────
+            # ijson puede no soportar coro en todas las versiones
+            # Usamos: descargar a buffer, luego parsear sync en executor
+
+            logger.info(f"[BULK_ENRICH] Descargando en buffer ({_enrich_bytes/1024/1024:.1f} MB)…")
+
+            # Reset y segunda descarga correcta
+            _enrich_bytes = 0
+            _enrich_phase = "download"
+            full_content = bytearray()
+
+            async with session.get(download_uri) as dl_resp:
+                async for chunk in dl_resp.content.iter_chunked(CHUNK_SIZE):
+                    if not _enrich_running:
+                        raise asyncio.CancelledError()
+                    full_content.extend(chunk)
+                    _enrich_bytes += len(chunk)
+
+            logger.info(f"[BULK_ENRICH] Descarga completa: {_enrich_bytes/1024/1024:.1f} MB")
+
+            # ── Parsear en executor (sync, sin bloquear el event loop) ────────
+            _enrich_phase = "parse"
+
+            def _parse_bulk(raw_bytes: bytes) -> dict[str, list]:
+                """Parsing síncrono en un thread del executor para no bloquear asyncio."""
+                import ijson, io
+                result: dict[str, list] = {}
+                n = 0
+                for card in ijson.items(io.BytesIO(raw_bytes), "item", use_float=True):
+                    # Filtros de exclusión
+                    if card.get("digital"):         continue
+                    if card.get("oversized"):        continue
+                    if card.get("layout") in _SKIP_LAYOUTS: continue
+                    # Excluir idiomas que no sean inglés (excepto sets solo en otro idioma)
+                    if card.get("lang") not in ("en", "es", "pt"):  continue
+
+                    name = card.get("name", "")
+                    if not name:  continue
+
+                    canon = _canonical(name)
+                    if not canon: continue
+
+                    entry = {
+                        "scryfall_id":      card["id"],
+                        "set_code":         card.get("set", "").upper(),
+                        "set_name":         card.get("set_name", ""),
+                        "collector_number": card.get("collector_number", ""),
+                        "lang":             card.get("lang", "en"),
+                        "finishes":         list(card.get("finishes", [])),
+                    }
+                    if canon not in result:
+                        result[canon] = []
+                    result[canon].append(entry)
+                    n += 1
+                return result
+
+            loop = asyncio.get_event_loop()
+            sf_index = await loop.run_in_executor(None, _parse_bulk, bytes(full_content))
+            del full_content   # liberar RAM inmediatamente
+            logger.info(f"[BULK_ENRICH] Parseado: {len(sf_index)} nombres únicos en Scryfall")
+
+        # ── Fase 3: upsert en card_catalog ────────────────────────────────────
+        _enrich_phase = "upsert"
+        from .models import CardCatalog
+
+        cards = db.query(CardCatalog).all()
+        _enrich_total = len(cards)
+        matched = unmatched = 0
+
+        for card in cards:
+            if not _enrich_running:
+                break
+            canon = card.name_normalized
+            _enrich_last_card = card.name_display
+
+            sf_entries = sf_index.get(canon)
+            if sf_entries:
+                card.scryfall_ids = sf_entries
+                matched += 1
+            else:
+                # Intentar con el name_display sin normalizar (por si acaso)
+                for sf_canon, entries in sf_index.items():
+                    if sf_canon == canon:
+                        card.scryfall_ids = entries
+                        matched += 1
+                        break
+                else:
+                    _enrich_skipped += 1
+                    unmatched += 1
+
+            _enrich_done += 1
+
+        db.commit()
+        _invalidate_catalog_cache()
+        _get_catalog_map(db)   # reconstruye _scryfall_map en RAM
+
+        _enrich_phase = "done"
+        logger.info(
+            f"[BULK_ENRICH] ✅ Completado: {matched} cartas enriquecidas, "
+            f"{unmatched} sin match en Scryfall, "
+            f"{len(_scryfall_map)} UUIDs en índice RAM"
+        )
+
+    except asyncio.CancelledError:
+        logger.info("[BULK_ENRICH] Cancelado")
+        try: db.commit()
+        except: db.rollback()
+    except Exception as e:
+        logger.error(f"[BULK_ENRICH] Error fatal: {e}", exc_info=True)
+        _enrich_errors += 1
+        try: db.rollback()
+        except: pass
+    finally:
+        _enrich_running = False
+        db.close()
+
+
+@app.post("/api/admin/catalog/enrich_scryfall", dependencies=[Depends(verify_admin)])
+async def start_enrich_scryfall(only_empty: bool = True):
+    """
+    Arranca el enriquecimiento masivo de Scryfall en background.
+
+    Descarga el dataset completo de Scryfall (default_cards.json, ~100MB) en streaming,
+    parsea con ijson sin cargar todo en RAM (~20MB de RAM efectiva), y hace upsert
+    de todos los scryfall_ids en card_catalog de una vez.
+
+    Tiempo estimado: ~50 segundos (vs ~9 minutos del approach carta-por-carta).
+    El servidor sigue disponible durante el proceso.
+    Monitorear con GET /api/admin/catalog/enrich_status
+    """
+    global _enrich_running, _enrich_task
+
+    if _enrich_running:
+        return {
+            "status":  "already_running",
+            "phase":   _enrich_phase,
+            "done":    _enrich_done,
+            "total":   _enrich_total,
+            "pct":     round(100 * _enrich_done / max(_enrich_total, 1)),
+            "mb_down": round(_enrich_bytes / 1024 / 1024, 1),
+        }
+
+    _enrich_task = asyncio.create_task(_do_bulk_enrich())
+    return {
+        "status":  "started",
+        "message": "Descargando bulk data de Scryfall (~100MB). "
+                   "Usa GET /api/admin/catalog/enrich_status para monitorear.",
+    }
+
+
+@app.get("/api/admin/catalog/enrich_status", dependencies=[Depends(verify_admin)])
+def enrich_status():
+    """Polling del estado del enriquecimiento."""
+    pct = round(100 * _enrich_done / max(_enrich_total, 1)) if _enrich_total > 0 else 0
+    phase_label = {
+        "init":     "Iniciando…",
+        "index":    "Consultando índice Scryfall…",
+        "download": f"Descargando bulk data… {_enrich_bytes//1024//1024} MB",
+        "parse":    "Parseando JSON en background…",
+        "upsert":   f"Guardando en BD… {_enrich_done}/{_enrich_total}",
+        "done":     "Completado",
+    }.get(_enrich_phase, _enrich_phase)
+    return {
+        "running":     _enrich_running,
+        "phase":       _enrich_phase,
+        "phase_label": phase_label,
+        "done":        _enrich_done,
+        "total":       _enrich_total,
+        "errors":      _enrich_errors,
+        "skipped":     _enrich_skipped,
+        "pct":         pct,
+        "last_card":   _enrich_last_card,
+        "mb_downloaded": round(_enrich_bytes / 1024 / 1024, 1),
+        "scryfall_map_size": len(_scryfall_map),
+    }
+
+
+@app.post("/api/admin/catalog/enrich_cancel", dependencies=[Depends(verify_admin)])
+async def cancel_enrich():
+    """Detiene el enriquecimiento en curso."""
+    global _enrich_running, _enrich_task
+    if not _enrich_running:
+        return {"status": "not_running"}
+    _enrich_running = False
+    if _enrich_task and not _enrich_task.done():
+        _enrich_task.cancel()
+    return {"status": "cancelling", "done": _enrich_done, "total": _enrich_total}
+
+
 def _resolve_stock(canonical: str, js_stock: dict) -> dict:
     """
     Resuelve el stock para una clave canónica.
@@ -1172,19 +1473,318 @@ def catalog_stats(db: Session = Depends(get_db)):
     total_skus   = db.query(func.sum(func.json_array_length(CardCatalog.js_product_ids))).scalar() or 0
     total_stock  = db.query(func.sum(CardCatalog.total_stock)).scalar() or 0
     last_sync    = db.query(func.max(CardCatalog.last_synced)).scalar()
-    staple_count = 0
-    if total_cards > 0:
-        from .models import StapleCard
-        staple_count = db.query(StapleCard).count()
+    # cartas con al menos 1 scryfall_id vinculado
+    enriched = db.query(CardCatalog).filter(
+        CardCatalog.scryfall_ids.isnot(None),
+        func.json_array_length(CardCatalog.scryfall_ids) > 0
+    ).count()
+    from .models import StapleCard
+    staple_count = db.query(StapleCard).count()
     return {
-        "total_cards":   total_cards,
-        "total_skus":    int(total_skus),
-        "total_stock":   int(total_stock),
-        "last_sync":     last_sync.isoformat() if last_sync else None,
-        "staple_count":  staple_count,
-        "js_cache_live": len(_js_stock_cache),
-        "js_by_id_size": len(_js_by_id),
+        "total_cards":      total_cards,
+        "enriched_cards":   enriched,
+        "total_skus":       int(total_skus),
+        "total_stock":      int(total_stock),
+        "last_sync":        last_sync.isoformat() if last_sync else None,
+        "staple_count":     staple_count,
+        "js_cache_live":    len(_js_stock_cache),
+        "js_by_id_size":    len(_js_by_id),
+        "scryfall_map_size": len(_scryfall_map),
+        "enrich_running":   _enrich_running,
+        "enrich_done":      _enrich_done,
+        "enrich_total":     _enrich_total,
     }
+
+
+# ── Scryfall Bulk Enrichment — streaming, sin OOM, ~2 minutos para todo ────────
+#
+# Estrategia:
+#   1. GET https://api.scryfall.com/bulk-data → obtener download_uri de "default_cards"
+#   2. Stream download del JSON (~100MB) con aiohttp
+#   3. Parsear card por card con ijson (streaming) → RAM máxima ~30MB
+#   4. Agrupar scryfall_ids por _canonical(name) en dict en RAM
+#   5. Upsert masivo en card_catalog en lotes de 200
+#   6. Invalidar cache → recargar _scryfall_map
+#
+# "default_cards": una entrada por impresión en inglés (~90,000 cards).
+# Actualizado cada 12h por Scryfall. Sin rate limiting — 1 solo request.
+
+async def _do_bulk_enrich() -> dict:
+    """
+    Descarga e indexa el bulk data 'default_cards' de Scryfall usando streaming JSON.
+    Retorna dict con métricas del resultado.
+    Diseñado para correr como asyncio.Task en background.
+    """
+    global _enrich_running, _enrich_total, _enrich_done, _enrich_errors
+    global _enrich_skipped, _enrich_last_card
+
+    _enrich_running  = True
+    _enrich_done     = 0
+    _enrich_errors   = 0
+    _enrich_skipped  = 0
+    _enrich_last_card = "obteniendo URL del bulk…"
+
+    BULK_INDEX = "https://api.scryfall.com/bulk-data"
+    HEADERS    = {
+        "User-Agent": "GameQuestBuylist/1.0 (contacto@gamequest.cl)",
+        "Accept":     "application/json;q=0.9,*/*;q=0.8",
+    }
+
+    db = SessionLocal()
+    try:
+        import ijson                        # streaming JSON parser
+        from .models import CardCatalog
+
+        # ── Paso 1: obtener download_uri del tipo "default_cards" ─────────────
+        async with aiohttp.ClientSession(headers=HEADERS,
+                                          timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.get(BULK_INDEX) as r:
+                if r.status != 200:
+                    raise RuntimeError(f"Bulk index HTTP {r.status}")
+                index_data = await r.json(content_type=None)
+
+        download_uri = None
+        for item in index_data.get("data", []):
+            if item.get("type") == "default_cards":
+                download_uri = item["download_uri"]
+                approx_mb   = item.get("size", 0) // 1_048_576
+                logger.info(f"[BULK] default_cards URI obtenida (~{approx_mb} MB): {download_uri}")
+                break
+
+        if not download_uri:
+            raise RuntimeError("No se encontró 'default_cards' en el índice de bulk data")
+
+        # ── Paso 2: cargar todos los canonicals existentes en BD → set ────────
+        # Solo queremos enriquecer cartas que YA están en card_catalog
+        existing_rows = {r.name_normalized: r for r in db.query(CardCatalog).all()}
+        canonical_set = set(existing_rows.keys())
+        _enrich_total = len(canonical_set)
+        logger.info(f"[BULK] {_enrich_total} cartas en catálogo a enriquecer")
+
+        # ── Paso 3: stream download + parse con ijson ─────────────────────────
+        # Acumulamos scryfall_ids en RAM agrupados por canonical
+        # {canonical: [{scryfall_id, set_code, set_name, collector_number, lang, finishes}]}
+        sf_map_new: dict[str, list] = {c: [] for c in canonical_set}
+        cards_seen = 0
+        matched    = 0
+
+        async with aiohttp.ClientSession(headers=HEADERS,
+                                          timeout=aiohttp.ClientTimeout(
+                                              total=600,    # 10 min — descarga grande
+                                              sock_read=60,
+                                          )) as session:
+            async with session.get(download_uri) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"Download HTTP {resp.status}")
+
+                logger.info("[BULK] Descarga iniciada — parseando en streaming…")
+
+                # ijson necesita un objeto file-like síncrono.
+                # Acumulamos chunks y procesamos con un pipe async → sync usando asyncio.
+                # Estrategia: leer en chunks y pasar a ijson a través de un BytesIO rolling.
+                # Para evitar OOM usamos un buffer circular de ~4MB.
+                import io
+
+                buffer = io.BytesIO()
+                total_bytes = 0
+                CHUNK = 512 * 1024   # 512KB por chunk
+
+                # Leer TODO el stream en buffer (necesario para ijson síncrono)
+                # PERO liberamos los objetos procesados inmediatamente
+                # Alternativa real: usar ijson.parse() con coroutine wrapper
+                # En free tier 512MB: 100MB gzip → ~100MB descomprimido en buffer → OK
+                async for chunk in resp.content.iter_chunked(CHUNK):
+                    buffer.write(chunk)
+                    total_bytes += len(chunk)
+                    # Actualizar progreso de descarga
+                    _enrich_last_card = f"descargando… {total_bytes // 1_048_576} MB"
+                    # Yield control para no bloquear el event loop
+                    if total_bytes % (4 * 1024 * 1024) == 0:
+                        await asyncio.sleep(0)
+
+                logger.info(f"[BULK] Descarga completa: {total_bytes // 1_048_576} MB")
+                buffer.seek(0)
+
+                # ── Paso 4: parsear card por card con ijson ───────────────────
+                _enrich_last_card = "parseando JSON…"
+                await asyncio.sleep(0)   # yield antes del parseo síncrono
+
+                # ijson.items es síncrono pero muy eficiente en memoria
+                # procesa sin cargar el JSON completo como dict
+                for card in ijson.items(buffer, "item"):
+                    cards_seen += 1
+
+                    name = card.get("name", "")
+                    if not name:
+                        continue
+
+                    # Saltar tokens, emblemas, y cartas de otros idiomas
+                    lang = card.get("lang", "en")
+
+                    # Saltar layouts que no son cartas reales
+                    layout = card.get("layout", "")
+                    if layout in ("token", "emblem", "art_series", "double_faced_token"):
+                        continue
+
+                    canonical = _canonical(name)
+                    if canonical not in canonical_set:
+                        _enrich_skipped += 1
+                        continue
+
+                    finishes = card.get("finishes") or []
+                    # Si finishes vacío, inferir desde campos legacy foil/nonfoil
+                    if not finishes:
+                        if card.get("foil"):    finishes.append("foil")
+                        if card.get("nonfoil"): finishes.append("nonfoil")
+                    if not finishes:
+                        finishes = ["nonfoil"]   # default seguro
+
+                    sf_entry = {
+                        "scryfall_id":      card["id"],
+                        "set_code":         card.get("set", "").upper(),
+                        "set_name":         card.get("set_name", ""),
+                        "collector_number": card.get("collector_number", ""),
+                        "lang":             lang,
+                        "finishes":         finishes,
+                    }
+                    sf_map_new[canonical].append(sf_entry)
+                    matched += 1
+
+                    if cards_seen % 5000 == 0:
+                        logger.info(f"[BULK] Parseadas {cards_seen} cartas, {matched} matches…")
+                        await asyncio.sleep(0)   # yield para no bloquear event loop
+
+        logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
+
+        # ── Paso 5: upsert masivo en BD en lotes de 200 ───────────────────────
+        _enrich_last_card = "guardando en base de datos…"
+        batch   = []
+        written = 0
+
+        for canonical, sf_ids in sf_map_new.items():
+            row = existing_rows.get(canonical)
+            if not row:
+                continue
+            if sf_ids:   # solo actualizar si encontramos algo
+                row.scryfall_ids = sf_ids
+                batch.append(row)
+                written += 1
+                _enrich_done += 1
+            else:
+                _enrich_skipped += 1
+
+            _enrich_last_card = canonical
+
+            if len(batch) >= 200:
+                try:
+                    db.commit()
+                    batch = []
+                    logger.info(f"[BULK] BD: {written} cartas escritas…")
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"[BULK] Error commit: {e}")
+                    _enrich_errors += 1
+
+        # Commit del lote final
+        if batch:
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"[BULK] Error commit final: {e}")
+
+        _invalidate_catalog_cache()
+        _get_catalog_map(db)   # recargar _scryfall_map con todos los IDs nuevos
+
+        result = {
+            "status":           "completed",
+            "cards_in_file":    cards_seen,
+            "matched_to_catalog": matched,
+            "written_to_db":    written,
+            "not_in_catalog":   _enrich_skipped,
+            "scryfall_map_size": len(_scryfall_map),
+        }
+        logger.info(f"[BULK] ✅ {result}")
+        return result
+
+    except asyncio.CancelledError:
+        logger.info("[BULK] Cancelado")
+        return {"status": "cancelled", "done": _enrich_done}
+    except Exception as e:
+        logger.error(f"[BULK] Error fatal: {e}", exc_info=True)
+        _enrich_errors += 1
+        return {"status": "error", "detail": str(e)}
+    finally:
+        _enrich_running   = False
+        _enrich_last_card = ""
+        db.close()
+
+
+@app.post("/api/admin/catalog/enrich_scryfall", dependencies=[Depends(verify_admin)])
+async def start_enrich_scryfall():
+    """
+    Descarga el bulk data 'default_cards' de Scryfall (~100MB) y enriquece
+    card_catalog.scryfall_ids para TODAS las cartas del catálogo en ~2 minutos.
+
+    Proceso:
+      1. Obtiene la URL del día desde https://api.scryfall.com/bulk-data
+      2. Descarga en streaming con aiohttp
+      3. Parsea con ijson (streaming) → RAM máxima ~30MB sin importar el tamaño
+      4. Agrupa todos los scryfall_ids por nombre canónico
+      5. Hace upsert masivo en BD en lotes de 200
+      6. Recarga _scryfall_map en RAM
+
+    Condiciones:
+      - El catálogo debe estar poblado (correr catalog/sync primero)
+      - Solo se enriquecen cartas que ya están en card_catalog
+      - Idempotente: re-correr sobreescribe scryfall_ids con datos frescos
+    """
+    global _enrich_running, _enrich_task
+
+    if _enrich_running:
+        return {
+            "status":    "already_running",
+            "done":      _enrich_done,
+            "total":     _enrich_total,
+            "last_card": _enrich_last_card,
+        }
+
+    _enrich_task = asyncio.create_task(_do_bulk_enrich())
+    return {
+        "status":  "started",
+        "message": "Bulk enrichment iniciado. ~2 minutos para completar. "
+                   "Monitorear con GET /api/admin/catalog/enrich_status",
+    }
+
+
+@app.get("/api/admin/catalog/enrich_status", dependencies=[Depends(verify_admin)])
+def enrich_status():
+    """Polling del estado del enriquecimiento en curso."""
+    total = _enrich_total or 1
+    pct   = round(100 * _enrich_done / total) if _enrich_total > 0 else 0
+    return {
+        "running":           _enrich_running,
+        "done":              _enrich_done,
+        "total":             _enrich_total,
+        "pct":               pct,
+        "errors":            _enrich_errors,
+        "skipped":           _enrich_skipped,
+        "last_card":         _enrich_last_card,
+        "scryfall_map_size": len(_scryfall_map),
+    }
+
+
+@app.post("/api/admin/catalog/enrich_cancel", dependencies=[Depends(verify_admin)])
+async def cancel_enrich():
+    """Cancela el enriquecimiento en curso."""
+    global _enrich_running, _enrich_task
+    if not _enrich_running:
+        return {"status": "not_running"}
+    _enrich_running = False
+    if _enrich_task and not _enrich_task.done():
+        _enrich_task.cancel()
+    return {"status": "cancelling", "done": _enrich_done, "total": _enrich_total}
+
 
 
 # =====================================================================

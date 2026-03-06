@@ -197,9 +197,94 @@
           <div class="text-[9px] text-slate-600 uppercase font-bold">Stock total</div>
         </div>
         <div class="text-center">
-          <div class="text-xs font-black text-yellow-400" id="cs-sync">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Última sync</div>
+          <div class="text-xl font-black text-yellow-400" id="cs-enriched">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Con Scryfall IDs</div>
         </div>
+        <div class="col-span-2 md:col-span-2 text-center">
+          <div class="text-xs font-black text-slate-400" id="cs-sync">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Última sync JS</div>
+        </div>
+        <div class="col-span-2 text-center">
+          <div class="text-xs font-black text-purple-300" id="cs-sfmap">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Índice Scryfall en RAM</div>
+        </div>
+      </div>
+
+      <!-- Panel de enriquecimiento Scryfall -->
+      <div id="enrich-panel" class="glass p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <i class="fas fa-wand-magic-sparkles text-purple-400 text-xs"></i>
+            </div>
+            <div>
+              <div class="text-xs font-black text-white">Poblar Scryfall IDs</div>
+              <div class="text-[9px] text-slate-600">Vincula todos los UUIDs de Scryfall a cada carta del catálogo</div>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="startEnrich(true)"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-600 text-slate-400
+                     hover:text-white hover:border-slate-400 transition">
+              <i class="fas fa-refresh mr-1"></i>Re-procesar todo
+            </button>
+            <button id="btn-enrich" onclick="startEnrich()"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+                     bg-purple-500/15 text-purple-300 border border-purple-500/30
+                     hover:bg-purple-500/25 transition">
+              <i class="fas fa-play mr-1"></i>Iniciar enriquecimiento
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de progreso (oculta cuando no corre) -->
+        <div id="enrich-progress-wrap" class="hidden">
+          <!-- Fase actual -->
+          <div class="flex items-center gap-2 mb-3 p-2 rounded-lg bg-purple-500/5 border border-purple-500/10">
+            <i class="fas fa-circle-notch spin text-purple-400 text-xs"></i>
+            <span class="text-[11px] text-purple-300 font-bold" id="enrich-phase-label">Iniciando…</span>
+          </div>
+          <!-- Progreso descarga -->
+          <div class="mb-2">
+            <div class="flex justify-between mb-1">
+              <span class="text-[9px] text-slate-600 uppercase font-bold">Descarga bulk data</span>
+              <span class="text-[10px] font-black text-slate-400" id="enrich-mb">0 MB</span>
+            </div>
+            <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="enrich-dl-bar" class="h-full bg-blue-500/60 rounded-full transition-all duration-300"
+                   style="width:0%"></div>
+            </div>
+          </div>
+          <!-- Progreso upsert -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[9px] text-slate-600 uppercase font-bold">Guardando en BD</span>
+              <span class="text-[10px] font-black text-purple-300" id="enrich-pct">0%</span>
+            </div>
+            <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div id="enrich-bar" class="h-full bg-gradient-to-r from-purple-600 to-purple-400
+                                          rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="flex items-center justify-between mt-2">
+            <span class="text-[9px] text-slate-600 font-mono" id="enrich-counts">—</span>
+            <button onclick="cancelEnrich()"
+              class="text-[9px] text-red-500 hover:text-red-400 transition font-bold">
+              <i class="fas fa-stop mr-1"></i>Detener
+            </button>
+          </div>
+        </div>
+
+        <!-- Mensaje final -->
+        <div id="enrich-done-msg" class="hidden text-[10px] text-green-400 font-bold text-center py-1">
+          <i class="fas fa-circle-check mr-1"></i>
+          <span id="enrich-done-text">Enriquecimiento completado</span>
+        </div>
+
+        <p class="text-[9px] text-slate-700 mt-3">
+          Descarga bulk data de Scryfall (~100MB, streaming). Tarda ~2 minutos.
+          El servidor sigue disponible. Requiere haber corrido <strong class="text-slate-600">Sync Catálogo</strong> primero.
+        </p>
       </div>
 
       <!-- Controles del catálogo -->
@@ -600,18 +685,129 @@ async function loadCatalogStats() {
     const r = await fetch(`${API}/api/admin/catalog/stats`, { headers: ah() });
     if (!r.ok) return;
     const d = await r.json();
-    document.getElementById('cs-cards').textContent  = d.total_cards?.toLocaleString() || '0';
-    document.getElementById('cs-skus').textContent   = d.total_skus?.toLocaleString()  || '0';
-    document.getElementById('cs-stock').textContent  = d.total_stock?.toLocaleString() || '0';
-    document.getElementById('cs-sync').textContent   = d.last_sync
+    document.getElementById('cs-cards').textContent     = d.total_cards?.toLocaleString()    || '0';
+    document.getElementById('cs-skus').textContent      = d.total_skus?.toLocaleString()     || '0';
+    document.getElementById('cs-stock').textContent     = d.total_stock?.toLocaleString()    || '0';
+    document.getElementById('cs-enriched').textContent  = d.enriched_cards?.toLocaleString() || '0';
+    document.getElementById('cs-sync').textContent      = d.last_sync
       ? new Date(d.last_sync).toLocaleString('es-CL', {dateStyle:'short',timeStyle:'short'})
       : 'Nunca';
+    document.getElementById('cs-sfmap').textContent =
+      (d.scryfall_map_size || 0).toLocaleString() + ' IDs';
+
     const badge = document.getElementById('catalog-count-badge');
     if (d.total_cards > 0) {
       badge.textContent = d.total_cards.toLocaleString();
       badge.classList.remove('hidden');
     }
+
+    // Si hay enriquecimiento corriendo, actualizar barra
+    if (d.enrich_running) {
+      updateEnrichBar(d.enrich_done, d.enrich_total, true);
+    }
   } catch(e) {}
+}
+
+// ── Enriquecimiento Scryfall ───────────────────────────────────────────────────
+let enrichPollInterval = null;
+
+async function startEnrich(reprocess = false) {
+  const verb = reprocess ? 'TODO el catálogo (re-procesar)' : 'todas las cartas del catálogo';
+  const { isConfirmed } = await Swal.fire({
+    title: '🔮 Poblar Scryfall IDs',
+    html: `<p style="font-size:13px;color:#94a3b8;margin-bottom:12px">
+      Descargará el <strong style="color:#e2e8f0">bulk data de Scryfall</strong> (~100MB) y vinculará
+      todos los UUIDs a <strong style="color:#e2e8f0">${verb}</strong>.<br><br>
+      <span style="color:#22c55e">⚡ Solo ~2 minutos — un único request a Scryfall, sin rate limiting.</span><br>
+      El servidor sigue disponible durante el proceso.
+    </p>
+    <p style="font-size:11px;color:#64748b">
+      Asegúrate de haber corrido <strong>Sync Catálogo</strong> primero.
+    </p>`,
+    confirmButtonText: 'Iniciar',
+    showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+  });
+  if (!isConfirmed) return;
+
+  try {
+    const r = await fetch(`${API}/api/admin/catalog/enrich_scryfall`,
+      { method: 'POST', headers: ah() });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error');
+
+    if (d.status === 'already_running') {
+      showToast('⚠️ Ya hay un proceso en curso', 'error');
+      startEnrichPoll();   // conectar al progreso existente
+    } else {
+      showToast('🚀 Bulk enrichment iniciado');
+      startEnrichPoll();
+    }
+  } catch(e) { showToast(`❌ ${e.message}`, 'error'); }
+}
+
+async function cancelEnrich() {
+  await fetch(`${API}/api/admin/catalog/enrich_cancel`, { method: 'POST', headers: ah() });
+  showToast('⏹ Enriquecimiento detenido');
+  stopEnrichPoll();
+}
+
+function startEnrichPoll() {
+  document.getElementById('enrich-progress-wrap').classList.remove('hidden');
+  document.getElementById('enrich-done-msg').classList.add('hidden');
+  document.getElementById('btn-enrich').disabled = true;
+  if (enrichPollInterval) clearInterval(enrichPollInterval);
+  enrichPollInterval = setInterval(pollEnrichStatus, 2000);
+}
+
+function stopEnrichPoll() {
+  if (enrichPollInterval) { clearInterval(enrichPollInterval); enrichPollInterval = null; }
+  document.getElementById('btn-enrich').disabled = false;
+}
+
+async function pollEnrichStatus() {
+  try {
+    const r = await fetch(`${API}/api/admin/catalog/enrich_status`, { headers: ah() });
+    const d = await r.json();
+
+    // Fase label
+    const phaseEl = document.getElementById('enrich-phase-label');
+    if (phaseEl) phaseEl.textContent = d.phase_label || d.phase || '…';
+
+    // MB descargados
+    const mb = d.mb_downloaded || 0;
+    const dlPct = Math.min(100, Math.round(mb / 100 * 100));
+    const mbEl = document.getElementById('enrich-mb');
+    if (mbEl) mbEl.textContent = `${mb.toFixed(1)} MB`;
+    const dlBar = document.getElementById('enrich-dl-bar');
+    if (dlBar) dlBar.style.width = `${dlPct}%`;
+
+    updateEnrichBar(d.done, d.total, d.running);
+
+    document.getElementById('enrich-counts').textContent =
+      `${d.done.toLocaleString()} / ${d.total.toLocaleString()} cartas · ` +
+      `${d.skipped} sin match · ` +
+      `${(d.scryfall_map_size||0).toLocaleString()} IDs en RAM`;
+
+    if (!d.running && enrichPollInterval) {
+      stopEnrichPoll();
+      document.getElementById('enrich-progress-wrap').classList.add('hidden');
+      const msg = document.getElementById('enrich-done-msg');
+      document.getElementById('enrich-done-text').textContent =
+        `✅ ${d.done.toLocaleString()} cartas · ${(d.scryfall_map_size||0).toLocaleString()} Scryfall IDs en índice · ${mb.toFixed(1)} MB procesados`;
+      msg.classList.remove('hidden');
+      catalogLoaded = false;
+      loadCatalog();
+    }
+  } catch(e) {}
+}
+
+function updateEnrichBar(done, total, running) {
+  const pct = total > 0 ? Math.round(100 * done / total) : 0;
+  const bar  = document.getElementById('enrich-bar');
+  const pctEl = document.getElementById('enrich-pct');
+  if (bar)   bar.style.width   = `${pct}%`;
+  if (pctEl) pctEl.textContent = `${pct}%`;
 }
 
 // ── Cargar tabla catálogo ──────────────────────────────────────────────────────
