@@ -9,44 +9,72 @@
     <style>
         body { font-family: 'Inter', system-ui, sans-serif; background-color: #f8fafc; color: #1e293b; }
         .input-clean { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; transition: all 0.2s; }
-        .input-clean:focus { border-color: #eab308; outline: none; box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.15); }
+        .input-clean:focus { border-color: #eab308; outline: none; box-shadow: 0 0 0 3px rgba(234,179,8,.15); }
         .truncate-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0,0,0,.05), 0 2px 4px -1px rgba(0,0,0,.03); }
         .spin-slow { animation: spin 2s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .tab-btn { padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:all .15s;border:1px solid transparent; }
+        .tab-on  { background:#0f172a;color:#fff; }
+        .tab-off { background:#fff;color:#64748b;border-color:#e2e8f0; }
+        .tab-off:hover { background:#f1f5f9;color:#334155; }
+        .order-row { border-left:3px solid transparent; }
+        .order-pending  { border-left-color:#f59e0b; }
+        .order-reviewed { border-left-color:#22c55e; }
+        .order-closed   { border-left-color:#94a3b8; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
-    <div id="login-view" class="flex flex-grow items-center justify-center p-4 bg-slate-50">
-        <div class="w-full max-w-sm bg-white rounded-xl card-shadow border border-slate-100 p-8">
-            <div class="text-center mb-8">
-                <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-50 text-yellow-600 mb-4"><i class="fas fa-lock"></i></div>
-                <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Acceso Bóveda</h1>
-            </div>
-            <form onsubmit="event.preventDefault(); login();" class="space-y-5">
-                <input type="text" id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
-                <input type="password" id="pass" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••">
-                <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg transition-all shadow-md transform active:scale-95">INGRESAR</button>
-            </form>
+
+<!-- LOGIN -->
+<div id="login-view" class="flex flex-grow items-center justify-center p-4 bg-slate-50">
+    <div class="w-full max-w-sm bg-white rounded-xl card-shadow border border-slate-100 p-8">
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-50 text-yellow-600 mb-4"><i class="fas fa-lock"></i></div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Acceso Bóveda</h1>
         </div>
+        <form onsubmit="event.preventDefault(); login();" class="space-y-5">
+            <input type="text" id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
+            <input type="password" id="pass" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••">
+            <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg transition-all shadow-md transform active:scale-95">INGRESAR</button>
+        </form>
+    </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard-view" class="hidden flex-col w-full max-w-[1400px] mx-auto p-4 md:p-8">
+
+    <header class="flex justify-between items-center mb-6 pb-4 border-b border-slate-200">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-slate-900 text-yellow-400 rounded flex items-center justify-center"><i class="fas fa-coins"></i></div>
+            <div><h2 class="text-lg font-bold text-slate-800">GameQuest Bóveda</h2><p class="text-xs text-slate-500">Panel de Administración</p></div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="syncUsers()" id="btn-sync" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-2"><i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span></button>
+            <button onclick="logout()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 rounded-lg text-xs font-bold transition shadow-sm">SALIR</button>
+        </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="flex gap-2 mb-6">
+        <button id="tab-qp"     onclick="showTab('qp')"     class="tab-btn tab-on"><i class="fas fa-coins mr-1.5"></i>QuestPoints</button>
+        <button id="tab-orders" onclick="showTab('orders')" class="tab-btn tab-off">
+            <i class="fas fa-inbox mr-1.5"></i>Cotizaciones
+            <span id="orders-badge" class="hidden ml-1.5 bg-amber-400 text-slate-900 text-[9px] font-black px-1.5 py-0.5 rounded-full">0</span>
+        </button>
     </div>
 
-    <div id="dashboard-view" class="hidden flex-col w-full max-w-[1400px] mx-auto p-4 md:p-8">
-        <header class="flex justify-between items-center mb-6 pb-4 border-b border-slate-200">
-            <div class="flex items-center gap-3">
-                <div class="w-8 h-8 bg-slate-900 text-yellow-400 rounded flex items-center justify-center"><i class="fas fa-coins"></i></div>
-                <div><h2 class="text-lg font-bold text-slate-800">GameQuest Bóveda</h2><p class="text-xs text-slate-500">Gestión de Puntos</p></div>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="syncUsers()" id="btn-sync" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-2"><i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span></button>
-                <button onclick="logout()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 rounded-lg text-xs font-bold transition shadow-sm">SALIR</button>
-            </div>
-        </header>
-
-        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-8 flex flex-col md:flex-row gap-4 items-center justify-between">
+    <!-- ══ TAB QuestPoints ══ -->
+    <div id="panel-qp">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Circulante Total</p><p id="stat-pts" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Clientes Totales</p><p id="stat-count" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Histórico Canjeado</p><p id="stat-redeemed" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
             <div class="relative w-full md:w-96">
                 <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400"><i class="fas fa-search"></i></div>
-                <input type="text" id="search-input" onkeyup="if(event.key === 'Enter') load()" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre o email...">
+                <input type="text" id="search-input" onkeyup="if(event.key==='Enter') load()" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre o email...">
             </div>
             <div class="flex w-full md:w-auto gap-3 items-center">
                 <select id="filter-mode" onchange="load()" class="input-clean rounded-lg py-2.5 px-3 text-sm font-bold text-slate-600 bg-slate-50 cursor-pointer">
@@ -56,120 +84,312 @@
                 <button onclick="load()" class="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm">BUSCAR</button>
             </div>
         </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Circulante Total</p><p id="stat-pts" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
-            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Clientes Totales</p><p id="stat-count" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
-            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Histórico Canjeado</p><p id="stat-redeemed" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden flex flex-col flex-grow">
+        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden">
             <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <div class="col-span-3 pl-2">Cliente</div> <div class="col-span-3">Nombre</div>
+                <div class="col-span-3 pl-2">Cliente</div><div class="col-span-3">Nombre</div>
                 <div class="col-span-2 text-center">Histórico</div>
                 <div class="col-span-2 text-center">Saldo</div>
                 <div class="col-span-2 text-center">Acciones</div>
             </div>
-            <div id="user-table" class="divide-y divide-slate-100 max-h-[600px] overflow-y-auto"></div>
-            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados</div>
+            <div id="user-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto"></div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
+                Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados
+            </div>
         </div>
     </div>
 
-    <script>
-        const API = "https://gamecoins.onrender.com";
-        let authToken = null;
+    <!-- ══ TAB Cotizaciones ══ -->
+    <div id="panel-orders" class="hidden">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div class="flex gap-2 flex-wrap">
+                <button onclick="setOrderFilter('all')"      id="of-all"      class="tab-btn tab-on">Todas</button>
+                <button onclick="setOrderFilter('pending')"  id="of-pending"  class="tab-btn tab-off">⏳ Pendientes</button>
+                <button onclick="setOrderFilter('reviewed')" id="of-reviewed" class="tab-btn tab-off">✅ Revisadas</button>
+                <button onclick="setOrderFilter('closed')"   id="of-closed"   class="tab-btn tab-off">🔒 Cerradas</button>
+            </div>
+            <button onclick="loadOrders()" class="px-5 py-2.5 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 transition">
+                <i class="fas fa-rotate-right mr-1.5"></i>Actualizar
+            </button>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden">
+            <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div class="col-span-1 text-center">#</div>
+                <div class="col-span-3">Vendedor</div>
+                <div class="col-span-1 text-center">Pago</div>
+                <div class="col-span-2 text-right">QP</div>
+                <div class="col-span-2 text-right">Cash</div>
+                <div class="col-span-1 text-center">Estado</div>
+                <div class="col-span-1 text-center">Fecha</div>
+                <div class="col-span-1 text-center">Ver</div>
+            </div>
+            <div id="orders-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto">
+                <div class="p-8 text-center text-slate-400 italic">Cargando...</div>
+            </div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
+                <span id="orders-count" class="font-bold text-slate-800">0</span> cotizaciones
+            </div>
+        </div>
+    </div>
 
-        async function login() {
-            const u = document.getElementById('user').value;
-            const p = document.getElementById('pass').value;
-            try {
-                const res = await fetch(`${API}/api/auth/login`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: u, password: p }) });
-                if(res.ok) {
-                    const data = await res.json();
-                    authToken = data.access_token;
-                    document.getElementById('login-view').classList.add('hidden');
-                    const dash = document.getElementById('dashboard-view');
-                    dash.classList.remove('hidden'); dash.classList.add('flex');
-                    load();
-                } else { Swal.fire('Error', 'Credenciales inválidas', 'error'); }
-            } catch(e) { Swal.fire('Error', 'Sin conexión', 'error'); }
+</div>
+
+<script>
+const API = "https://gamecoins.onrender.com";
+let authToken = null;
+let allOrders = [];
+let orderFilter = 'all';
+
+function authH() { return { "Authorization": `Bearer ${authToken}`, "Content-Type": "application/json" }; }
+
+async function login() {
+    const u = document.getElementById('user').value;
+    const p = document.getElementById('pass').value;
+    try {
+        const res = await fetch(`${API}/api/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,password:p}) });
+        if (res.ok) {
+            authToken = (await res.json()).access_token;
+            document.getElementById('login-view').classList.add('hidden');
+            const dash = document.getElementById('dashboard-view');
+            dash.classList.remove('hidden'); dash.classList.add('flex');
+            load(); loadOrders();
+        } else { Swal.fire('Error','Credenciales inválidas','error'); }
+    } catch(e) { Swal.fire('Error','Sin conexión','error'); }
+}
+function logout() { authToken = null; location.reload(); }
+
+function showTab(tab) {
+    ['qp','orders'].forEach(t => {
+        document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+        document.getElementById(`tab-${t}`).className = `tab-btn ${t===tab?'tab-on':'tab-off'}`;
+    });
+    if (tab === 'orders') loadOrders();
+}
+
+// ── QuestPoints ───────────────────────────────────────────────────────────────
+async function load() {
+    if (!authToken) return;
+    const search = document.getElementById('search-input').value;
+    const mode   = document.getElementById('filter-mode').value;
+    document.getElementById('user-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Cargando datos...</div>';
+    try {
+        let url = `${API}/admin/users?limit=100`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (mode === 'balance') url += `&only_balance=true`;
+        const res = await fetch(url, { headers: authH() });
+        if (res.status === 403) { logout(); return; }
+        const data = await res.json();
+        let html = '';
+        if (!data.users.length) {
+            html = '<div class="p-8 text-center text-slate-500">No se encontraron clientes.</div>';
+        } else {
+            data.users.forEach(u => {
+                const name     = (u.name||u.surname) ? `${u.name||''} ${u.surname||''}` : '<i class="text-slate-400">Sin nombre</i>';
+                const initials = u.email.substring(0,2).toUpperCase();
+                html += `
+                <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-4 md:gap-0 border-b border-slate-100 md:border-0">
+                    <div class="md:col-span-3 flex items-center gap-3 pl-2 overflow-hidden">
+                        <div class="w-10 h-10 flex-shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">${initials}</div>
+                        <p class="font-bold text-slate-800 text-sm truncate-text" title="${u.email}">${u.email}</p>
+                    </div>
+                    <div class="md:col-span-3 text-sm text-slate-600 truncate-text">${name}</div>
+                    <div class="md:col-span-2 text-center"><span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span></div>
+                    <div class="md:col-span-2 text-center"><span class="inline-block border rounded-lg px-3 py-1 text-sm font-bold ${u.saldo>0?'bg-yellow-50 text-yellow-700 border-yellow-200':'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span></div>
+                    <div class="md:col-span-2 flex justify-center gap-2">
+                        <button onclick="adjust('${u.email}','add')"      class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition"><i class="fas fa-plus"></i></button>
+                        <button onclick="adjust('${u.email}','subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition"><i class="fas fa-minus"></i></button>
+                    </div>
+                </div>`;
+            });
         }
+        document.getElementById('user-table').innerHTML = html;
+        document.getElementById('stat-count').innerText    = data.totalCount.toLocaleString();
+        document.getElementById('stat-pts').innerText      = data.totalPointsInVault.toLocaleString();
+        document.getElementById('stat-redeemed').innerText = '$' + data.totalRedeemed.toLocaleString();
+        document.getElementById('results-count').innerText = data.users.length;
+    } catch(e) { console.error(e); }
+}
 
-        async function load() {
-            if(!authToken) return;
-            const search = document.getElementById('search-input').value;
-            const mode = document.getElementById('filter-mode').value;
-            document.getElementById('user-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Cargando datos...</div>';
-            
-            try {
-                let url = `${API}/admin/users?limit=100`;
-                if(search) url += `&search=${encodeURIComponent(search)}`;
-                if(mode === 'balance') url += `&only_balance=true`;
-
-                const res = await fetch(url, { headers: { "Authorization": `Bearer ${authToken}` } });
-                if(res.status === 403) { logout(); return; }
-                const data = await res.json();
-                
-                const container = document.getElementById('user-table');
-                let htmlBuffer = '';
-                
-                if(data.users.length === 0) {
-                    htmlBuffer = '<div class="p-8 text-center text-slate-500">No se encontraron clientes.</div>';
-                } else {
-                    data.users.forEach(u => {
-                        const name = (u.name || u.surname) ? `${u.name||''} ${u.surname||''}` : '<i class="text-slate-400">Sin nombre</i>';
-                        const initials = u.email.substring(0,2).toUpperCase();
-                        
-                        htmlBuffer += `
-                        <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-4 md:gap-0 border-b border-slate-100 md:border-0">
-                            <div class="md:col-span-3 flex items-center gap-3 pl-2 overflow-hidden">
-                                <div class="w-10 h-10 flex-shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">${initials}</div>
-                                <div class="min-w-0">
-                                    <p class="font-bold text-slate-800 text-sm truncate-text" title="${u.email}">${u.email}</p>
-                                </div>
-                            </div>
-                            <div class="md:col-span-3 text-sm text-slate-600 truncate-text">${name}</div>
-                            <div class="md:col-span-2 text-center"><span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span></div>
-                            <div class="md:col-span-2 text-center"><span class="inline-block border rounded-lg px-3 py-1 text-sm font-bold ${u.saldo > 0 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span></div>
-                            <div class="md:col-span-2 flex justify-center gap-2">
-                                <button onclick="adjust('${u.email}', 'add')" class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition"><i class="fas fa-plus"></i></button>
-                                <button onclick="adjust('${u.email}', 'subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition"><i class="fas fa-minus"></i></button>
-                            </div>
-                        </div>`;
-                    });
-                }
-                container.innerHTML = htmlBuffer;
-                document.getElementById('stat-count').innerText = data.totalCount.toLocaleString();
-                document.getElementById('stat-pts').innerText = data.totalPointsInVault.toLocaleString();
-                document.getElementById('stat-redeemed').innerText = '$' + data.totalRedeemed.toLocaleString();
-                document.getElementById('results-count').innerText = data.users.length;
-            } catch(e) { console.error(e); }
+async function syncUsers() {
+    const btn = document.getElementById('btn-sync');
+    const icon = btn.querySelector('i');
+    icon.classList.add('spin-slow'); btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-sync-alt spin-slow"></i> SINCRONIZANDO...`;
+    try {
+        const res = await fetch(`${API}/admin/sync_users`, { method:'POST', headers:authH() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            Swal.fire({icon:'success', title:'Sincronización Completa', text:`Agregados: ${data.details.added}, Actualizados: ${data.details.updated}`, confirmButtonColor:'#2563eb'});
+            load();
         }
+    } catch(e) { Swal.fire('Error','Fallo Sync','error'); }
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span>`;
+    icon.classList.remove('spin-slow');
+}
 
-        async function syncUsers() {
-            const btn = document.getElementById('btn-sync');
-            const icon = btn.querySelector('i');
-            icon.classList.add('spin-slow'); btn.disabled = true; btn.innerHTML = `<i class="fas fa-sync-alt spin-slow"></i> SINCRONIZANDO...`;
-            try {
-                const res = await fetch(`${API}/admin/sync_users`, { method: 'POST', headers: { "Authorization": `Bearer ${authToken}` } });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    Swal.fire({icon: 'success', title: 'Sincronización Completa', text: `Agregados: ${data.details.added}, Actualizados: ${data.details.updated}`, confirmButtonColor: '#2563eb'});
-                    load();
-                }
-            } catch(e) { Swal.fire('Error', 'Fallo Sync', 'error'); }
-            btn.disabled = false; btn.innerHTML = `<i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span>`; icon.classList.remove('spin-slow');
-        }
+async function adjust(email, op) {
+    const isAdd = op === 'add';
+    const { value: amt } = await Swal.fire({ title: isAdd?'ABONAR':'DESCONTAR', html:`<p class="text-sm text-slate-500">${email}</p>`, input:'number', confirmButtonColor:isAdd?'#22c55e':'#ef4444', showCancelButton:true });
+    if (amt && parseInt(amt) > 0) {
+        await fetch(`${API}/admin/adjust_balance`, { method:'POST', headers:authH(), body:JSON.stringify({email, amount:parseInt(amt), operation:op}) });
+        load();
+    }
+}
 
-        async function adjust(email, op) {
-            const isAdd = op === 'add';
-            const { value: amt } = await Swal.fire({ title: isAdd ? 'ABONAR' : 'DESCONTAR', html: `<p class="text-sm text-slate-500">${email}</p>`, input: 'number', confirmButtonColor: isAdd ? '#22c55e' : '#ef4444', showCancelButton: true });
-            if(amt && parseInt(amt) > 0) {
-                await fetch(`${API}/admin/adjust_balance`, { method: 'POST', headers: { "Content-Type": "application/json", "Authorization": `Bearer ${authToken}` }, body: JSON.stringify({ email, amount: parseInt(amt), operation: op }) });
-                load();
-            }
-        }
-        function logout() { authToken = null; location.reload(); }
-    </script>
+// ── Cotizaciones Buylist ───────────────────────────────────────────────────────
+async function loadOrders() {
+    try {
+        const res = await fetch(`${API}/api/admin/buylist_orders`, { headers: authH() });
+        if (!res.ok) return;
+        allOrders = await res.json();
+        const pend = allOrders.filter(o => o.status === 'pending').length;
+        const badge = document.getElementById('orders-badge');
+        if (pend > 0) { badge.textContent = pend; badge.classList.remove('hidden'); }
+        else badge.classList.add('hidden');
+        renderOrders();
+    } catch(e) { console.error('loadOrders', e); }
+}
+
+function setOrderFilter(f) {
+    orderFilter = f;
+    ['all','pending','reviewed','closed'].forEach(k => {
+        document.getElementById(`of-${k}`).className = `tab-btn ${k===f?'tab-on':'tab-off'}`;
+    });
+    renderOrders();
+}
+
+function renderOrders() {
+    const filtered = orderFilter === 'all' ? allOrders : allOrders.filter(o => o.status === orderFilter);
+    document.getElementById('orders-count').textContent = filtered.length;
+
+    const PAY  = { credito:'bg-yellow-50 text-yellow-800 💎 QP', cash:'bg-green-50 text-green-800 💵 Cash', mixto:'bg-purple-50 text-purple-800 🔀 Mixto' };
+    const STAT = { pending:'bg-amber-50 text-amber-800 ⏳', reviewed:'bg-green-50 text-green-800 ✅', closed:'bg-slate-100 text-slate-500 🔒' };
+    const BORDER = { pending:'order-pending', reviewed:'order-reviewed', closed:'order-closed' };
+
+    if (!filtered.length) {
+        document.getElementById('orders-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Sin cotizaciones en esta categoría.</div>';
+        return;
+    }
+
+    let html = filtered.map(o => {
+        const payParts  = (PAY[o.payment_preference]  || 'bg-slate-100 text-slate-500 ?').split(' ');
+        const statParts = (STAT[o.status]              || 'bg-slate-100 text-slate-500 ?').split(' ');
+        const payBg = payParts[0], payFg = payParts[1], payLabel = payParts.slice(2).join(' ');
+        const stBg  = statParts[0], stFg = statParts[1], stLabel = statParts.slice(2).join(' ');
+        const fecha = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+        return `
+        <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-3 md:gap-0 order-row ${BORDER[o.status]||''}">
+            <div class="md:col-span-1 text-center text-xs font-black text-slate-400">#${o.id}</div>
+            <div class="md:col-span-3 overflow-hidden">
+                <p class="font-bold text-sm text-slate-800 truncate-text" title="${o.email}">${o.email}</p>
+                <p class="text-xs text-slate-400">${o.rut||''}</p>
+            </div>
+            <div class="md:col-span-1 text-center">
+                <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${payBg} ${payFg}">${payLabel}</span>
+            </div>
+            <div class="md:col-span-2 text-right font-black text-amber-700 text-sm">$${(o.total_credito||0).toLocaleString()}</div>
+            <div class="md:col-span-2 text-right font-black text-green-700 text-sm">$${(o.total_cash||0).toLocaleString()}</div>
+            <div class="md:col-span-1 text-center">
+                <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${stBg} ${stFg}">${stLabel}</span>
+            </div>
+            <div class="md:col-span-1 text-center text-xs text-slate-400">${fecha}</div>
+            <div class="md:col-span-1 text-center">
+                <button onclick="viewOrder(${o.id})" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center mx-auto transition text-xs">
+                    <i class="fas fa-eye"></i>
+                </button>
+            </div>
+        </div>`;
+    }).join('');
+    document.getElementById('orders-table').innerHTML = html;
+}
+
+async function viewOrder(id) {
+    const o = allOrders.find(x => x.id === id);
+    if (!o) return;
+    const items = Array.isArray(o.items) ? o.items : [];
+    const FOIL = { foil:'✨ Foil', etched:'⬡ Etched', normal:'' };
+    const COND = { near_mint:'', lightly_played:'LP', moderately_played:'MP', heavily_played:'HP', damaged:'DMG' };
+    const PAY_LABEL = { credito:'💎 QuestPoints / Crédito', cash:'💵 Transferencia / Cash', mixto:'🔀 Combinación' };
+
+    const rows = items.map(it => {
+        const foilT = FOIL[it.foil||'normal']||'';
+        const condT = COND[it.condition||'near_mint']||'';
+        const tags  = [foilT, it.version||'', (it.is_estaca&&!foilT)?'✦ Prem.':'', condT].filter(Boolean).join(' · ');
+        return `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:8px 10px;font-size:12px"><strong>${it.name||''}</strong>
+            ${tags?`<br><span style="font-size:10px;color:#7c3aed">${tags}</span>`:''}
+            </td>
+            <td style="padding:8px;text-align:center;font-size:12px">${it.qty||1}</td>
+            <td style="padding:8px;text-align:right;font-size:11px;color:#64748b">$${(it.price_usd||0).toFixed(2)}</td>
+            <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;color:#b45309">$${(it.price_credito||0).toLocaleString()}</td>
+            <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;color:#15803d">$${(it.price_cash||0).toLocaleString()}</td>
+        </tr>`;
+    }).join('');
+    const tQP   = items.reduce((s,i) => s + (i.price_credito||0)*(i.qty||1), 0);
+    const tCash = items.reduce((s,i) => s + (i.price_cash||0)*(i.qty||1), 0);
+    const nextStatus = o.status==='pending'?'reviewed':o.status==='reviewed'?'closed':null;
+    const nextLabel  = { reviewed:'✅ Marcar Revisada', closed:'🔒 Cerrar Orden' };
+
+    const { isDenied, isConfirmed } = await Swal.fire({
+        title: `Orden #${o.id}`, width:'680px',
+        html: `<div style="text-align:left;font-size:12px;color:#1e293b">
+            <table style="width:100%;margin-bottom:12px">
+                <tr><td style="color:#64748b;padding:3px 0">Vendedor</td><td><strong>${o.email}</strong></td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">RUT</td><td>${o.rut||'—'}</td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">Preferencia</td><td>${PAY_LABEL[o.payment_preference]||o.payment_preference}</td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">Estado</td><td><strong>${o.status}</strong></td></tr>
+            </table>
+            <div style="max-height:260px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+            <table style="width:100%;border-collapse:collapse">
+                <thead style="background:#f8fafc;position:sticky;top:0">
+                    <tr style="font-size:10px;color:#64748b;text-transform:uppercase">
+                        <th style="padding:7px 10px;text-align:left">Carta</th>
+                        <th style="padding:7px 8px;text-align:center">Cant.</th>
+                        <th style="padding:7px 8px;text-align:right">USD</th>
+                        <th style="padding:7px 8px;text-align:right;color:#b45309">💎 QP</th>
+                        <th style="padding:7px 8px;text-align:right;color:#15803d">💵 Cash</th>
+                    </tr>
+                </thead>
+                <tbody>${rows||'<tr><td colspan="5" style="text-align:center;padding:16px;color:#94a3b8">Sin ítems</td></tr>'}</tbody>
+                <tfoot style="background:#f8fafc;font-weight:700">
+                    <tr>
+                        <td colspan="3" style="padding:8px 10px;font-size:11px">TOTAL</td>
+                        <td style="padding:8px;text-align:right;color:#b45309">$${tQP.toLocaleString()}</td>
+                        <td style="padding:8px;text-align:right;color:#15803d">$${tCash.toLocaleString()}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            </div>
+        </div>`,
+        showCancelButton: true,
+        showDenyButton:   !!nextStatus,
+        confirmButtonText: 'Cerrar',
+        denyButtonText:   nextStatus ? nextLabel[nextStatus] : '',
+        denyButtonColor:  '#0f172a',
+        cancelButtonText: '✉ Contactar',
+        cancelButtonColor:'#6366f1',
+    });
+
+    if (isDenied && nextStatus) await updateOrderStatus(id, nextStatus);
+    if (!isConfirmed && !isDenied) {
+        window.location.href = `mailto:${o.email}?subject=Cotización Buylist %23${o.id} — GameQuest`;
+    }
+}
+
+async function updateOrderStatus(id, newStatus) {
+    try {
+        const res = await fetch(`${API}/api/admin/buylist_orders/${id}?new_status=${newStatus}`, { method:'PATCH', headers:authH() });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Error');
+        const o = allOrders.find(x => x.id === id);
+        if (o) o.status = newStatus;
+        renderOrders();
+        const pend = allOrders.filter(x => x.status === 'pending').length;
+        const badge = document.getElementById('orders-badge');
+        if (pend > 0) { badge.textContent = pend; badge.classList.remove('hidden'); }
+        else badge.classList.add('hidden');
+        Swal.fire({icon:'success', title:'Estado actualizado', timer:1400, showConfirmButton:false});
+    } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
+</script>
 </body>
 </html>

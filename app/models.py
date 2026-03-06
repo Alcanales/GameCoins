@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, BigInteger, Numeric, DateTime, Integer, JSON, Boolean, Float, func
+from sqlalchemy import Column, String, BigInteger, Numeric, DateTime, Integer, JSON, Float, func
 from .database import Base
 
 
@@ -35,8 +35,10 @@ class BuylistOrder(Base):
 
 class StapleCard(Base):
     """
-    Lista de cartas marcadas como Staple por el admin.
-    Staples: stock mínimo 8 | Normales: stock mínimo 4
+    Lista de cartas por tier de demanda:
+      - normal    → stock mínimo MIN_STOCK_NORMAL (default 4)
+      - alta      → stock mínimo MIN_STOCK_ALTA   (default 8)
+      - muy_alta  → siempre comprar, sin límite de stock
     """
     __tablename__ = "staple_cards"
 
@@ -45,13 +47,14 @@ class StapleCard(Base):
     name_normalized = Column(String, nullable=False, unique=True, index=True)
     # Nombre original tal como viene de Manabox / Jumpseller
     name_display    = Column(String, nullable=False)
-    is_staple       = Column(Boolean, default=True)
-    # Stock mínimo personalizado (None = usa el default según is_staple)
+    # Tier: "normal" | "alta" | "muy_alta"
+    tier            = Column(String, default="alta", nullable=False)
+    # Stock mínimo personalizado (None = usa el default según tier)
     min_stock_override = Column(Integer, nullable=True)
     # Precio mínimo de venta personalizado en CLP (None = calculado automático)
     min_price_override = Column(Numeric(12, 2), nullable=True)
-    # Factor de margen mínimo (ej: 2.5 = precio venta >= compra × 2.5 × factor_clp)
+    # Factor de margen mínimo
     margin_factor   = Column(Float, default=2.5)
-    added_by        = Column(String, nullable=True)  # email del admin
+    added_by        = Column(String, nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())

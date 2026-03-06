@@ -28,11 +28,12 @@ class BuylistItem(BaseModel):
     price_usd:     float
     price_credito: int
     price_cash:    int
-    # v4: foil y condición — opcionales para compatibilidad con CSV sin esas columnas
-    foil:          Optional[str]   = "normal"    # normal | foil | etched
-    condition:     Optional[str]   = "near_mint" # near_mint | lightly_played | ...
+    foil:          Optional[str]   = "normal"     # normal | foil | etched
+    condition:     Optional[str]   = "near_mint"  # near_mint | lightly_played | ...
+    version:       Optional[str]   = ""           # Extended Art, Showcase, etc.
+    is_estaca:     Optional[bool]  = False        # True si es versión premium
 
-    # Permite recibir campos extra del frontend sin romper validación
+    # Descarta campos de análisis interno que no se necesitan guardar
     model_config = {"extra": "ignore"}
 
 

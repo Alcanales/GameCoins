@@ -1,482 +1,322 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vende tus Cartas - GameQuest</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        body { background: #f0f4f2; font-family: 'Inter', sans-serif; }
-        .pastel-card { background: white; border-radius: 24px; border: 1px solid #d1d9d4; box-shadow: 0 8px 30px rgba(0,0,0,0.05); }
-        .terms-box { background: #eef2f1; border-left: 4px solid #4a665a; }
-        .input-focus:focus { border-color: #dc2626; outline: none; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1); }
-        .price-col { transition: all 0.3s ease; }
-        .highlight-price { background: #fef9c3; border-radius: 6px; padding: 2px 8px; font-weight: 900; }
-        .badge-estaca  { display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px;background:#ede9fe;color:#6d28d9;margin-left:4px;vertical-align:middle; }
-        .badge-muyalta { display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e; }
-        .badge-buscamos{ display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534; }
-        .badge-stockok { display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:999px;background:#f1f5f9;color:#94a3b8; }
-        .row-stockok   { opacity:0.5; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buylist — GameQuest</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    body { background:#f8f9fa; font-family:'Inter',system-ui,sans-serif; color:#1e293b; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; }
+    .pill { display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap; }
+    .p-muyalta { background:#fef3c7;color:#92400e;border:1px solid #fde68a; }
+    .p-buscamos{ background:#dcfce7;color:#166534;border:1px solid #bbf7d0; }
+    .p-stockok { background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0; }
+    .p-estaca  { background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd; }
+    .p-sinlista{ background:#f8fafc;color:#cbd5e1;border:1px solid #f1f5f9; }
+    .f-btn { padding:5px 13px;border-radius:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:all .15s;border:1px solid transparent; }
+    .f-on  { background:#1e293b;color:#fff; }
+    .f-off { background:#f1f5f9;color:#64748b;border-color:#e2e8f0; }
+    .f-off:hover { background:#e2e8f0;color:#334155; }
+    .row-stockok { opacity:.45; }
+    .row-estaca td:first-child { padding-left:9px; border-left:3px solid #7c3aed; }
+    thead th { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;padding:10px 12px; }
+    tbody td { padding:11px 12px;font-size:13px; }
+    tbody tr { border-bottom:1px solid #f8fafc; }
+    tbody tr:hover { background:#fafafa; }
+    .upload-zone { border:2px dashed #cbd5e1;border-radius:14px;cursor:pointer;transition:all .2s; }
+    .upload-zone:hover { border-color:#dc2626;background:#fff5f5; }
+    .col-qp   { color:#b45309;font-weight:800; }
+    .col-cash { color:#15803d;font-weight:800; }
+    label[for=csv-file] { display:block; }
+    input[type=file] { display:none; }
+  </style>
 </head>
-<body class="p-4 md:p-10 text-slate-800">
-    <div class="max-w-5xl mx-auto">
+<body class="min-h-screen p-4 md:p-8">
+<div class="max-w-5xl mx-auto space-y-5">
 
-        <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-            <div>
-                <h1 class="text-4xl font-black uppercase italic tracking-tighter text-slate-900">Buylist <span class="text-red-600">Quest</span></h1>
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Servicio de Cotización Profesional</p>
-            </div>
-            <div class="text-right text-[11px] font-bold text-slate-500">
-                <p><i class="fas fa-envelope text-red-500 mr-2"></i> contacto@gamequest.cl</p>
-            </div>
-        </div>
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+    <div>
+      <h1 class="text-3xl font-black uppercase tracking-tighter">Buylist <span class="text-red-600">Quest</span></h1>
+      <p class="text-[11px] text-slate-400 font-medium mt-0.5 uppercase tracking-wider">Cotización de Cartas</p>
+    </div>
+    <div id="cash-banner" class="hidden text-[11px] font-bold px-4 py-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
+      <i class="fas fa-info-circle mr-1"></i> Solo recibiendo por QuestPoints
+    </div>
+  </div>
 
-        <!-- Banner estado buylist -->
-        <div id="closed-banner" class="hidden pastel-card p-6 mb-8 text-center border-2 border-red-200 bg-red-50">
-          <i class="fas fa-lock text-3xl text-red-400 mb-3 block"></i>
-          <h2 class="text-xl font-black text-red-700">Buylist Temporalmente Cerrada</h2>
-          <p class="text-sm text-red-500 mt-2">Vuelve pronto — estamos procesando las órdenes actuales.</p>
-        </div>
+  <!-- Banner buylist cerrada -->
+  <div id="closed-banner" class="hidden card p-8 text-center border-2 border-red-100">
+    <div class="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+      <i class="fas fa-lock text-red-400 text-xl"></i>
+    </div>
+    <h2 class="text-xl font-black text-slate-800 mb-2">Buylist Temporalmente Cerrada</h2>
+    <p class="text-sm text-slate-500">Estamos evaluando cotizaciones anteriores o reponiendo stock. Vuelve pronto.</p>
+    <p class="text-xs text-slate-400 mt-3"><i class="fas fa-envelope mr-1"></i> contacto@gamequest.cl para consultas urgentes.</p>
+  </div>
 
-        <div id="cash-disabled-banner" class="hidden pastel-card p-5 mb-8 text-center border-2 border-yellow-300 bg-yellow-50">
-          <i class="fas fa-gem text-2xl text-yellow-500 mb-2 block"></i>
-          <p class="text-base font-black text-yellow-800">Por el momento solo estamos recibiendo cartas por QuestPoints</p>
-          <p class="text-xs text-yellow-600 mt-1">El pago en efectivo y transferencia no está disponible en este período.</p>
-        </div>
-        <!-- Términos -->
-        <div class="pastel-card p-6 mb-8 terms-box">
-            <h3 class="font-bold text-slate-900 mb-4 flex items-center text-sm uppercase tracking-wider">
-                <i class="fas fa-file-contract mr-2 text-slate-700"></i>
-                Términos y Condiciones del Servicio
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-[11px] text-slate-600 leading-relaxed text-justify">
-                <div class="space-y-3">
-                    <p><strong>• Fuente de Precios:</strong> El CSV debe exportarse desde Manabox usando <strong>Card Kingdom Buylist</strong> como fuente de precios. Archivos con otras fuentes pueden generar cotizaciones incorrectas.</p>
-                    <p><strong>• Carácter de Cotización:</strong> Esta plataforma es una guía visual. No constituye una obligación de compra por la totalidad de los ítems.</p>
-                    <p><strong>• Presupuesto Mensual:</strong> Operamos con cupos limitados. Una vez cubierto el presupuesto mensual, las compras se limitarán hasta el mes siguiente.</p>
-                </div>
-                <div class="space-y-3">
-                    <p><strong>• Procesamiento:</strong> Las cotizaciones son revisadas por el equipo de GameQuest. Los precios no constituyen una obligación de compra.</p>
-                    <p><strong>• Política de Precios:</strong> Los multiplicadores pueden variar sin previo aviso por políticas internas o eventos como Trading Days.</p>
-                    <p><strong>• Criterio NM:</strong> Se asume estado Near Mint para el cálculo base; desgastes físicos reducirán el valor final en la inspección presencial.</p>
-                </div>
-            </div>
-        </div>
+  <div id="upload-section">
+    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Condiciones del Servicio</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5 text-[11px] text-slate-500 leading-relaxed">
+      <p>• Exporta el CSV el mismo día — precios de mercado actuales.</p>
+      <p>• Cotización referencial, no constituye obligación de compra.</p>
+      <p>• Cupos mensuales limitados — primera revisión gana prioridad.</p>
+      <p>• Estado NM asumido — desgastes ajustan valor en inspección.</p>
+    </div>
+  </div>
 
-        <!-- Factores informativos -->
-        <div class="pastel-card p-5 mb-8 flex flex-col md:flex-row gap-4 items-center justify-center">
-            <div class="flex items-center gap-3 px-6 py-3 bg-yellow-50 rounded-2xl border border-yellow-200">
-                <i class="fas fa-gem text-yellow-600 text-lg"></i>
-                <div>
-                    <p class="text-[10px] font-bold text-yellow-700 uppercase tracking-widest">Crédito QuestPoints</p>
-                    <p class="text-2xl font-black text-yellow-800">×500 <span class="text-sm font-normal">CLP/USD</span></p>
-                </div>
-            </div>
-            <div class="text-slate-300 text-2xl font-light hidden md:block">|</div>
-            <div id="factor-cash-block" class="flex items-center gap-3 px-6 py-3 bg-green-50 rounded-2xl border border-green-200">
-                <i class="fas fa-money-bill-wave text-green-600 text-lg"></i>
-                <div>
-                    <p class="text-[10px] font-bold text-green-700 uppercase tracking-widest">Cash / Transferencia</p>
-                    <p class="text-2xl font-black text-green-800">×450 <span class="text-sm font-normal">CLP/USD</span></p>
-                </div>
-            </div>
-        </div>
+  <div class="card p-5">
+    <label for="csv-file" class="upload-zone flex flex-col items-center py-8 px-6 text-center">
+      <i class="fas fa-file-csv text-3xl text-slate-300 mb-2"></i>
+      <p class="font-bold text-slate-400 text-sm uppercase tracking-wider">Sube tu CSV de Manabox</p>
+      <p id="fname" class="text-xs text-slate-400 mt-1">Ningún archivo seleccionado</p>
+    </label>
+    <input type="file" id="csv-file" accept=".csv" onchange="onFile()">
+  </div>
 
-        <!-- Upload CSV -->
-        <div class="pastel-card p-10 text-center mb-10">
-            <div id="drop-zone" class="border-4 border-dashed border-slate-100 rounded-3xl p-12 hover:border-red-500 cursor-pointer transition-all group" onclick="document.getElementById('csv').click()">
-                <i class="fas fa-cloud-upload-alt text-4xl text-slate-200 group-hover:text-red-500 mb-4"></i>
-                <p class="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Sube tu archivo .csv exportado de Manabox</p>
-                <input type="file" id="csv" class="hidden" accept=".csv" onchange="processFile()">
-            </div>
-        </div>
-
-        <!-- Resultados -->
-        <div id="results-area" class="hidden space-y-10">
-            <div class="pastel-card p-8">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-900 uppercase tracking-tighter">Resultados del Análisis</h2>
-                        <div class="flex gap-2 mt-3 flex-wrap">
-                            <button onclick="setDemandFilter('all')" id="df-all" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all bg-slate-900 text-white">Todas</button>
-                            <button onclick="setDemandFilter('muy_alta')" id="df-muy_alta" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-800">⭐ Muy Alta</button>
-                            <button onclick="setDemandFilter('buscamos')" id="df-buscamos" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-green-100 hover:text-green-800">🟢 Buscamos</button>
-                            <button onclick="setDemandFilter('estaca')" id="df-estaca" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-purple-100 hover:text-purple-800">✦ Estaca</button>
-                            <button onclick="setDemandFilter('sin_lista')" id="df-sin_lista" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-slate-200">Sin Lista</button>
-                        </div>
-                    </div>
-                    <!-- Selector de modo de precio -->
-                    <div id="price-mode-selector" class="flex gap-2">
-                        <button onclick="setPriceMode('credito')" id="btn-credito"
-                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
-                                   bg-yellow-400 text-yellow-900 shadow-md shadow-yellow-100">
-                            <i class="fas fa-gem mr-1"></i> Ver Crédito
-                        </button>
-                        <button onclick="setPriceMode('cash')" id="btn-cash"
-                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
-                                   bg-slate-100 text-slate-500 hover:bg-green-100 hover:text-green-800">
-                            <i class="fas fa-dollar-sign mr-1"></i> Ver Cash
-                        </button>
-                        <button onclick="setPriceMode('ambos')" id="btn-ambos"
-                            class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all
-                                   bg-slate-100 text-slate-500 hover:bg-slate-200">
-                            <i class="fas fa-table mr-1"></i> Ver Ambos
-                        </button>
-                        <!-- btn-cash-wrap y btn-ambos-wrap son ocultados por JS cuando CASH_ENABLED=false -->
-                    </div>
-                </div>
-
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left">
-                        <thead class="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
-                            <tr>
-                                <th class="pb-4">Carta</th>
-                                <th class="pb-4 text-center">Estado</th>
-                                <th class="pb-4 text-center">Cant.</th>
-                                <th class="pb-4 text-right text-slate-300">USD</th>
-                                <th id="th-credito" class="pb-4 text-right text-yellow-600">💎 Crédito QP</th>
-                                <th id="th-cash" class="pb-4 text-right text-green-600 hidden">💵 Cash CLP</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tbody" class="divide-y divide-slate-50"></tbody>
-                    </table>
-                </div>
-                <div class="mt-8 flex flex-col md:flex-row justify-end gap-6 items-end">
-                    <div class="text-right" id="total-credito-block">
-                        <p class="text-[10px] font-bold text-yellow-600 uppercase tracking-widest">Total Crédito QP</p>
-                        <p id="total-credito" class="text-3xl font-black text-yellow-700">$0</p>
-                    </div>
-                    <div class="text-right hidden" id="total-cash-block">
-                        <p class="text-[10px] font-bold text-green-600 uppercase tracking-widest">Total Cash CLP</p>
-                        <p id="total-cash" class="text-3xl font-black text-green-700">$0</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Formulario de cotización sin compromiso -->
-            <div class="pastel-card p-8 border-2 border-slate-200">
-                <h3 class="font-bold text-slate-900 mb-6 uppercase text-sm tracking-widest flex items-center">
-                    <i class="fas fa-paper-plane mr-3 text-red-600"></i> Datos para enviar tu cotización
-                </h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 mb-2 uppercase">RUT Vendedor</label>
-                        <input type="text" id="v_rut" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm" placeholder="12.345.678-K">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 mb-2 uppercase">Email de contacto</label>
-                        <input type="email" id="v_mail" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm" placeholder="ejemplo@correo.cl">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-widest">Preferencia de Pago</label>
-                        <select id="v_payment" onchange="onPaymentChange()" class="input-focus w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-sm font-bold">
-                            <option value="" disabled selected>Selecciona una opción...</option>
-                            <option value="credito">💎 Crédito QuestPoints (Mayor valor — ×500)</option>
-                            <option id="opt-cash"  value="cash">💵 Dinero en Efectivo / Transferencia (×450)</option>
-                            <option id="opt-mixto" value="mixto">🔀 Combinación Crédito + Cash</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Resumen de pago -->
-                <div id="payment-summary" class="hidden mb-8 p-5 rounded-2xl bg-slate-50 border border-slate-200">
-                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Resumen según preferencia</p>
-                    <div id="payment-detail" class="text-sm text-slate-700"></div>
-                </div>
-
-                <div class="flex items-start gap-3 mb-8">
-                    <input type="checkbox" id="v_terms" class="mt-1 w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500">
-                    <label for="v_terms" class="text-[11px] text-slate-500 leading-tight">
-                        He leído y acepto los <b>Términos y Condiciones</b> del servicio de cotización de GameQuest. Entiendo que los precios son referenciales y que GameQuest no tiene obligación de comprar la totalidad de los ítems.
-                    </label>
-                </div>
-
-                <button onclick="commitOrder()"
-                    class="w-full bg-slate-900 hover:bg-red-600 text-white font-black py-5 rounded-2xl shadow-xl uppercase tracking-[0.2em] text-xs transition-all transform active:scale-95">
-                    Enviar Cotización
-                </button>
-            </div>
-        </div>
+  <div id="results" class="hidden space-y-4">
+    <div class="card p-3 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+      <div class="flex gap-1.5 flex-wrap">
+        <button onclick="setFilter('all')"       id="f-all"       class="f-btn f-on">Todas</button>
+        <button onclick="setFilter('muy_alta')"  id="f-muy_alta"  class="f-btn f-off">⭐ Muy Alta</button>
+        <button onclick="setFilter('buscamos')"  id="f-buscamos"  class="f-btn f-off">🟢 Buscamos</button>
+        <button onclick="setFilter('estaca')"    id="f-estaca"    class="f-btn f-off">✦ Estaca</button>
+        <button onclick="setFilter('sin_lista')" id="f-sin_lista" class="f-btn f-off">Sin lista</button>
+      </div>
+      <div class="flex gap-4 text-xs font-bold">
+        <span class="text-slate-400"><span id="cnt" class="text-slate-700 text-sm font-black">0</span> cartas</span>
+        <span class="col-qp">💎 <span id="t-qp">$0</span></span>
+        <span id="tcash-wrap" class="col-cash">💵 <span id="t-cash">$0</span></span>
+      </div>
     </div>
 
-    <script>
-        const API = "https://gamecoins.onrender.com";
+    <div class="card overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead class="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th class="text-left min-w-[160px]">Carta</th>
+              <th class="text-center">Estado</th>
+              <th class="text-center">Cant.</th>
+              <th class="text-right text-slate-300">Ref. CK (USD)</th>
+              <th class="text-right col-qp">💎 QP Crédito</th>
+              <th id="th-cash" class="text-right col-cash">💵 Cash CLP</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap justify-between items-center gap-3">
+        <p class="text-[10px] text-slate-400 italic">Valores referenciales — sujetos a revisión presencial</p>
+        <div class="flex gap-5">
+          <div class="text-right">
+            <p class="text-[9px] text-slate-400 uppercase tracking-wider">Total 💎 QP</p>
+            <p id="footer-qp" class="text-lg font-black col-qp">$0</p>
+          </div>
+          <div id="footer-cash-block" class="text-right">
+            <p class="text-[9px] text-slate-400 uppercase tracking-wider">Total 💵 Cash</p>
+            <p id="footer-cash" class="text-lg font-black col-cash">$0</p>
+          </div>
+        </div>
+      </div>
+    </div>
 
-        // Verificar estado del buylist al cargar
-        let cashEnabled = true; // default optimista mientras carga
-        (async function checkStatus() {
-          try {
-            const res  = await fetch(`${API}/api/public/buylist_status`);
-            const data = await res.json();
-            if (!data.open) {
-              document.getElementById('closed-banner').classList.remove('hidden');
-              document.getElementById('drop-zone').style.pointerEvents = 'none';
-              document.getElementById('drop-zone').style.opacity = '0.4';
+    <div class="card p-6 border-2 border-slate-100">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-5">
+        <i class="fas fa-paper-plane mr-1.5 text-red-500"></i> Enviar Cotización
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">RUT Vendedor</label>
+          <input id="v-rut" type="text" placeholder="12.345.678-K"
+            class="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Email de contacto</label>
+          <input id="v-email" type="email" placeholder="correo@ejemplo.cl"
+            class="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Preferencia de Pago</label>
+          <select id="v-pay" class="w-full border border-slate-200 rounded-xl p-3 text-sm font-bold focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
+            <option value="" disabled selected>Selecciona...</option>
+            <option value="credito">💎 QuestPoints / Crédito (Mayor valor)</option>
+            <option id="opt-cash"  value="cash">💵 Transferencia / Efectivo</option>
+            <option id="opt-mixto" value="mixto">🔀 Combinación</option>
+          </select>
+        </div>
+      </div>
+      <label class="flex items-start gap-3 mb-5 cursor-pointer">
+        <input id="v-terms" type="checkbox" class="mt-0.5 w-4 h-4 text-red-600 rounded">
+        <span class="text-[11px] text-slate-500 leading-relaxed">
+          Entiendo que los precios son <strong>referenciales</strong> y que GameQuest no tiene obligación de comprar la totalidad de los ítems. Las cartas son evaluadas presencialmente en Near Mint.
+        </span>
+      </label>
+      <button onclick="submitOrder()" class="w-full bg-slate-900 hover:bg-red-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-xs transition-all">
+        <i class="fas fa-paper-plane mr-2"></i> Enviar Cotización
+      </button>
+    </div>
+  </div>
+
+</div><!-- /upload-section -->
+</div><!-- /max-w-5xl -->
+<script>
+const API = "https://gamecoins.onrender.com";
+let data = [], activeFilter = "all", cashEnabled = true;
+
+async function checkStatus() {
+  try {
+    const r = await fetch(`${API}/api/public/buylist_status`);
+    const s = await r.json();
+
+    // Si la buylist está cerrada → bloquear todo y mostrar banner
+    if (!s.open) {
+      document.getElementById('upload-section').style.display = 'none';
+      const banner = document.getElementById('closed-banner');
+      banner.classList.remove('hidden');
+      return;
+    }
+
+    cashEnabled = s.cash_enabled !== false;
+    if (!cashEnabled) {
+      ['cash-banner','th-cash','tcash-wrap','footer-cash-block'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', true);
+      });
+      ['opt-cash','opt-mixto'].forEach(id => {
+        const el = document.getElementById(id); if(el) el.style.display='none';
+      });
+    }
+  } catch(_) {}
 }
-            // ── CASH_ENABLED ─────────────────────────────────────────────────
-            cashEnabled = data.cash_enabled !== false; // true si no viene el campo (compat.)
-            if (!cashEnabled) {
-              // Mostrar banner informativo
-              document.getElementById('cash-disabled-banner').classList.remove('hidden');
-              // Ocultar tarjeta de factor cash
-              document.getElementById('factor-cash-block').classList.add('hidden');
-              // Ocultar botones Ver Cash / Ver Ambos
-              document.getElementById('btn-cash').classList.add('hidden');
-              document.getElementById('btn-ambos').classList.add('hidden');
-              // Eliminar opciones cash y mixto del select
-              const optCash  = document.getElementById('opt-cash');
-              const optMixto = document.getElementById('opt-mixto');
-              if (optCash)  optCash.remove();
-              if (optMixto) optMixto.remove();
-            }
-          } catch(e) { /* silencioso */ }
-        })();
 
- — FastAPI sirve este HTML
-        let analyzedData = [];
-        let priceMode    = "credito";  // credito | cash | ambos
-        let demandFilter = "all";
+function onFile() {
+  const f = document.getElementById('csv-file').files[0];
+  if (!f) return;
+  document.getElementById('fname').textContent = f.name;
+  processFile(f);
+}
 
-        // ── Procesar CSV ──────────────────────────────────────────────────────
-        async function processFile() {
-            const file = document.getElementById('csv').files[0];
-            if (!file) return;
+async function processFile(file) {
+  Swal.fire({ title:'Analizando...', text:'Consultando precios y stock en tiempo real', didOpen:()=>Swal.showLoading() });
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/api/public/analyze_buylist`, { method:'POST', body:fd });
+    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||'Error del servidor'); }
+    data = await r.json();
+    renderTable();
+    document.getElementById('results').classList.remove('hidden');
+    Swal.close();
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
 
-            const fd = new FormData();
-            fd.append('file', file);
+function setFilter(f) {
+  activeFilter = f;
+  ['all','muy_alta','buscamos','estaca','sin_lista'].forEach(k => {
+    document.getElementById(`f-${k}`).className = `f-btn ${k===f?'f-on':'f-off'}`;
+  });
+  renderTable();
+}
 
-            Swal.fire({ title: 'Analizando Mercado...', didOpen: () => Swal.showLoading(), background: '#fff' });
+function getVisible() {
+  const m = { all:()=>true, estaca:c=>c.is_estaca, muy_alta:c=>c.buying_status==='muy_alta',
+              buscamos:c=>['muy_alta','buscamos'].includes(c.buying_status),
+              sin_lista:c=>c.buying_status==='sin_lista' };
+  return data.filter(m[activeFilter]||m.all);
+}
 
-            try {
-                const res = await fetch(`${API}/api/public/analyze_buylist`, { method: 'POST', body: fd });
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Error del servidor');
-                }
-                analyzedData = await res.json();
+const PILL = {
+  muy_alta:  '<span class="pill p-muyalta">⭐ Muy Alta</span>',
+  buscamos:  '<span class="pill p-buscamos">🟢 Buscamos</span>',
+  stock_ok:  '<span class="pill p-stockok">Stock OK</span>',
+  sin_lista: '<span class="pill p-sinlista">—</span>',
+};
+const FOIL = { foil:'✨ Foil', etched:'⬡ Etched', normal:'' };
+const COND = { near_mint:'', lightly_played:'LP', moderately_played:'MP', heavily_played:'HP', damaged:'DMG' };
 
-                if (analyzedData.length === 0) {
-                    return Swal.fire('Sin Resultados', 'No se encontraron cartas válidas en el CSV.', 'warning');
-                }
+function renderTable() {
+  const vis = getVisible();
+  let tQP=0, tCash=0, html='';
 
-                renderTable();
-                document.getElementById('results-area').classList.remove('hidden');
-                Swal.close();
+  vis.forEach(c => {
+    const qpSub   = (c.price_credito||0)*(c.qty||1);
+    const cashSub = (c.price_cash||0)*(c.qty||1);
+    tQP += qpSub; tCash += cashSub;
 
-            } catch (e) {
-                Swal.fire('Error', e.message || 'Fallo al procesar archivo o conexión offline.', 'error');
-            }
-        }
+    const foilT = FOIL[c.foil||'normal']||'';
+    const condT = COND[c.condition||'near_mint']||'';
+    const tags  = [
+      foilT&&`<span class="pill p-estaca" style="font-size:9px">${foilT}</span>`,
+      condT&&`<span class="pill p-stockok" style="font-size:9px">${condT}</span>`,
+      (c.is_estaca&&!foilT)&&`<span class="pill p-estaca" style="font-size:9px">✦ Prem.</span>`,
+    ].filter(Boolean).join('');
 
-        // ── Renderizar tabla ──────────────────────────────────────────────────
-        function renderTable() {
-            const body       = document.getElementById('tbody');
-            const thCredito  = document.getElementById('th-credito');
-            const thCash     = document.getElementById('th-cash');
-            let totalCredito = 0;
-            let totalCash    = 0;
-            let html         = '';
+    const isOk = c.buying_status==='stock_ok';
+    html += `<tr class="${isOk?'row-stockok':''}${c.is_estaca?' row-estaca':''}">
+      <td>
+        <p class="font-bold text-slate-800">${c.name}</p>
+        <div class="flex gap-1 mt-0.5 flex-wrap">${tags}</div>
+      </td>
+      <td class="text-center">${PILL[c.buying_status]||PILL.sin_lista}</td>
+      <td class="text-center text-slate-500 font-mono">${c.qty||1}</td>
+      <td class="text-right font-mono text-xs text-slate-400">
+        $${(c.price_usd_raw||c.price_usd||0).toFixed(2)}
+        ${c.is_estaca?`<span class="block text-purple-400" style="font-size:9px">→ $${(c.price_usd_base||0).toFixed(2)} eff.</span>`:''}
+      </td>
+      <td class="text-right col-qp">$${qpSub.toLocaleString()}</td>
+      ${cashEnabled?`<td class="text-right col-cash">$${cashSub.toLocaleString()}</td>`:''}
+    </tr>`;
+  });
 
-            // Filtrar por demanda
-            const visible = analyzedData.filter(c => {
-                if (demandFilter === 'all')       return true;
-                if (demandFilter === 'estaca')    return c.is_estaca;
-                if (demandFilter === 'muy_alta')  return c.buying_status === 'muy_alta';
-                if (demandFilter === 'buscamos')  return ['muy_alta','buscamos'].includes(c.buying_status);
-                if (demandFilter === 'sin_lista') return c.buying_status === 'sin_lista';
-                return true;
-            });
+  document.getElementById('tbody').innerHTML = html || `<tr><td colspan="6" class="text-center py-10 text-slate-400 italic text-sm">Sin cartas para este filtro</td></tr>`;
+  document.getElementById('cnt').textContent      = vis.length;
+  document.getElementById('t-qp').textContent     = `$${tQP.toLocaleString()}`;
+  document.getElementById('t-cash').textContent   = `$${tCash.toLocaleString()}`;
+  document.getElementById('footer-qp').textContent   = `$${tQP.toLocaleString()}`;
+  document.getElementById('footer-cash').textContent = `$${tCash.toLocaleString()}`;
+}
 
-            visible.forEach(c => {
-                const subtC = (c.price_credito || 0) * (c.qty || 1);
-                const subtH = (c.price_cash    || 0) * (c.qty || 1);
-                totalCredito += subtC;
-                totalCash    += subtH;
+async function submitOrder() {
+  const rut   = document.getElementById('v-rut').value.trim();
+  const email = document.getElementById('v-email').value.trim();
+  const pay   = document.getElementById('v-pay').value;
+  const terms = document.getElementById('v-terms').checked;
+  if (!rut||!email||!pay) return Swal.fire('Faltan datos','Completa RUT, email y preferencia de pago.','warning');
+  if (!terms) return Swal.fire('Términos','Debes aceptar los términos para continuar.','info');
+  if (!data.length) return Swal.fire('Sin datos','Sube un CSV primero.','warning');
 
-                const creditoCell = `<td class="py-5 text-right font-black text-yellow-700 td-credito">$${subtC.toLocaleString()}</td>`;
-                const cashCell    = `<td class="py-5 text-right font-black text-green-700 td-cash ${priceMode === 'cash' ? '' : (priceMode === 'ambos' ? '' : 'hidden')}">$${subtH.toLocaleString()}</td>`;
+  // Calcular totales reales desde todos los ítems del CSV
+  const totalCredito = data.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
+  const totalCash    = data.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
 
-                const estacaBadge = c.is_estaca
-                    ? `<span class="badge-estaca ml-1" title="Estaca ×${c.stake_mult || 1}">estaca ×${c.stake_mult || 1}</span>`
-                    : '';
-                const foilTag = (c.foil && c.foil !== 'normal')
-                    ? `<span style="font-size:9px;color:#7c3aed;margin-left:4px;">✨ ${c.foil}</span>`
-                    : '';
-                const bsMap = {
-                    muy_alta:  '<span class="badge-muyalta">⭐ Muy Alta</span>',
-                    buscamos:  '<span class="badge-buscamos">🟢 Buscamos</span>',
-                    stock_ok:  '<span class="badge-stockok">Stock OK</span>',
-                    sin_lista: '<span class="badge-stockok">—</span>',
-                };
-                const bsHtml   = bsMap[c.buying_status] || '<span class="badge-stockok">—</span>';
-                const isStockOk = c.buying_status === 'stock_ok';
-                const rowCls   = isStockOk ? ' row-stockok' : (c.is_estaca ? ' bg-purple-50/40' : '');
-                html += `<tr class="hover:bg-slate-50 transition-colors${rowCls}">
-                    <td class="py-5 font-bold text-slate-800">${c.name}${foilTag}${estacaBadge}</td>
-                    <td class="py-5 text-center">${bsHtml}</td>
-                    <td class="py-5 text-slate-500 font-medium text-center">${c.qty || 1}</td>
-                    <td class="py-5 text-right text-slate-300 text-xs font-mono">$${(c.price_usd_raw||c.price_usd||0).toFixed(2)}</td>
-                    ${creditoCell}
-                    ${cashCell}
-                </tr>`;
-            });
+  const {isConfirmed} = await Swal.fire({
+    title:'¿Enviar cotización?', text:'Los precios son referenciales y quedan sujetos a revisión.',
+    icon:'question', showCancelButton:true, confirmButtonColor:'#1e293b', confirmButtonText:'ENVIAR'
+  });
+  if (!isConfirmed) return;
 
-            body.innerHTML = html || `<tr><td colspan="6" class="text-center py-10 text-slate-400 italic text-sm">Sin cartas para este filtro</td></tr>`;
+  Swal.fire({ title:'Enviando...', didOpen:()=>Swal.showLoading() });
+  try {
+    const r = await fetch(`${API}/api/public/commit_buylist`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        email, rut,
+        payment_preference: pay,
+        items:          data,
+        total_credito:  totalCredito,
+        total_cash:     totalCash,
+      })
+    });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.detail||'Error al enviar');
+    Swal.fire({ icon:'success', title:`Cotización #${res.order_id||''} Recibida`,
+      text:`Resumen enviado a ${email} — nos contactaremos para coordinar.`, confirmButtonColor:'#1e293b' });
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
 
-            // Totales (solo visibles)
-            document.getElementById('total-credito').innerText = `$${totalCredito.toLocaleString()}`;
-            document.getElementById('total-cash').innerText    = `$${totalCash.toLocaleString()}`;
-
-            // Visibilidad columnas
-            const showCredito = priceMode === 'credito' || priceMode === 'ambos';
-            const showCash    = priceMode === 'cash'    || priceMode === 'ambos';
-
-            thCredito.classList.toggle('hidden', !showCredito);
-            thCash.classList.toggle('hidden', !showCash);
-
-            document.querySelectorAll('.td-credito').forEach(el => el.classList.toggle('hidden', !showCredito));
-            document.querySelectorAll('.td-cash').forEach(el    => el.classList.toggle('hidden', !showCash));
-
-            document.getElementById('total-credito-block').classList.toggle('hidden', !showCredito);
-            document.getElementById('total-cash-block').classList.toggle('hidden', !showCash);
-
-            updatePaymentSummary();
-        }
-
-        // ── Filtro de demanda ────────────────────────────────────────────────
-        function setDemandFilter(f) {
-            demandFilter = f;
-            ['all','muy_alta','buscamos','estaca','sin_lista'].forEach(k => {
-                const b = document.getElementById(`df-${k}`);
-                if (!b) return;
-                const base = 'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all';
-                const onCls = { all:'bg-slate-900 text-white', muy_alta:'bg-amber-400 text-amber-900', buscamos:'bg-green-500 text-white', estaca:'bg-purple-500 text-white', sin_lista:'bg-slate-700 text-white' };
-                b.className = `${base} ${k===f ? onCls[k] : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`;
-            });
-            if (analyzedData.length) renderTable();
-        }
-
-        // ── Selector de modo precio ───────────────────────────────────────────
-        function setPriceMode(mode) {
-            priceMode = mode;
-            ['credito','cash','ambos'].forEach(m => {
-                const btn = document.getElementById(`btn-${m}`);
-                if (m === mode) {
-                    btn.className = btn.className.replace(/bg-slate-100 text-slate-500[^"]*/, '');
-                    if (m === 'credito') btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-yellow-400 text-yellow-900 shadow-md shadow-yellow-100';
-                    if (m === 'cash')    btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-green-400 text-green-900 shadow-md shadow-green-100';
-                    if (m === 'ambos')   btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-slate-800 text-white shadow-md';
-                } else {
-                    btn.className = 'px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all bg-slate-100 text-slate-500 hover:bg-slate-200';
-                }
-            });
-            if (analyzedData.length) renderTable();
-        }
-
-        // ── Actualizar resumen de pago ────────────────────────────────────────
-        function onPaymentChange() {
-            updatePaymentSummary();
-        }
-
-        function updatePaymentSummary() {
-            const pref = document.getElementById('v_payment').value;
-            if (!pref || !analyzedData.length) return;
-
-            let totalC = analyzedData.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
-            let totalH = analyzedData.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
-
-            const block  = document.getElementById('payment-summary');
-            const detail = document.getElementById('payment-detail');
-            block.classList.remove('hidden');
-
-            if (pref === 'credito') {
-                detail.innerHTML = `<p>Recibirás <strong class="text-yellow-700 text-lg">$${totalC.toLocaleString()} QuestPoints</strong> en crédito de tienda.</p>`;
-                block.className = block.className.replace('bg-slate-50 border-slate-200', 'bg-yellow-50 border-yellow-200');
-            } else if (pref === 'cash') {
-                detail.innerHTML = `<p>Recibirás <strong class="text-green-700 text-lg">$${totalH.toLocaleString()} CLP</strong> por transferencia bancaria.</p>`;
-                block.className = block.className.replace('bg-yellow-50 border-yellow-200', 'bg-slate-50 border-slate-200');
-            } else {
-                detail.innerHTML = `
-                    <p>Combinarás ambas modalidades:</p>
-                    <ul class="mt-2 space-y-1">
-                        <li>💎 Hasta <strong class="text-yellow-700">$${totalC.toLocaleString()} QP</strong> en crédito</li>
-                        <li>💵 O hasta <strong class="text-green-700">$${totalH.toLocaleString()} CLP</strong> en cash</li>
-                    </ul>
-                    <p class="text-xs text-slate-400 mt-2">La distribución exacta se coordina en tienda.</p>`;
-                block.className = block.className.replace('bg-yellow-50 border-yellow-200', 'bg-slate-50 border-slate-200');
-            }
-        }
-
-        // ── Confirmar y enviar ────────────────────────────────────────────────
-        async function commitOrder() {
-            const rut   = document.getElementById('v_rut').value.trim();
-            const mail  = document.getElementById('v_mail').value.trim();
-            const pay   = document.getElementById('v_payment').value;
-            const terms = document.getElementById('v_terms').checked;
-
-            if (!rut || !mail || !pay)
-                return Swal.fire('Faltan Datos', 'Completa el RUT, Email y Preferencia de Pago.', 'warning');
-
-            // Bloqueo defensivo — el backend también valida
-            if (!cashEnabled && (pay === 'cash' || pay === 'mixto'))
-                return Swal.fire('Solo QuestPoints', 'Por el momento solo estamos recibiendo cartas por QuestPoints.', 'info');
-            if (!terms)
-                return Swal.fire('Aceptar Términos', 'Debes aceptar los términos y condiciones para continuar.', 'info');
-            if (analyzedData.length === 0)
-                return Swal.fire('Sin Cartas', 'Carga un CSV primero.', 'warning');
-
-            const confirm = await Swal.fire({
-                title: '¿Enviar cotización?',
-                text: "Te enviaremos un email con tu cotización. Los precios son referenciales y quedan sujetos a revisión en tienda.",
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonColor: '#1e293b',
-                cancelButtonText: 'Cancelar',
-                confirmButtonText: 'ENVIAR'
-            });
-
-            if (!confirm.isConfirmed) return;
-
-            Swal.fire({ title: 'Enviando...', didOpen: () => Swal.showLoading() });
-
-            const totalCredito = analyzedData.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
-            const totalCash    = analyzedData.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
-
-            try {
-                const res = await fetch(`${API}/api/public/commit_buylist`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        rut:                rut,
-                        email:              mail,
-                        payment_preference: pay,
-                        items:              analyzedData,
-                        total_credito:      totalCredito,
-                        total_cash:         totalCash,
-                    })
-                });
-
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Error del servidor');
-                }
-
-                const data = await res.json();
-                Swal.fire({
-                    title: '¡Recibido!',
-                    html: `<p>Tu cotización <strong>#${data.order_id}</strong> fue recibida.</p>
-                           <p class="text-sm text-slate-500 mt-2">Te enviamos un resumen a <strong>${mail}</strong> — nos contactaremos para coordinar.</p>`,
-                    icon: 'success',
-                    confirmButtonColor: '#1e293b'
-                });
-
-            } catch (e) {
-                Swal.fire('Error', e.message || 'Fallo al enviar la cotización.', 'error');
-            }
-        }
-    </script>
+checkStatus();
+</script>
 </body>
 </html>

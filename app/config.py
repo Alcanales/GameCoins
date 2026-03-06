@@ -34,13 +34,15 @@ class Settings(BaseSettings):
 
     # Buylist — control operacional
     BUYLIST_OPEN:             bool  = os.getenv("BUYLIST_OPEN", "true").lower() == "true"
-    BUYLIST_DAILY_BUDGET_USD: float = float(os.getenv("BUYLIST_DAILY_BUDGET_USD", 500.0))
 
     # SMTP
     SMTP_EMAIL:    str = os.getenv("SMTP_EMAIL",    "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     TARGET_EMAIL:  str = os.getenv("TARGET_EMAIL",  "contacto@gamequest.cl")
 
+    CASH_ENABLED: bool = os.getenv("CASH_ENABLED", "true").lower() == "true"
+    MIN_STOCK_NORMAL: int = int(os.getenv("MIN_STOCK_NORMAL", 4))
+    MIN_STOCK_ALTA:   int = int(os.getenv("MIN_STOCK_ALTA",   8))
     MAINTENANCE_MODE_CANJE: bool = os.getenv("MAINTENANCE_MODE_CANJE", "false").lower() == "true"
 
     class Config:

@@ -14,7 +14,7 @@ import unicodedata
 import pandas as pd
 
 from collections import defaultdict
-from datetime import datetime, date
+from datetime import datetime
 
 from pathlib import Path
 from decimal import Decimal
@@ -77,20 +77,9 @@ def _rate_limit(key: str, max_calls: int, window_sec: int) -> bool:
 # ── Cache de stock JS (TTL 5 minutos) ─────────────────────────────────────────
 _js_stock_cache: dict = {}
 _js_stock_cache_ts: float = 0.0
-JS_STOCK_TTL = 300  # segundos
+JS_STOCK_TTL = 600  # 10 min — free tier se duerme 15 min, así siempre hay cache al despertar
 
-# ── Budget diario de buylist ──────────────────────────────────────────────────
-_daily_budget: dict[str, float] = {}  # {"2025-01-15": 123.45}
-
-def _today() -> str:
-    return date.today().isoformat()
-
-def _budget_spent() -> float:
-    return _daily_budget.get(_today(), 0.0)
-
-def _budget_add(usd: float):
-    key = _today()
-    _daily_budget[key] = _daily_budget.get(key, 0.0) + usd
+# Sin límite de presupuesto diario — todas las órdenes se aceptan.
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 security = HTTPBearer()
@@ -114,7 +103,7 @@ class AdminAdjustReq(BaseModel):
 
 class StapleUpsertReq(BaseModel):
     name:               str
-    is_staple:          bool  = True
+    tier:               str   = "alta"   # "normal" | "alta" | "muy_alta"
     min_stock_override: Optional[int] = None
     margin_factor:      float = 2.5
 
@@ -129,26 +118,79 @@ class EmailAnalysisReq(BaseModel):
 
 # ── Helpers de normalización de nombres MTG ───────────────────────────────────
 
-def _normalize_name(name: str) -> str:
+# ══════════════════════════════════════════════════════════════════════════════
+# FUNCIÓN CANÓNICA ÚNICA — usada por los TRES pipelines:
+#   [CSV Manabox] → _canonical(name)
+#   [Jumpseller]  → _canonical(js_product_name)
+#   [Admin BD]    → _canonical(name_display)
+#
+# Si los tres producen la misma clave → match garantizado.
+# No hay otras funciones de normalización en este sistema.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Todos los variantes unicode de apóstrofe que puede usar Jumpseller
+_APOSTROPHES = frozenset({
+    '\u2018',  # '  LEFT SINGLE QUOTATION MARK
+    '\u2019',  # '  RIGHT SINGLE QUOTATION MARK  ← el más común en JS
+    '\u201A',  # ‚  SINGLE LOW-9 QUOTATION MARK
+    '\u201B',  # ‛  SINGLE HIGH-REVERSED-9 QUOTATION MARK
+    '\u02BC',  # ʼ  MODIFIER LETTER APOSTROPHE
+    '\u02B9',  # ʹ  MODIFIER LETTER PRIME
+    '\u0060',  # `  GRAVE ACCENT (mal uso como apóstrofe)
+    '\u00B4',  # ´  ACUTE ACCENT (mal uso como apóstrofe)
+    '\uFF07',  # ＇ FULLWIDTH APOSTROPHE
+})
+
+def _canonical(name: str) -> str:
     """
-    Normaliza nombre de carta para matching:
-    - Remove accents (û→u, é→e)
-    - Lowercase
-    - Strip set/edition info in parentheses/brackets
-    - Collapse spaces
+    Produce la clave normalizada canónica de una carta MTG.
+
+    Maneja todos los casos reales de inconsistencia entre fuentes:
+      - Apóstrofes tipográficos (U+2019 ' → U+0027 ')
+        "Thassa's Oracle" en JS == "Thassa's Oracle" en CSV  ✓
+      - Em-dash / en-dash como separadores de versión
+        "Cabal Coffers – Extended | NM" → "cabal coffers"   ✓
+      - Paréntesis con versiones
+        "Sol Ring (Borderless) | NM" → "sol ring"            ✓
+      - Acentos diacríticos
+        "Teferi, Héroe de Dominaria" → "teferi, heroe de dominaria" ✓
+      - Separador pipe de JS
+        "Force of Will | Etched | NM | 2XM" → "force of will" ✓
     """
+    if not name:
+        return ""
     n = name.strip()
-    # Quitar info de set entre paréntesis o corchetes
-    n = re.sub(r"[\(\[][^\)\]]+[\)\]]", "", n)
-    # Normalizar unicode (ñ, û, é, etc.)
+    # 1. Cortar en primer pipe  (formato JS: "Nombre | Idioma | Cond | Set")
+    n = n.split("|")[0].strip()
+    # 2. Cortar en em-dash / en-dash (separador ad-hoc del admin en JS)
+    #    Ningún nombre canónico de Scryfall contiene estos caracteres
+    n = re.split(r'[\u2013\u2014\u2015\u2212]', n)[0].strip()
+    # 3. Quitar contenido entre paréntesis y corchetes (versiones, sets, idioma)
+    n = re.sub(r"[\(\[][^\)\]]*[\)\]]", "", n).strip()
+    # 4. Normalizar variantes unicode de apóstrofe → ASCII U+0027
+    for ch in _APOSTROPHES:
+        n = n.replace(ch, "'")
+    # 5. NFKD para acentos diacríticos (â→a, é→e, ñ→n, ü→u, etc.)
     n = unicodedata.normalize("NFKD", n)
     n = "".join(c for c in n if not unicodedata.combining(c))
-    # Lowercase y colapsar espacios
-    n = " ".join(n.lower().split())
-    return n
+    # 6. Lowercase + colapsar espacios
+    return " ".join(n.lower().split())
 
 
-# ── Condición (CK cotiza en NM, aplicamos descuento por estado físico) ──────────
+# Alias para retrocompatibilidad — ambos apuntan a _canonical
+def _normalize_name(name: str) -> str:
+    return _canonical(name)
+
+def _base_name(name: str) -> str:
+    """
+    Para matching de nombres: idéntico a _canonical().
+    La detección de versión especial usa las columnas Foil/Version del CSV,
+    NUNCA el nombre de la carta (evita destruir nombres como 'Etched Champion').
+    """
+    return _canonical(name)
+
+
+# ── Condición ─────────────────────────────────────────────────────────────────
 
 def _cond_mult(cond_str: str) -> float:
     return {
@@ -161,97 +203,219 @@ def _cond_mult(cond_str: str) -> float:
 
 
 # ── Detección de versión especial (Estaca) ────────────────────────────────────
-# Una carta es "estaca" si es foil/etched O si su nombre o versión indica arte
-# premium (Borderless, Extended Art, Showcase, Alternate Art, Full Art, etc.).
-# En Manabox el campo "Foil" cubre foil/etched; el resto se detecta por keywords
-# en el nombre o en la columna "Version" si el CSV la trae.
+# SOLO usa las columnas Foil y Version del CSV — NUNCA el nombre de la carta.
+# Motivo: keywords como "etched", "showcase", "full art" son también palabras
+# en nombres reales ("Etched Champion", "Showcase, Mirror of Mayhem").
 
-_ESTACA_KEYWORDS = {
+_ESTACA_KEYWORDS = frozenset({
     "borderless", "extended art", "showcase", "alternate art",
     "full art", "retro frame", "surge foil", "galaxy foil",
     "textured foil", "gilded foil", "etched", "concept prewallpaper",
     "serialized", "double rainbow foil",
-}
+})
 
 def _is_estaca(foil: str, name: str, version: str = "") -> bool:
     """
-    Retorna True si la carta es una versión especial premium.
-    - foil   : columna 'Foil' del CSV  (normal | foil | etched)
-    - name   : nombre completo de la carta
-    - version: columna 'Version' del CSV si existe (Manabox puede traerla)
+    True si la carta es versión especial premium.
+    - foil   : columna Foil del CSV (normal | foil | etched)
+    - name   : nombre — solo se usa si version está vacío (backward compat)
+    - version: columna Version del CSV (Extended Art, Showcase, etc.)
     """
     foil_l = (foil or "normal").strip().lower()
     if foil_l in ("foil", "etched"):
         return True
-    combined = f"{name} {version}".lower()
-    return any(kw in combined for kw in _ESTACA_KEYWORDS)
-
-
-def _base_name(name: str) -> str:
-    """
-    Extrae el nombre base de la carta quitando sufijos de versión
-    para agrupar todas las versiones de la misma carta.
-    Ej: 'Lightning Bolt (Borderless)' → 'lightning bolt'
-         'Thassa's Oracle Extended Art' → 'thassa's oracle'
-    """
-    n = _normalize_name(name)  # ya quita paréntesis/corchetes y normaliza
-    # Quitar keywords de versión que puedan estar en el nombre normalizado
-    for kw in sorted(_ESTACA_KEYWORDS, key=len, reverse=True):
-        n = n.replace(kw, "").strip()
-    return " ".join(n.split())  # colapsar espacios dobles
+    # Preferir la columna Version sobre el nombre para evitar falsos positivos
+    source = version.strip() if version.strip() else ""
+    return any(kw in source.lower() for kw in _ESTACA_KEYWORDS)
 
 
 # ── JS stock con cache ────────────────────────────────────────────────────────
 
-async def _fetch_js_stock_cached() -> dict:
+# ── Helpers compartidos por analyze_buylist, stock_check y stock_lookup ───────
+
+def _build_staple_map(staple_rows: list) -> dict:
+    """
+    Construye el dict de lookup tier por clave canónica.
+    Indexa por DOS claves por staple:
+      1. _canonical(name_display) — siempre actualizado
+      2. s.name_normalized        — para compatibilidad con registros en BD
+         guardados antes de la normalización de apóstrofes (U+2019)
+    Sin fallback O(n²): el doble-indexado lo cubre.
+    """
+    sm: dict = {}
+    for s in staple_rows:
+        # Clave canónica fresca (garantiza apóstrofes normalizados)
+        sm[_canonical(s.name_display)] = s
+        # Clave tal como está en BD (puede ser pre-fix con U+2019)
+        if s.name_normalized not in sm:
+            sm[s.name_normalized] = s
+    return sm
+
+
+def _staple_lookup(staple_map: dict, name: str):
+    """Busca un staple por nombre canónico. O(1)."""
+    return staple_map.get(_canonical(name))
+
+
+def _compute_card_price(
+    price_usd: float,
+    foil_raw:  str,
+    version:   str,
+    cond_raw:  str,
+    base_min_price: dict,
+    card_name: str,
+) -> tuple[float, float, bool]:
+    """
+    Calcula precio efectivo USD después de aplicar estaca y condición.
+    Devuelve (precio_efectivo_usd, precio_ajustado_usd, is_estaca).
+    """
+    is_estaca_card = _is_estaca(foil_raw, card_name, version)
+    if is_estaca_card:
+        bn        = _canonical(card_name)
+        ref_price = base_min_price.get(bn, price_usd)
+        eff_usd   = ref_price * settings.STAKE_MULTIPLIER
+    else:
+        eff_usd = price_usd
+    adjusted = round(eff_usd * _cond_mult(cond_raw), 4)
+    return eff_usd, adjusted, is_estaca_card
+
+
+def _build_base_min_price(df) -> dict:
+    """
+    Pre-pase: precio base mínimo de cada carta en el CSV
+    (ignora versiones especiales — se usa como referencia para el precio estaca).
+    """
+    base_min: dict[str, float] = {}
+    for _, row in df.iterrows():
+        nm  = str(row.get("Name", "")).strip()
+        pr  = float(row.get("Purchase price", 0) or 0)
+        fo  = str(row.get("Foil",    "normal")).strip().lower()
+        ve  = str(row.get("Version", "")).strip()
+        cur = str(row.get("Purchase price currency", "USD")).strip().upper()
+        if not nm or pr <= 0:
+            continue
+        if cur == "EUR":
+            pr *= 1.10
+        if not _is_estaca(fo, nm, ve):
+            bn = _canonical(nm)
+            if bn not in base_min or pr < base_min[bn]:
+                base_min[bn] = pr
+    return base_min
+
+
+async def _fetch_js_stock_cached(force: bool = False) -> dict:
+    """
+    Descarga catálogo de Jumpseller y agrega stock + precio de venta por nombre base.
+    
+    CORAZÓN DEL SISTEMA:
+    - Clave del dict = nombre base de carta (sin versión/foil/idioma/set/condición)
+    - stock = suma de TODAS las versiones en JS (NM, LP, foil, retro frame, etc.)
+    - price = precio de venta JS de la variante regular más barata
+    - Usa limit=100 para reducir páginas (~213 para 21250 productos)
+    - Retry hasta 3 intentos por página para resiliencia en free tier
+    """
     global _js_stock_cache, _js_stock_cache_ts
-    if time.time() - _js_stock_cache_ts < JS_STOCK_TTL and _js_stock_cache:
-        logger.info("[JS_STOCK] Usando caché")
+    if not force and time.time() - _js_stock_cache_ts < JS_STOCK_TTL and _js_stock_cache:
         return _js_stock_cache
 
-    logger.info("[JS_STOCK] Descargando catálogo de Jumpseller...")
+    logger.info("[JS_STOCK] Cargando catálogo Jumpseller (limit=100, agregando por carta)...")
     url    = f"{settings.JUMPSELLER_API_BASE}/products.json"
     params = {"login": settings.JS_LOGIN_CODE, "authtoken": settings.JS_AUTH_TOKEN,
-              "limit": 50, "page": 1}
-    products = {}
+              "limit": 100, "page": 1}
+
+    raw_cards: dict = {}
+    total_prods = 0
 
     async with aiohttp.ClientSession() as session:
         while True:
-            try:
-                async with session.get(url, params=params,
-                                       timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        break
-                    data = await resp.json()
-                    if not data:
-                        break
-                    for p in data:
-                        prod  = p.get("product", p)
-                        name  = (prod.get("name") or "").strip()
-                        if not name:
+            # Retry hasta 3 veces por página (free tier puede tener latencia alta)
+            last_err = None
+            for attempt in range(3):
+                try:
+                    async with session.get(url, params=params,
+                                           timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                        if resp.status == 429:
+                            await asyncio.sleep(2 ** attempt)
                             continue
-                        variants = prod.get("variants", [])
-                        if variants:
-                            v = variants[0].get("variant", variants[0])
-                            stock = int(v.get("stock", 0) or 0)
-                            price = float(v.get("price", 0) or 0)
-                        else:
-                            stock = int(prod.get("stock", 0) or 0)
-                            price = float(prod.get("price", 0) or 0)
-                        key = _normalize_name(name)
-                        products[key] = {"id": prod.get("id"), "name": name,
-                                         "stock": stock, "price": price}
-                    if len(data) < 50:
+                        if resp.status != 200:
+                            last_err = f"HTTP {resp.status}"
+                            break
+                        data = await resp.json()
+                        last_err = None
                         break
-                    params["page"] += 1
-                    await asyncio.sleep(0.1)
-            except Exception as e:
-                logger.error(f"[JS_STOCK] Error página {params['page']}: {e}")
+                except Exception as e:
+                    last_err = str(e)
+                    await asyncio.sleep(1)
+            else:
+                data = []
+
+            if last_err or not data:
+                if last_err:
+                    logger.warning(f"[JS_STOCK] Página {params['page']}: {last_err} — deteniendo")
                 break
+
+            for p in data:
+                prod  = p.get("product", p)
+                name  = (prod.get("name") or "").strip()
+                if not name:
+                    continue
+
+                # Stock: sumar todas las variantes del producto
+                variants = prod.get("variants", [])
+                prod_stock = 0
+                prod_price = 0.0
+                if variants:
+                    for vv in variants:
+                        v_data = vv.get("variant", vv) if isinstance(vv, dict) else {}
+                        prod_stock += int(v_data.get("stock", 0) or 0)
+                        vp = float(v_data.get("price", 0) or 0)
+                        if vp > 0 and (prod_price == 0 or vp < prod_price):
+                            prod_price = vp
+                else:
+                    prod_stock = int(prod.get("stock", 0) or 0)
+                    prod_price = float(prod.get("price", 0) or 0)
+
+                # ── CLAVE: nombre base — independiente de versión, idioma, set, condición ──
+                key = _canonical(name)
+                if not key:
+                    continue
+
+                if key not in raw_cards:
+                    raw_cards[key] = {
+                        "total_stock": 0,
+                        "best_price":  0,
+                        "variants":    [],
+                        "first_id":    prod.get("id"),
+                    }
+                raw_cards[key]["total_stock"] += prod_stock
+                raw_cards[key]["variants"].append({
+                    "name": name, "stock": prod_stock, "price": prod_price,
+                    "id": prod.get("id")
+                })
+                if prod_price > 0 and (raw_cards[key]["best_price"] == 0
+                                        or prod_price < raw_cards[key]["best_price"]):
+                    raw_cards[key]["best_price"] = prod_price
+                total_prods += 1
+
+            if len(data) < 100:
+                break
+            params["page"] += 1
+            await asyncio.sleep(0.05)  # Gentle rate limiting
+
+    products = {
+        key: {
+            "stock":    v["total_stock"],
+            "price":    v["best_price"],   # precio de venta JS (más bajo)
+            "id":       v["first_id"],
+            "variants": v["variants"],
+        }
+        for key, v in raw_cards.items()
+    }
 
     _js_stock_cache    = products
     _js_stock_cache_ts = time.time()
-    logger.info(f"[JS_STOCK] {len(products)} productos cargados")
+    logger.info(f"[JS_STOCK] ✅ {len(products)} cartas únicas / {total_prods} productos / "
+                f"{sum(v['stock'] for v in products.values())} u. stock total")
     return products
 
 
@@ -338,23 +502,29 @@ async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
 
 @app.get("/api/public/buylist_status")
 def buylist_status():
-    spent = _budget_spent()
     return {
-        "open":          settings.BUYLIST_OPEN,
-        "budget_daily":  settings.BUYLIST_DAILY_BUDGET_USD,
-        "budget_spent":  round(spent, 2),
-        "budget_left":   max(0.0, round(settings.BUYLIST_DAILY_BUDGET_USD - spent, 2)),
+        "open":         settings.BUYLIST_OPEN,
+        "cash_enabled": settings.CASH_ENABLED,
     }
 
 
 @app.post("/api/public/analyze_buylist")
-async def analyze_buylist(file: UploadFile = File(...)):
+async def analyze_buylist(
+    file: UploadFile = File(...),
+    request: Request  = None,
+    db: Session = Depends(get_db),
+):
     """
-    Recibe CSV Manabox. Aplica foil/condición/moneda. Retorna cotización.
-    Versión pública — sin datos de stock, solo precios de compra.
+    Recibe CSV Manabox. Aplica foil/condición/moneda.
+    Incluye tier de demanda y estado de stock para filtrado en frontend.
+    Rate limit: 20 análisis/hora por IP (protege el free tier).
     """
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada. Vuelve pronto.")
+
+    ip = (request.client.host if request and request.client else "unknown")
+    if not _rate_limit(f"analyze:{ip}", max_calls=20, window_sec=3600):
+        raise HTTPException(429, "Demasiados análisis. Espera un momento e inténtalo de nuevo.")
 
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:  # 5 MB max
@@ -367,24 +537,11 @@ async def analyze_buylist(file: UploadFile = File(...)):
     if missing:
         raise HTTPException(422, f"Columnas faltantes: {missing}. Encontradas: {list(df.columns)}")
 
-    # ── Pre-pase: precio base mínimo por nombre de carta (para cálculo estaca) ───
-    # Se agrupa por nombre normalizado e ignora versiones especiales para encontrar
-    # el precio de la versión regular más barata de cada carta en el CSV.
-    base_min_price: dict[str, float] = {}
-    for _, row in df.iterrows():
-        nm    = str(row.get("Name", "")).strip()
-        pr    = float(row.get("Purchase price", 0) or 0)
-        fo    = str(row.get("Foil", "normal")).strip().lower()
-        ve    = str(row.get("Version", "")).strip()
-        cur   = str(row.get("Purchase price currency", "USD")).strip().upper()
-        if not nm or pr <= 0:
-            continue
-        if cur == "EUR":
-            pr = pr * 1.10
-        if not _is_estaca(fo, nm, ve):
-            bn = _base_name(nm)
-            if bn not in base_min_price or pr < base_min_price[bn]:
-                base_min_price[bn] = pr
+    # ── Pre-pase y tablas de lookup ────────────────────────────────────────
+    from .models import StapleCard
+    base_min_price  = _build_base_min_price(df)
+    staple_map_pub  = _build_staple_map(db.query(StapleCard).all())
+    js_stock_pub    = await _fetch_js_stock_cached()
 
     results = []
     for _, row in df.iterrows():
@@ -398,33 +555,39 @@ async def analyze_buylist(file: UploadFile = File(...)):
 
         if not name or price_usd <= 0:
             continue
-
         if currency == "EUR":
-            price_usd = price_usd * 1.10
+            price_usd *= 1.10
 
-        # ── Lógica de Estaca ──────────────────────────────────────────────────
-        is_estaca_card = _is_estaca(foil_raw, name, version)
-        if is_estaca_card:
-            bn = _base_name(name)
-            # Usar precio base mínimo si existe en el CSV; si no, usar el propio precio CK
-            ref_price = base_min_price.get(bn, price_usd)
-            effective_price = ref_price * settings.STAKE_MULTIPLIER
-        else:
-            effective_price = price_usd
-
-        # Condición aplica siempre (CK cotiza en NM)
-        cm             = _cond_mult(cond_raw)
-        adjusted_price = effective_price * cm
+        eff_usd, adjusted_price, is_estaca_card = _compute_card_price(
+            price_usd, foil_raw, version, cond_raw, base_min_price, name
+        )
 
         price_credito = int(adjusted_price * settings.BUYLIST_FACTOR_CREDITO)
         price_cash    = int(adjusted_price * settings.BUYLIST_FACTOR_CASH)
+
+        # ── Tier y estado de compra ─────────────────────────────────────────
+        srec         = _staple_lookup(staple_map_pub, name)
+        tier_pub     = srec.tier if srec else "sin_lista"
+        key_pub      = _canonical(name)
+        js_pub       = js_stock_pub.get(key_pub, {})
+        stock_pub    = js_pub.get("stock", None)
+        min_s_pub    = (srec.min_stock_override if srec and srec.min_stock_override
+                        else settings.MIN_STOCK_ALTA   if tier_pub == "alta"
+                        else settings.MIN_STOCK_NORMAL)
+
+        if tier_pub == "muy_alta":
+            buying_status = "muy_alta"
+        elif tier_pub in ("alta", "normal"):
+            buying_status = "buscamos" if (stock_pub is None or stock_pub < min_s_pub * 3) else "stock_ok"
+        else:
+            buying_status = "sin_lista"
 
         results.append({
             "name":           name,
             "qty":            qty,
             "price_usd":      round(adjusted_price, 2),
             "price_usd_raw":  round(price_usd, 2),
-            "price_usd_base": round(effective_price, 2),  # precio base antes de condición
+            "price_usd_base": round(eff_usd, 2),
             "foil":           foil_raw,
             "condition":      cond_raw,
             "version":        version,
@@ -432,7 +595,11 @@ async def analyze_buylist(file: UploadFile = File(...)):
             "stake_mult":     settings.STAKE_MULTIPLIER if is_estaca_card else 1.0,
             "price_credito":  price_credito,
             "price_cash":     price_cash,
-            "price_normal":   price_credito,  # compat. HTML anterior
+            "price_normal":   price_credito,   # alias legacy para frontend
+            "tier":           tier_pub,
+            "stock_actual":   stock_pub,
+            "min_stock":      min_s_pub,
+            "buying_status":  buying_status,
         })
 
     return results
@@ -457,14 +624,12 @@ async def commit_buylist(
     if not _rate_limit(f"buylist:{ip}", max_calls=3, window_sec=3600):
         raise HTTPException(429, "Demasiadas solicitudes. Intenta en 1 hora.")
 
-    # Verificar presupuesto diario
-    total_usd = sum(
-        it.price_usd * getattr(it, "qty", getattr(it, "qty_csv", 1))
-        for it in req.items
-    )
-    if _budget_spent() + total_usd > settings.BUYLIST_DAILY_BUDGET_USD:
-        raise HTTPException(503,
-            "El presupuesto diario de compra está agotado. Vuelve mañana.")
+    # Verificar modalidad de pago permitida
+    if not settings.CASH_ENABLED and req.payment_preference in ("cash", "mixto"):
+        raise HTTPException(400,
+            "Por el momento solo estamos recibiendo cartas por QuestPoints.")
+
+
 
     from .models import BuylistOrder
     items_dict = [it.model_dump() for it in req.items]
@@ -482,26 +647,25 @@ async def commit_buylist(
     db.commit()
     db.refresh(order)
 
-    _budget_add(total_usd)
+
 
     # ── Emails en background — wrapper sync que corre la coroutine ──────────────
-    def _send_both_sync():
-        import asyncio
-        asyncio.run(email_service.send_public_buylist_both(
-            vendor_email   = req.email,
-            rut            = req.rut,
-            payment_pref   = req.payment_preference,
-            items          = items_dict,
-            total_credito  = req.total_credito,
-            total_cash     = req.total_cash,
-            order_id       = order.id,
-        ))
-    background_tasks.add_task(_send_both_sync)
+    # BackgroundTask async — FastAPI lo ejecuta correctamente dentro del event loop
+    background_tasks.add_task(
+        email_service.send_public_buylist_both,
+        vendor_email  = req.email,
+        rut           = req.rut,
+        payment_pref  = req.payment_preference,
+        items         = items_dict,
+        total_credito = req.total_credito,
+        total_cash    = req.total_cash,
+        order_id      = order.id,
+    )
 
     return {
         "status":   "ok",
         "order_id": order.id,
-        "message":  f"Orden #{order.id} guardada. Email enviado a {req.email} y respaldo a tienda.",
+        "message":  f"Cotización #{order.id} recibida. Enviaremos un resumen a {req.email}.",
     }
 
 
@@ -596,7 +760,7 @@ def get_metrics(db: Session = Depends(get_db)):
 @app.get("/api/admin/staples", dependencies=[Depends(verify_admin)])
 def list_staples(db: Session = Depends(get_db)):
     from .models import StapleCard
-    return [{"id": c.id, "name": c.name_display, "is_staple": c.is_staple,
+    return [{"id": c.id, "name": c.name_display, "tier": c.tier,
              "min_stock_override": c.min_stock_override, "margin_factor": c.margin_factor,
              "created_at": c.created_at.isoformat() if c.created_at else None}
             for c in db.query(StapleCard).order_by(StapleCard.name_display).all()]
@@ -604,22 +768,46 @@ def list_staples(db: Session = Depends(get_db)):
 
 @app.post("/api/admin/staples", dependencies=[Depends(verify_admin)])
 def upsert_staple(req: StapleUpsertReq, db: Session = Depends(get_db)):
+    """
+    Guarda/actualiza una carta en la lista de demanda.
+    Clave canónica: _canonical(name) — inmune a apóstrofes tipográficos.
+    Maneja migración de registros viejos con name_normalized en U+2019.
+    """
     from .models import StapleCard
-    key  = _normalize_name(req.name)
+    clean_name = req.name.strip()
+    key        = _canonical(clean_name)
+
+    # Buscar primero por la clave nueva (canónica)
     card = db.query(StapleCard).filter(StapleCard.name_normalized == key).first()
+
+    # Fallback: buscar por _canonical(name_display) para registros con clave vieja (U+2019)
+    if not card:
+        card = (db.query(StapleCard)
+                  .filter(func.lower(StapleCard.name_display) == clean_name.lower())
+                  .first())
+        if card:
+            # Migrar clave al formato canónico actual
+            card.name_normalized = key
+
     if card:
-        card.is_staple          = req.is_staple
+        card.tier               = req.tier
         card.min_stock_override = req.min_stock_override
         card.margin_factor      = req.margin_factor
-        card.name_display       = req.name.strip()
+        card.name_display       = clean_name   # actualizar siempre al nombre más reciente
+        card.name_normalized    = key          # garantizar clave canónica
     else:
-        card = StapleCard(name_normalized=key, name_display=req.name.strip(),
-                          is_staple=req.is_staple, min_stock_override=req.min_stock_override,
-                          margin_factor=req.margin_factor)
+        card = StapleCard(
+            name_normalized    = key,
+            name_display       = clean_name,
+            tier               = req.tier,
+            min_stock_override = req.min_stock_override,
+            margin_factor      = req.margin_factor,
+        )
         db.add(card)
+
     db.commit()
     db.refresh(card)
-    return {"status": "ok", "id": card.id, "name": card.name_display}
+    return {"status": "ok", "id": card.id, "name": card.name_display, "key": key}
 
 
 @app.delete("/api/admin/staples/{staple_id}", dependencies=[Depends(verify_admin)])
@@ -654,34 +842,17 @@ async def stock_check(
     if missing:
         raise HTTPException(422, f"Columnas faltantes: {missing}")
 
-    # Cargar staples y stock JS (en paralelo)
-    staple_rows = db.query(StapleCard).all()
-    staple_map  = {_normalize_name(s.name_display): s for s in staple_rows}
-    js_stock    = await _fetch_js_stock_cached()
-
-    # ── Pre-pase: precio base mínimo por carta (para estaca) ────────────────────
-    base_min_price: dict[str, float] = {}
-    for _, row in df.iterrows():
-        nm  = str(row.get("Name", "")).strip()
-        pr  = float(row.get("Purchase price", 0) or 0)
-        fo  = str(row.get("Foil", "normal")).strip().lower()
-        ve  = str(row.get("Version", "")).strip()
-        cur = str(row.get("Purchase price currency", "USD")).strip().upper()
-        if not nm or pr <= 0:
-            continue
-        if cur == "EUR":
-            pr = pr * 1.10
-        if not _is_estaca(fo, nm, ve):
-            bn = _base_name(nm)
-            if bn not in base_min_price or pr < base_min_price[bn]:
-                base_min_price[bn] = pr
+    from .models import StapleCard
+    base_min_price = _build_base_min_price(df)
+    staple_map     = _build_staple_map(db.query(StapleCard).all())
+    js_stock       = await _fetch_js_stock_cached()
 
     results      = []
     total_compra = 0.0
 
     for _, row in df.iterrows():
         name     = str(row.get("Name",           "")).strip()
-        qty_csv  = int(row.get("Quantity",         1) or 1)
+        qty      = int(row.get("Quantity",         1) or 1)
         raw_usd  = float(row.get("Purchase price", 0) or 0)
         foil_raw = str(row.get("Foil",      "normal")).strip().lower()
         cond_raw = str(row.get("Condition", "near_mint")).strip().lower()
@@ -690,101 +861,86 @@ async def stock_check(
 
         if not name or raw_usd <= 0:
             continue
-
         if currency == "EUR":
-            raw_usd = raw_usd * 1.10
+            raw_usd *= 1.10
 
-        # ── Lógica de Estaca ──────────────────────────────────────────────────
-        is_estaca_card = _is_estaca(foil_raw, name, version)
-        if is_estaca_card:
-            bn        = _base_name(name)
-            ref_price = base_min_price.get(bn, raw_usd)  # fallback al propio precio CK
-            eff_usd   = ref_price * settings.STAKE_MULTIPLIER
-        else:
-            eff_usd   = raw_usd
+        eff_usd, price_usd, is_estaca_card = _compute_card_price(
+            raw_usd, foil_raw, version, cond_raw, base_min_price, name
+        )
 
-        # Condición aplica siempre
-        cm        = _cond_mult(cond_raw)
-        price_usd = round(eff_usd * cm, 4)
+        # Tier lookup O(1)
+        staple_rec  = _staple_lookup(staple_map, name)
+        tier        = staple_rec.tier if staple_rec else "normal"
+        is_muy_alta = tier == "muy_alta"
+        is_alta     = tier == "alta"
+        min_stock   = (staple_rec.min_stock_override if staple_rec and staple_rec.min_stock_override
+                       else settings.MIN_STOCK_ALTA if is_alta else settings.MIN_STOCK_NORMAL)
+        margin      = staple_rec.margin_factor if staple_rec else 2.5
 
-        # Staple lookup
-        key        = _normalize_name(name)
-        staple_rec = staple_map.get(key)
-        is_staple  = staple_rec.is_staple if staple_rec else False
-        min_stock  = (staple_rec.min_stock_override if staple_rec and staple_rec.min_stock_override
-                      else (8 if is_staple else 4))
-        margin     = staple_rec.margin_factor if staple_rec else 2.5
-
-        # Precios CLP
         price_clp_cash    = price_usd * settings.BUYLIST_FACTOR_CASH
         price_clp_credito = price_usd * settings.BUYLIST_FACTOR_CREDITO
         min_price_venta   = price_clp_cash * margin
 
-        # Stock JS
+        key              = _canonical(name)
         js_data          = js_stock.get(key, {})
         stock_actual     = js_data.get("stock", None)
         price_js         = js_data.get("price", 0)
         js_id            = js_data.get("id")
-        stock_proyectado = (stock_actual or 0) + qty_csv
+        stock_proyectado = (stock_actual or 0) + qty
 
-        # ── Alertas ───────────────────────────────────────────────────
+        # ── Alertas ───────────────────────────────────────────────────────
         alerts = []
         status = "ok"
 
-        # Carta no existe en JS
         if stock_actual is None:
             alerts.append({"type": "info", "msg": "No existe en Jumpseller — se creará"})
             status = "info"
 
-        # Precio mínimo de compra
         if raw_usd < settings.MIN_PURCHASE_USD:
             alerts.append({"type": "warning",
-                           "msg": f"Precio base ${raw_usd:.2f} USD bajo mínimo rentable (${settings.MIN_PURCHASE_USD} USD)"})
+                           "msg": f"Precio ${raw_usd:.2f} USD bajo mínimo rentable (${settings.MIN_PURCHASE_USD} USD)"})
             if status == "ok":
                 status = "warning"
 
-        # Estaca: informar qué multiplicador y precio base se usó
         if is_estaca_card:
-            bn        = _base_name(name)
+            bn        = _canonical(name)
             base_used = base_min_price.get(bn, raw_usd)
             origin    = "CSV base" if bn in base_min_price else "precio CK propio"
             alerts.append({"type": "info",
-                           "msg": (f"Estaca ×{settings.STAKE_MULTIPLIER} "
-                                   f"(base ${base_used:.2f} USD — {origin})")})
+                           "msg": f"Estaca ×{settings.STAKE_MULTIPLIER} (base ${base_used:.2f} USD — {origin})"})
 
-        # Sobrestock
-        overstock_limit = min_stock * 3
-        if stock_proyectado > overstock_limit:
-            alerts.append({"type": "danger",
-                           "msg": f"Sobrestock: tendrías {stock_proyectado} u. (límite {overstock_limit})"})
-            status = "danger"
-        elif stock_proyectado > min_stock * 2:
-            alerts.append({"type": "warning",
-                           "msg": f"Stock alto: {stock_proyectado} u. tras compra"})
-            if status == "ok":
-                status = "warning"
+        if not is_muy_alta:
+            overstock_limit = min_stock * 3
+            if stock_proyectado > overstock_limit:
+                alerts.append({"type": "danger",
+                               "msg": f"Sobrestock: tendrías {stock_proyectado} u. (límite {overstock_limit})"})
+                status = "danger"
+            elif stock_proyectado > min_stock * 2:
+                alerts.append({"type": "warning", "msg": f"Stock alto: {stock_proyectado} u. tras compra"})
+                if status == "ok":
+                    status = "warning"
+        else:
+            alerts.append({"type": "info", "msg": "Muy alta demanda — compra siempre"})
 
-        # Precio JS bajo mínimo de venta
         if price_js > 0 and price_js < min_price_venta:
             alerts.append({"type": "danger",
                            "msg": f"Precio JS ${price_js:,.0f} bajo mínimo recomendado ${min_price_venta:,.0f}"})
             status = "danger"
 
-        # Stock actual bajo mínimo
-        if stock_actual is not None and stock_actual < min_stock:
+        if not is_muy_alta and stock_actual is not None and stock_actual < min_stock:
             alerts.append({"type": "warning",
-                           "msg": f"Stock actual ({stock_actual}) bajo mínimo ({min_stock}) — compra ayuda"})
+                           "msg": f"Stock actual ({stock_actual}) bajo mínimo ({min_stock})"})
             if status == "ok":
                 status = "warning"
 
-        total_compra += raw_usd * qty_csv
+        total_compra += raw_usd * qty
 
         results.append({
             "name":              name,
-            "qty_csv":           qty_csv,
+            "qty":               qty,
             "price_usd":         round(price_usd, 2),
             "price_usd_raw":     round(raw_usd, 4),
-            "price_usd_eff":     round(eff_usd, 4),   # precio efectivo tras estaca
+            "price_usd_eff":     round(eff_usd, 4),
             "foil":              foil_raw,
             "condition":         cond_raw,
             "version":           version,
@@ -793,7 +949,9 @@ async def stock_check(
             "price_cash":        int(price_clp_cash),
             "price_credito":     int(price_clp_credito),
             "min_price_venta":   int(min_price_venta),
-            "is_staple":         is_staple,
+            "tier":              tier,
+            "is_muy_alta":       is_muy_alta,
+            "js_variants_count": len(js_data.get("variants", [])),
             "min_stock":         min_stock,
             "stock_actual":      stock_actual,
             "stock_proyectado":  stock_proyectado,
@@ -801,14 +959,14 @@ async def stock_check(
             "js_id":             js_id,
             "alerts":            alerts,
             "status":            status,
-            "approved":          all(a["type"] != "danger" for a in alerts),
+            "approved":          is_muy_alta or all(a["type"] != "danger" for a in alerts),
         })
 
     order_map = {"danger": 0, "warning": 1, "info": 2, "ok": 3}
     results.sort(key=lambda r: order_map.get(r["status"], 9))
 
-    total_clp_cash    = sum(r["price_cash"]    * r["qty_csv"] for r in results)
-    total_clp_credito = sum(r["price_credito"] * r["qty_csv"] for r in results)
+    total_clp_cash    = sum(r["price_cash"]    * r["qty"] for r in results)
+    total_clp_credito = sum(r["price_credito"] * r["qty"] for r in results)
 
     return {
         "summary": {
@@ -938,18 +1096,183 @@ async def jumpseller_customer_webhook(request: Request, background_tasks: Backgr
 # 🛠️ SALUD
 # =====================================================================
 
+@app.get("/api/admin/stock_lookup", dependencies=[Depends(verify_admin)])
+async def stock_lookup(q: str = "", db: Session = Depends(get_db)):
+    """
+    Búsqueda de carta en el cache de Jumpseller por tokens.
+
+    Estrategia de match (en orden de prioridad):
+      1. Exacto           — "sol ring"  == "sol ring"
+      2. Prefijo completo — key.startswith(q_norm)
+      3. Todos los tokens — "fat pus"  → ["fat","pus"] ambos son prefijo de
+                             alguna palabra en "fatal push" ✓
+                             "dimir hous" → ["dimir","hous"] ✓ en "dimir house guard"
+      4. Cualquier token  — al menos 1 token ≥3 chars matchea como prefijo de palabra
+
+    No procesa CSV — consulta el cache en RAM (O(n) sobre ~21k cartas, <10ms).
+    """
+    q_clean = q.strip()
+    if len(q_clean) < 2:
+        raise HTTPException(422, "Escribe al menos 2 caracteres")
+
+    js_stock = await _fetch_js_stock_cached()
+    from .models import StapleCard
+
+    q_norm   = _normalize_name(q_clean)   # ej: "sol ring", "dimir hous"
+    q_tokens = q_norm.split()             # ["sol","ring"] / ["dimir","hous"]
+
+    def _score(key: str) -> int | None:
+        """
+        Devuelve prioridad de match (0=mejor) o None si no hay match.
+        Comparamos contra las palabras del key para soportar typos parciales.
+        """
+        key_words = key.split()
+
+        # 1. Coincidencia exacta
+        if key == q_norm:
+            return 0
+
+        # 2. Key empieza con el query completo
+        if key.startswith(q_norm):
+            return 1
+
+        # 3. Todos los tokens del query son prefijo de alguna palabra del key
+        #    "fat pus" → "fat" es prefijo de "fatal" ✓, "pus" de "push" ✓
+        def token_matches_any_word(tok: str) -> bool:
+            return any(w.startswith(tok) for w in key_words)
+
+        if all(token_matches_any_word(t) for t in q_tokens):
+            # Cuántas palabras matchean exactamente (mejor ranking si más exactas)
+            exact = sum(1 for t in q_tokens if t in key_words)
+            return 2 + (10 - min(exact, 9))   # 2–11
+
+        # 4. Al menos un token largo (≥3) matchea como prefijo de alguna palabra
+        long_tokens = [t for t in q_tokens if len(t) >= 3]
+        if long_tokens and any(token_matches_any_word(t) for t in long_tokens):
+            return 20
+
+        return None  # sin match
+
+    # Recorrer cache y puntuar
+    scored: list[tuple[int, str, dict]] = []
+    for key, data in js_stock.items():
+        s = _score(key)
+        if s is not None:
+            scored.append((s, key, data))
+
+    scored.sort(key=lambda x: x[0])
+
+    if not scored:
+        return {"query": q_clean, "q_normalized": q_norm, "results": [], "total_matches": 0}
+
+    # Staple map para enriquecer con tier — usa el mismo helper que los otros endpoints
+    from .models import StapleCard
+    staple_map = _build_staple_map(db.query(StapleCard).all())
+
+    results = []
+    for _, key, data in scored[:20]:
+        srec = staple_map.get(key)
+        min_s = (srec.min_stock_override if srec and srec.min_stock_override
+                 else settings.MIN_STOCK_ALTA   if srec and srec.tier == "alta"
+                 else settings.MIN_STOCK_NORMAL)
+
+        # Nombre para mostrar: BD > primera variante JS (parte antes del pipe) > key
+        if srec:
+            display = srec.name_display
+        elif data.get("variants"):
+            display = data["variants"][0]["name"].split("|")[0].strip()
+        else:
+            display = key.title()
+
+        results.append({
+            "key":          key,
+            "display_name": display,
+            "total_stock":  data["stock"],
+            "price_js":     data.get("price", 0),
+            "variants":     [{"name": v["name"], "stock": v["stock"], "price": v["price"]}
+                             for v in (data.get("variants") or [])],
+            "tier":         srec.tier if srec else None,
+            "staple_id":    srec.id   if srec else None,
+            "min_stock":    min_s     if srec else None,
+            "in_list":      srec is not None,
+        })
+
+    return {
+        "query":         q_clean,
+        "q_normalized":  q_norm,
+        "results":       results,
+        "total_matches": len(scored),
+        "cache_valid":   bool(js_stock),
+    }
+
+
 @app.post("/api/admin/clean_coupons", dependencies=[Depends(verify_admin)])
 async def clean_used_coupons():
     burned = await VaultController.sweep_used_coupons()
     return {"status": "success", "burned": burned}
 
+@app.post("/api/admin/migrate_canonical", dependencies=[Depends(verify_admin)])
+def migrate_canonical(db: Session = Depends(get_db)):
+    """
+    Migración idempotente: recalcula name_normalized con _canonical() para todos
+    los staples. Necesario tras el fix de apóstrofes tipográficos (U+2019→U+0027).
+    Seguro correrlo múltiples veces — no modifica datos si ya están normalizados.
+    """
+    from .models import StapleCard
+    rows     = db.query(StapleCard).all()
+    updated  = 0
+    skipped  = 0
+    for s in rows:
+        new_key = _canonical(s.name_display)
+        if s.name_normalized != new_key:
+            s.name_normalized = new_key
+            updated += 1
+        else:
+            skipped += 1
+    db.commit()
+    return {"status": "ok", "updated": updated, "skipped": skipped, "total": len(rows)}
+
+
 @app.get("/health")
 def health():
     return {
-        "status":        "ok",
-        "version":       "4.0",
-        "buylist_open":  settings.BUYLIST_OPEN,
-        "budget_spent":  round(_budget_spent(), 2),
-        "budget_limit":  settings.BUYLIST_DAILY_BUDGET_USD,
-        "js_cache_age":  int(time.time() - _js_stock_cache_ts),
+        "status":           "ok",
+        "version":          "4.6",
+        "buylist_open":     settings.BUYLIST_OPEN,
+        "cash_enabled":     settings.CASH_ENABLED,
+        "js_cache_age_sec": int(time.time() - _js_stock_cache_ts),
+        "js_cache_cards":   len(_js_stock_cache),
+        "js_cache_valid":   bool(_js_stock_cache and time.time() - _js_stock_cache_ts < JS_STOCK_TTL),
+    }
+
+
+@app.post("/api/admin/warmup_cache", dependencies=[Depends(verify_admin)])
+async def warmup_cache():
+    """
+    Fuerza recarga del catálogo JS desde cero.
+    Útil después de actualizar productos en Jumpseller o al despertar el free tier.
+    """
+    global _js_stock_cache_ts
+    _js_stock_cache_ts = 0.0  # invalidar cache
+    products = await _fetch_js_stock_cached(force=True)
+    total_stock = sum(v["stock"] for v in products.values())
+    return {
+        "status":          "ok",
+        "cards_loaded":    len(products),
+        "total_stock":     total_stock,
+        "cache_valid_sec": JS_STOCK_TTL,
+    }
+
+
+@app.get("/api/admin/cache_status", dependencies=[Depends(verify_admin)])
+def cache_status():
+    """Estado del cache de stock JS para diagnóstico."""
+    age = int(time.time() - _js_stock_cache_ts)
+    return {
+        "cache_age_sec":   age,
+        "cache_ttl_sec":   JS_STOCK_TTL,
+        "cache_valid":     bool(_js_stock_cache and age < JS_STOCK_TTL),
+        "cards_loaded":    len(_js_stock_cache),
+        "total_stock":     sum(v["stock"] for v in _js_stock_cache.values()),
+        "sample_5":        list(_js_stock_cache.keys())[:5],
     }

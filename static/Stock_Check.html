@@ -9,726 +9,447 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <style>
     body { background:#0f172a; font-family:'Inter',sans-serif; color:#e2e8f0; }
-    .glass       { background:rgba(255,255,255,0.04); backdrop-filter:blur(10px);
-                   border:1px solid rgba(255,255,255,0.08); }
-    .glass-hover { transition:all .2s; }
-    .glass-hover:hover { background:rgba(255,255,255,0.07); }
-
-    /* Status row colors */
-    .row-danger  { border-left:3px solid #ef4444; }
-    .row-warning { border-left:3px solid #f59e0b; }
-    .row-info    { border-left:3px solid #3b82f6; }
-    .row-ok      { border-left:3px solid #22c55e; }
-
-    /* Badge pills */
-    .badge        { display:inline-flex;align-items:center;gap:4px;
-                    padding:2px 10px;border-radius:999px;font-size:10px;font-weight:700; }
-    .badge-danger  { background:#450a0a;color:#fca5a5; }
-    .badge-warning { background:#451a03;color:#fcd34d; }
-    .badge-info    { background:#0c2340;color:#93c5fd; }
-    .badge-ok      { background:#052e16;color:#86efac; }
-    .badge-staple   { background:#3b0764;color:#e9d5ff; }
-    .badge-muyalta  { background:#78350f;color:#fde68a; }
-    .badge-alta     { background:#14532d;color:#86efac; }
-    .badge-bnormal  { background:#1e293b;color:#94a3b8;border:1px solid #334155; }
-
-    .input-dark { background:#1e293b;border:1px solid #334155;color:#e2e8f0;
-                  border-radius:8px;padding:8px 12px;font-size:13px; }
-    .input-dark:focus { outline:none;border-color:#eab308; }
-
-    .tab-btn         { padding:8px 20px;border-radius:8px;font-size:12px;font-weight:700;
-                       text-transform:uppercase;letter-spacing:.05em;transition:all .15s;
-                       cursor:pointer; }
-    .tab-active      { background:#eab308;color:#0f172a; }
-    .tab-inactive    { background:transparent;color:#64748b; }
-    .tab-inactive:hover { color:#cbd5e1; }
-
-    .spin { animation:spin 1s linear infinite; }
+    .glass  { background:rgba(255,255,255,0.035); backdrop-filter:blur(12px);
+              border:1px solid rgba(255,255,255,0.07); border-radius:14px; }
+    .pill   { display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
+              font-size:9px;font-weight:700;white-space:nowrap; }
+    .p-ma   { background:#78350f;color:#fde68a;border:1px solid #92400e; }
+    .p-al   { background:#14532d;color:#86efac;border:1px solid #166534; }
+    .p-no   { background:#1e293b;color:#94a3b8;border:1px solid #334155; }
+    .inp    { background:#1e293b;border:1px solid #334155;color:#e2e8f0;
+              border-radius:10px;padding:9px 14px;font-size:13px;transition:border .15s; }
+    .inp:focus  { outline:none;border-color:#eab308;box-shadow:0 0 0 3px rgba(234,179,8,.1); }
+    .inp::placeholder { color:#334155; }
+    .tier-btn { width:100%;text-align:left;padding:10px 14px;border-radius:10px;
+                background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);
+                color:#cbd5e1;font-weight:700;font-size:13px;cursor:pointer;transition:.15s; }
+    .tier-btn:hover { background:rgba(255,255,255,.09); }
+    .tier-btn.active { border-color:#eab308;background:rgba(234,179,8,.12);color:#fde68a; }
     @keyframes spin { to { transform:rotate(360deg); } }
-
-    /* Checkbox custom */
-    input[type=checkbox].approve-check {
-      width:18px;height:18px;accent-color:#22c55e;cursor:pointer;
-    }
-    .sortable { cursor:pointer;user-select:none; }
-    .sortable:hover { color:#eab308; }
+    .spin { animation:spin .8s linear infinite; display:inline-block; }
+    /* Variante row */
+    .var-row { display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
+               padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.025);
+               border:1px solid rgba(255,255,255,.04);margin-top:4px; }
+    .var-row .vname { font-size:11px;color:#94a3b8;line-height:1.3; }
+    .var-row .vstk  { font-size:12px;font-weight:700;text-align:right; }
+    .var-row .vprc  { font-size:11px;color:#64748b;text-align:right; }
   </style>
 </head>
 <body class="min-h-screen">
 
-<!-- ── LOGIN ────────────────────────────────────────────────────────── -->
+<!-- ═══════════════════ LOGIN ═══════════════════ -->
 <div id="login-view" class="flex min-h-screen items-center justify-center p-4">
-  <div class="glass rounded-2xl p-8 w-full max-w-sm">
-    <div class="text-center mb-6">
-      <div class="inline-flex w-12 h-12 bg-yellow-500/10 rounded-xl items-center justify-center mb-3">
-        <i class="fas fa-boxes-stacked text-yellow-400 text-xl"></i>
-      </div>
-      <h1 class="text-xl font-black text-white">Stock Check</h1>
-      <p class="text-xs text-slate-500 mt-1">Panel de Análisis — GameQuest</p>
+  <div class="glass p-8 w-full max-w-xs text-center">
+    <div class="w-11 h-11 bg-yellow-500/10 rounded-xl flex items-center justify-center mx-auto mb-4">
+      <i class="fas fa-magnifying-glass text-yellow-400 text-lg"></i>
     </div>
-    <div class="space-y-3">
-      <input id="login-user" type="text"     class="input-dark w-full" placeholder="Usuario">
-      <input id="login-pass" type="password" class="input-dark w-full" placeholder="Contraseña">
+    <h1 class="text-xl font-black text-white">Stock Check</h1>
+    <p class="text-xs text-slate-500 mt-1 mb-6">Consulta de stock · GameQuest</p>
+    <div class="space-y-3 text-left">
+      <input id="lu" type="text"     class="inp w-full" placeholder="Usuario">
+      <input id="lp" type="password" class="inp w-full" placeholder="Contraseña"
+             onkeydown="if(event.key==='Enter')doLogin()">
       <button onclick="doLogin()"
-        class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-3 rounded-xl uppercase tracking-wider text-xs transition">
+        class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-3
+               rounded-xl text-xs uppercase tracking-wide transition">
         INGRESAR
       </button>
     </div>
+    <p id="login-err" class="hidden text-red-400 text-xs mt-3"></p>
   </div>
 </div>
 
-<!-- ── DASHBOARD ─────────────────────────────────────────────────────── -->
-<div id="app" class="hidden flex-col min-h-screen">
+<!-- ═══════════════════ APP ═══════════════════ -->
+<div id="app" class="hidden min-h-screen flex flex-col">
 
   <!-- Header -->
-  <header class="glass border-b border-white/5 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+  <header class="px-5 py-3 border-b border-white/5 bg-slate-900/80 backdrop-blur sticky top-0 z-50
+                 flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 bg-yellow-500/20 rounded-lg flex items-center justify-center">
-        <i class="fas fa-chart-bar text-yellow-400 text-sm"></i>
+      <div class="w-8 h-8 bg-yellow-500/12 rounded-lg flex items-center justify-center">
+        <i class="fas fa-magnifying-glass text-yellow-400 text-sm"></i>
       </div>
       <div>
-        <span class="font-black text-white text-sm">GameQuest</span>
-        <span class="text-slate-500 text-xs ml-2">Stock Check v2</span>
+        <span class="font-black text-white text-sm">Stock Check</span>
+        <span id="cache-badge" class="ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full
+               bg-slate-800 text-slate-500 border border-slate-700">cache —</span>
       </div>
     </div>
     <div class="flex items-center gap-2">
-      <button onclick="showTab('analysis')" id="tab-analysis" class="tab-btn tab-active">
-        <i class="fas fa-magnifying-glass-chart mr-1"></i> Análisis
+      <!-- Sync -->
+      <button onclick="syncCache()" id="btn-sync"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+               bg-yellow-500/10 text-yellow-400 border border-yellow-500/20
+               hover:bg-yellow-500/25 transition">
+        <i id="sync-icon" class="fas fa-rotate-right"></i>
+        <span class="hidden sm:inline">Sync JS</span>
       </button>
-      <button onclick="showTab('staples')"  id="tab-staples"  class="tab-btn tab-inactive">
-        <i class="fas fa-star mr-1"></i> Staples
-      </button>
-      <button onclick="doLogout()" class="tab-btn tab-inactive ml-4">
+      <button onclick="doLogout()"
+        class="text-slate-600 text-xs font-bold hover:text-white transition px-2">
         <i class="fas fa-sign-out-alt"></i>
       </button>
     </div>
   </header>
 
-  <!-- ── TAB: ANÁLISIS ────────────────────────────────────────────────── -->
-  <div id="panel-analysis" class="flex-1 p-6 space-y-6">
+  <!-- Main -->
+  <main class="flex-1 p-4 md:p-6 max-w-3xl mx-auto w-full space-y-4">
 
-    <!-- Upload zone -->
-    <div class="glass rounded-2xl p-6">
-      <div class="flex flex-col md:flex-row gap-4 items-center">
-        <div id="drop-zone"
-          onclick="document.getElementById('csv-input').click()"
-          class="flex-1 border-2 border-dashed border-slate-700 hover:border-yellow-500
-                 rounded-xl p-6 text-center cursor-pointer transition-all group">
-          <i class="fas fa-file-csv text-2xl text-slate-600 group-hover:text-yellow-400 mb-2"></i>
-          <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Subir CSV Manabox</p>
-          <p id="csv-filename" class="text-[10px] text-slate-600 mt-1">Ningún archivo seleccionado</p>
-          <input type="file" id="csv-input" class="hidden" accept=".csv" onchange="onFileSelected()">
-        </div>
-        <button id="btn-analyze" onclick="runAnalysis()" disabled
-          class="px-8 py-4 bg-yellow-500/20 text-yellow-600 font-black uppercase tracking-wider
-                 text-xs rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed
-                 hover:bg-yellow-500 hover:text-slate-900 border border-yellow-500/30">
-          <i class="fas fa-bolt mr-2"></i> ANALIZAR
-        </button>
-      </div>
-    </div>
-
-    <!-- Summary cards (hidden until analysis) -->
-    <div id="summary-row" class="hidden grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-      <div class="glass rounded-xl p-4">
-        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total Cartas</p>
-        <p id="s-total" class="text-2xl font-black text-white mt-1">—</p>
-      </div>
-      <div class="glass rounded-xl p-4 border-l-2 border-red-500">
-        <p class="text-[10px] text-red-400 uppercase tracking-wider">⚠ Peligro</p>
-        <p id="s-danger" class="text-2xl font-black text-red-400 mt-1">—</p>
-      </div>
-      <div class="glass rounded-xl p-4 border-l-2 border-amber-400">
-        <p class="text-[10px] text-amber-400 uppercase tracking-wider">⚡ Alertas</p>
-        <p id="s-warning" class="text-2xl font-black text-amber-400 mt-1">—</p>
-      </div>
-      <div class="glass rounded-xl p-4 border-l-2 border-green-500">
-        <p class="text-[10px] text-green-400 uppercase tracking-wider">✓ OK</p>
-        <p id="s-ok" class="text-2xl font-black text-green-400 mt-1">—</p>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total USD</p>
-        <p id="s-usd" class="text-2xl font-black text-white mt-1">—</p>
-      </div>
-      <div class="glass rounded-xl p-4">
-        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Total CLP (Cash)</p>
-        <p id="s-clp" class="text-2xl font-black text-yellow-400 mt-1">—</p>
-      </div>
-    </div>
-
-    <!-- Filtros + acciones -->
-    <div id="filter-row" class="hidden glass rounded-xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
-      <div class="flex gap-2 flex-wrap">
-        <button onclick="setFilter('all')"     id="f-all"     class="tab-btn tab-active text-[10px] py-1 px-3">Todo</button>
-        <button onclick="setFilter('danger')"  id="f-danger"  class="tab-btn tab-inactive text-[10px] py-1 px-3">🔴 Peligro</button>
-        <button onclick="setFilter('warning')" id="f-warning" class="tab-btn tab-inactive text-[10px] py-1 px-3">🟡 Alerta</button>
-        <button onclick="setFilter('ok')"      id="f-ok"      class="tab-btn tab-inactive text-[10px] py-1 px-3">🟢 OK</button>
-        <button onclick="setFilter('info')"    id="f-info"    class="tab-btn tab-inactive text-[10px] py-1 px-3">🔵 Sin JS</button>
-      </div>
+    <!-- Buscador -->
+    <div class="glass p-4">
+      <p class="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-3">
+        Buscar carta en Jumpseller
+      </p>
       <div class="flex gap-2">
-        <button onclick="approveFiltered(true)"  class="text-[10px] px-3 py-1 rounded-lg bg-green-900/40 text-green-400 font-bold hover:bg-green-800/60 transition">✓ Aprobar visibles</button>
-        <button onclick="approveFiltered(false)" class="text-[10px] px-3 py-1 rounded-lg bg-red-900/40 text-red-400 font-bold hover:bg-red-800/60 transition">✗ Rechazar visibles</button>
-        <button onclick="exportApproved()"       class="text-[10px] px-3 py-1 rounded-lg bg-yellow-900/40 text-yellow-400 font-bold hover:bg-yellow-800/60 transition">
-          <i class="fas fa-download mr-1"></i> Exportar aprobados
+        <div class="relative flex-1">
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-sm pointer-events-none"></i>
+          <input id="q" type="text" class="inp w-full pl-10" placeholder="Escribe el nombre…  ej: sol ring"
+                 onkeydown="if(event.key==='Enter')search()" oninput="onInput()">
+          <button id="btn-clear" onclick="clearSearch()"
+            class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-white transition text-sm">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <button onclick="search()" id="btn-search"
+          class="bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black px-5 rounded-xl
+                 text-xs uppercase tracking-wide transition whitespace-nowrap">
+          BUSCAR
         </button>
       </div>
+      <p id="q-hint" class="text-[10px] text-slate-600 mt-2">
+        La búsqueda normaliza el nombre y suma el stock de <strong class="text-slate-500">todas las versiones</strong> (foil, set, condición, etc.)
+      </p>
     </div>
 
-    <!-- Tabla resultados -->
-    <div id="results-wrap" class="hidden glass rounded-2xl overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-white/5 text-[10px] text-slate-400 uppercase tracking-wider">
-            <tr>
-              <th class="px-4 py-3 w-8"><input type="checkbox" id="check-all" onchange="toggleAll(this)" class="approve-check"></th>
-              <th class="px-4 py-3 text-left sortable" onclick="sortBy('name')">Carta <i class="fas fa-sort ml-1 opacity-40"></i></th>
-              <th class="px-4 py-3 text-center">Staple</th>
-              <th class="px-4 py-3 text-center sortable" onclick="sortBy('qty_csv')">Cant. CSV <i class="fas fa-sort ml-1 opacity-40"></i></th>
-              <th class="px-4 py-3 text-right">USD Compra</th>
-              <th class="px-4 py-3 text-right">Stock JS</th>
-              <th class="px-4 py-3 text-right sortable" onclick="sortBy('stock_proyectado')">Stock Final <i class="fas fa-sort ml-1 opacity-40"></i></th>
-              <th class="px-4 py-3 text-right">Precio JS</th>
-              <th class="px-4 py-3 text-right">Precio Mín.</th>
-              <th class="px-4 py-3 text-left">Alertas</th>
-              <th class="px-4 py-3 text-center">Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="results-tbody" class="divide-y divide-white/5"></tbody>
-        </table>
-      </div>
-      <div class="px-4 py-3 flex justify-between items-center text-xs text-slate-500 border-t border-white/5">
-        <span id="results-count">0 resultados</span>
-        <span id="approved-count" class="text-green-400 font-bold">0 aprobados</span>
-      </div>
+    <!-- Estado cache / loading -->
+    <div id="loading" class="hidden glass p-6 text-center">
+      <i class="fas fa-circle-notch spin text-yellow-400 text-xl mb-2 block"></i>
+      <p class="text-xs text-slate-500">Consultando catálogo…</p>
     </div>
 
-  </div><!-- /panel-analysis -->
-
-  <!-- ── TAB: STAPLES ─────────────────────────────────────────────────── -->
-  <div id="panel-staples" class="hidden flex-1 p-6 space-y-6">
-
-    <!-- Agregar staple -->
-    <div class="glass rounded-2xl p-6">
-      <h2 class="text-sm font-black text-white uppercase tracking-wider mb-4">
-        <i class="fas fa-plus-circle text-yellow-400 mr-2"></i>Agregar / Editar Carta
-      </h2>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-        <div class="md:col-span-2">
-          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Nombre de la carta</label>
-          <input id="s-name" type="text" class="input-dark w-full" placeholder="Ej: Lightning Bolt">
-        </div>
-        <div>
-          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Tipo</label>
-          <select id="s-type" class="input-dark w-full">
-            <option value="true">⭐ Staple (mín. 8)</option>
-            <option value="false">📄 Normal (mín. 4)</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Stock mín. personalizado</label>
-          <input id="s-minstock" type="number" class="input-dark w-full" placeholder="Dejar vacío = default">
-        </div>
-        <div>
-          <label class="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">Factor margen mínimo</label>
-          <input id="s-margin" type="number" step="0.1" value="2.5" class="input-dark w-full" placeholder="2.5">
-        </div>
-        <div>
-          <button onclick="saveSingle()" class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-2 rounded-xl text-xs uppercase transition">
-            <i class="fas fa-save mr-1"></i> Guardar
-          </button>
-        </div>
-      </div>
-      <div class="mt-4 border-t border-white/5 pt-4">
-        <p class="text-[10px] text-slate-500 mb-2 uppercase tracking-wider">O importar múltiples desde texto (una carta por línea):</p>
-        <textarea id="bulk-input" class="input-dark w-full h-24 resize-none text-xs" placeholder="Lightning Bolt&#10;Force of Will&#10;Thoughtseize"></textarea>
-        <div class="flex gap-2 mt-2">
-          <select id="bulk-type" class="input-dark">
-            <option value="true">⭐ Staple</option>
-            <option value="false">📄 Normal</option>
-          </select>
-          <button onclick="saveBulk()" class="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs transition">
-            <i class="fas fa-upload mr-1"></i> Importar en lote
-          </button>
-        </div>
-      </div>
+    <!-- Sin resultados -->
+    <div id="no-results" class="hidden glass p-8 text-center">
+      <i class="fas fa-ghost text-3xl text-slate-700 mb-3 block"></i>
+      <p class="font-bold text-slate-500" id="no-results-msg">Sin resultados</p>
+      <p class="text-xs text-slate-700 mt-1">Prueba con otro nombre o revisa la ortografía</p>
     </div>
 
-    <!-- Lista de staples -->
-    <div class="glass rounded-2xl overflow-hidden">
-      <div class="px-5 py-3 flex items-center justify-between border-b border-white/5">
-        <span class="text-sm font-black text-white">Lista de Cartas Registradas</span>
-        <input id="staple-search" type="text" class="input-dark text-xs py-1.5 w-48" placeholder="Buscar..." oninput="filterStaples()">
+    <!-- Resultados -->
+    <div id="results-wrap" class="hidden space-y-3">
+      <div class="flex items-center justify-between px-1">
+        <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+          Resultados — <span id="res-count" class="text-slate-400">0</span>
+        </p>
+        <p id="res-q" class="text-[10px] text-slate-700 italic"></p>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-white/5 text-[10px] text-slate-400 uppercase tracking-wider">
-            <tr>
-              <th class="px-5 py-3 text-left">Carta</th>
-              <th class="px-5 py-3 text-center">Tipo</th>
-              <th class="px-5 py-3 text-center">Stock Mín.</th>
-              <th class="px-5 py-3 text-center">Margen</th>
-              <th class="px-5 py-3 text-center">Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="staples-tbody" class="divide-y divide-white/5"></tbody>
-        </table>
-      </div>
-      <div id="staples-empty" class="hidden p-8 text-center text-slate-600 text-sm italic">
-        No hay cartas registradas. Agrega staples arriba.
-      </div>
+      <div id="results-list" class="space-y-2"></div>
     </div>
 
-  </div><!-- /panel-staples -->
+  </main>
+</div>
 
-</div><!-- /app -->
-
+<!-- ═══════════════════ CARD TEMPLATE (JS) ═══════════════════ -->
 <script>
-const API   = "https://gamecoins.onrender.com";
-let TOKEN   = null;
-let allCards = [];
-let staples  = [];
-let currentFilter = "all";
-let sortKey = null;
-let sortAsc = true;
+const API = "https://gamecoins.onrender.com";
+let TOKEN = null;
+let lastResults = [];
 
-// ── AUTH ──────────────────────────────────────────────────────────────────
+// Normalización canónica idéntica a _canonical() de Python
+function canonical(name) {
+  if (!name) return '';
+  let n = name.split('|')[0].trim();
+  n = n.split(/[\u2013\u2014\u2015]/)[0].trim();
+  n = n.replace(/[\(\[][^\)\]]*[\)\]]/g, '').trim();
+  n = n.replace(/[\u2018\u2019\u201A\u201B\u02BC\u02B9\u0060\u00B4\uFF07]/g, "'");
+  n = n.normalize('NFD').replace(/\p{Mn}/gu, '');
+  return n.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function ah() { return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }; }
+
+// ── Auth ───────────────────────────────────────────────────────────────────────
 async function doLogin() {
-  const u = document.getElementById('login-user').value.trim();
-  const p = document.getElementById('login-pass').value.trim();
+  const u = document.getElementById('lu').value.trim();
+  const p = document.getElementById('lp').value.trim();
+  const errEl = document.getElementById('login-err');
+  errEl.classList.add('hidden');
   try {
-    const res  = await fetch(`${API}/api/auth/login`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ username:u, password:p })
+    const r = await fetch(`${API}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
     });
-    if (!res.ok) return Swal.fire('Error','Credenciales inválidas','error');
-    const data = await res.json();
-    TOKEN = data.access_token;
+    if (!r.ok) { errEl.textContent = 'Credenciales inválidas'; errEl.classList.remove('hidden'); return; }
+    TOKEN = (await r.json()).access_token;
     document.getElementById('login-view').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    document.getElementById('app').classList.add('flex','flex-col');
-    loadStaples();
-  } catch(e) {
-    Swal.fire('Error','Sin conexión con el servidor','error');
-  }
+    checkCacheStatus();
+    document.getElementById('q').focus();
+  } catch(e) { errEl.textContent = 'Sin conexión'; errEl.classList.remove('hidden'); }
 }
-document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !TOKEN) doLogin();
-});
 
 function doLogout() { TOKEN = null; location.reload(); }
 
-function authHeaders() {
-  return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+// ── Cache status ───────────────────────────────────────────────────────────────
+async function checkCacheStatus() {
+  try {
+    const r = await fetch(`${API}/api/admin/cache_status`, { headers: ah() });
+    const d = await r.json();
+    const badge = document.getElementById('cache-badge');
+    if (d.cache_valid) {
+      const min = Math.floor(d.cache_age_sec / 60);
+      badge.textContent = `${d.cards_loaded} cartas · hace ${min}m`;
+      badge.className = badge.className.replace('text-slate-500 border-slate-700',
+                                                 'text-green-400 border-green-800');
+    } else {
+      badge.textContent = 'cache expirado';
+      badge.className = badge.className.replace('text-slate-500 border-slate-700',
+                                                 'text-amber-400 border-amber-800');
+    }
+  } catch(_) {}
 }
 
-// ── TABS ──────────────────────────────────────────────────────────────────
-function showTab(tab) {
-  ['analysis','staples'].forEach(t => {
-    document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
-    const btn = document.getElementById(`tab-${t}`);
-    btn.className = btn.className.replace(/tab-(active|inactive)/g, '');
-    btn.className += t === tab ? ' tab-active' : ' tab-inactive';
-  });
-  if (tab === 'staples') loadStaples();
+async function syncCache() {
+  const icon = document.getElementById('sync-icon');
+  const btn  = document.getElementById('btn-sync');
+  icon.classList.add('spin'); btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/admin/warmup_cache`, { method: 'POST', headers: ah() });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error');
+    showToast(`✅ ${d.cards_loaded} cartas cargadas — ${d.total_stock} u. en stock`);
+    checkCacheStatus();
+    // Re-ejecutar búsqueda con datos frescos
+    if (document.getElementById('q').value.trim().length >= 2) search();
+  } catch(e) {
+    showToast(`❌ ${e.message}`, 'error');
+  } finally {
+    icon.classList.remove('spin'); btn.disabled = false;
+  }
 }
 
-// ── CSV ANÁLISIS ──────────────────────────────────────────────────────────
-function onFileSelected() {
-  const file = document.getElementById('csv-input').files[0];
-  document.getElementById('csv-filename').textContent = file ? file.name : 'Ningún archivo seleccionado';
-  document.getElementById('btn-analyze').disabled = !file;
+// ── Búsqueda ───────────────────────────────────────────────────────────────────
+function onInput() {
+  const q = document.getElementById('q').value;
+  document.getElementById('btn-clear').classList.toggle('hidden', !q);
+  // AutoSearch con debounce si tiene 3+ caracteres
+  clearTimeout(window._searchTimer);
+  if (q.trim().length >= 3)
+    window._searchTimer = setTimeout(search, 500);
 }
 
-async function runAnalysis() {
-  const file = document.getElementById('csv-input').files[0];
-  if (!file) return;
-  const fd = new FormData();
-  fd.append('file', file);
+function clearSearch() {
+  document.getElementById('q').value = '';
+  document.getElementById('btn-clear').classList.add('hidden');
+  document.getElementById('results-wrap').classList.add('hidden');
+  document.getElementById('no-results').classList.add('hidden');
+  document.getElementById('q').focus();
+}
 
-  Swal.fire({ title:'Analizando...', html:'Consultando Jumpseller y procesando CSV', didOpen:() => Swal.showLoading() });
+async function search() {
+  const q = document.getElementById('q').value.trim();
+  if (q.length < 2) return;
+
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('results-wrap').classList.add('hidden');
+  document.getElementById('no-results').classList.add('hidden');
 
   try {
-    const res = await fetch(`${API}/api/admin/stock_check`, {
-      method:'POST',
-      headers:{ 'Authorization': `Bearer ${TOKEN}` },
-      body: fd
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      return Swal.fire('Error', err.detail || 'Error del servidor', 'error');
+    const r = await fetch(`${API}/api/admin/stock_lookup?q=${encodeURIComponent(q)}`, { headers: ah() });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Error');
+    const d = await r.json();
+    lastResults = d.results || [];
+
+    document.getElementById('loading').classList.add('hidden');
+
+    if (!lastResults.length) {
+      document.getElementById('no-results-msg').textContent = `Sin resultados para "${q}"`;
+      document.getElementById('no-results').classList.remove('hidden');
+      return;
     }
-    const data = await res.json();
-    allCards = data.cards;
-    renderSummary(data.summary);
-    renderTable(allCards);
-    document.getElementById('summary-row').classList.remove('hidden');
-    document.getElementById('filter-row').classList.remove('hidden');
-    document.getElementById('results-wrap').classList.remove('hidden');
-    Swal.close();
+
+    renderResults(d);
   } catch(e) {
-    Swal.fire('Error', e.message, 'error');
+    document.getElementById('loading').classList.add('hidden');
+    showToast(`❌ ${e.message}`, 'error');
   }
 }
 
-function renderSummary(s) {
-  document.getElementById('s-total').textContent   = s.total_cards.toLocaleString();
-  document.getElementById('s-danger').textContent  = s.danger_count.toLocaleString();
-  document.getElementById('s-warning').textContent = s.warning_count.toLocaleString();
-  document.getElementById('s-ok').textContent      = s.ok_count.toLocaleString();
-  document.getElementById('s-usd').textContent     = `$${s.total_usd_compra.toFixed(2)}`;
-  document.getElementById('s-clp').textContent     = `$${s.total_clp_cash.toLocaleString()}`;
-}
+// ── Renderizado ────────────────────────────────────────────────────────────────
+const TIER_PILL = {
+  muy_alta: '<span class="pill p-ma">⭐ Muy Alta</span>',
+  alta:     '<span class="pill p-al">🟢 Alta</span>',
+  normal:   '<span class="pill p-no">📄 Normal</span>',
+};
+const TIER_OPTIONS = [
+  { v: 'muy_alta', label: '⭐ Muy Alta',  desc: 'Comprar siempre — sin límite de stock' },
+  { v: 'alta',     label: '🟢 Alta',      desc: 'Stock mínimo 8 unidades' },
+  { v: 'normal',   label: '📄 Normal',    desc: 'Stock mínimo 4 unidades' },
+];
 
-// ── FILTRO + SORT ─────────────────────────────────────────────────────────
-function setFilter(f) {
-  currentFilter = f;
-  ['all','danger','warning','ok','info'].forEach(k => {
-    const b = document.getElementById(`f-${k}`);
-    b.className = b.className.replace(/tab-(active|inactive)/g,'') + (k===f?' tab-active':' tab-inactive');
-  });
-  renderTable(allCards);
-}
+function renderResults(d) {
+  const q = document.getElementById('q').value.trim();
 
-function sortBy(key) {
-  if (sortKey === key) sortAsc = !sortAsc;
-  else { sortKey = key; sortAsc = true; }
-  renderTable(allCards);
-}
+  document.getElementById('res-count').textContent =
+    `${d.results.length}${d.total_matches > 20 ? ` de ${d.total_matches}` : ''}`;
+  document.getElementById('res-q').textContent = `"${d.q_normalized}"`;
 
-function getVisible() {
-  let cards = [...allCards];
-  if (currentFilter !== 'all') cards = cards.filter(c => c.status === currentFilter);
-  if (sortKey) {
-    cards.sort((a,b) => {
-      const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
-      if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
-      return sortAsc ? av - bv : bv - av;
-    });
-  }
-  return cards;
-}
+  const list = document.getElementById('results-list');
+  list.innerHTML = '';
 
-function renderTable(source) {
-  const cards = getVisible();
-  const tbody = document.getElementById('results-tbody');
-  let html = '';
+  d.results.forEach((c, i) => {
+    const inList = c.in_list;
+    const tierPill = inList ? (TIER_PILL[c.tier] || '') : '';
 
-  cards.forEach((c, i) => {
-    const rowClass = `row-${c.status}`;
-    const stockActual = c.stock_actual !== null && c.stock_actual !== undefined
-      ? c.stock_actual
-      : '<span class="text-slate-600 italic text-xs">N/A</span>';
+    const stockColor =
+      c.total_stock === 0  ? 'text-red-400' :
+      c.total_stock <= 2   ? 'text-amber-400' :
+      c.total_stock <= 4   ? 'text-yellow-300' : 'text-green-400';
 
-    const alertsHtml = c.alerts.map(a =>
-      `<span class="badge badge-${a.type}">${a.msg}</span>`
-    ).join(' ');
+    // Variantes (mostrar solo si hay más de 1)
+    const varsHtml = (c.variants && c.variants.length > 1) ? `
+      <details class="mt-3">
+        <summary class="text-[10px] text-slate-600 cursor-pointer hover:text-slate-400 select-none">
+          ${c.variants.length} versiones en Jumpseller
+        </summary>
+        <div class="mt-2 space-y-1">
+          ${c.variants.map(v => `
+            <div class="var-row">
+              <span class="vname">${v.name}</span>
+              <span class="vstk ${v.stock===0?'text-slate-700':v.stock<=2?'text-amber-400':'text-slate-300'}">${v.stock} u.</span>
+              <span class="vprc">${v.price>0?'$'+v.price.toLocaleString():''}</span>
+            </div>`).join('')}
+        </div>
+      </details>` : '';
 
-    const tierBadgeMap = {
-      muy_alta: '<span class="badge badge-muyalta">⭐ Muy Alta</span>',
-      alta:     '<span class="badge badge-alta">🟢 Alta</span>',
-      normal:   '<span class="badge badge-bnormal">📄 Normal</span>',
-    };
-    const stapleHtml = tierBadgeMap[c.tier] || '<span class="text-slate-600 text-xs">—</span>';
+    const card = document.createElement('div');
+    card.className = `glass p-4 transition-all ${inList ? 'border-l-2 ' + (
+      c.tier==='muy_alta'?'border-amber-500':c.tier==='alta'?'border-green-500':'border-slate-500'
+    ) : ''}`;
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <p class="font-black text-white text-sm">${c.display_name}</p>
+            ${tierPill}
+          </div>
+          <p class="text-[9px] text-slate-700 mt-0.5 font-mono">${c.key}</p>
+          ${c.min_stock ? `<p class="text-[10px] text-slate-600 mt-1">mín. ${c.min_stock} u. según tier</p>` : ''}
+          ${varsHtml}
+        </div>
 
-    const priceClass = (c.price_js > 0 && c.price_js < c.min_price_venta)
-      ? 'text-red-400 font-bold' : 'text-white';
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <!-- Stock total -->
+          <div class="text-right">
+            <p class="${stockColor} text-2xl font-black leading-none">${c.total_stock}</p>
+            <p class="text-[9px] text-slate-700 mt-0.5">en JS</p>
+            ${c.price_js > 0 ? `<p class="text-[10px] text-slate-500 mt-0.5">$${c.price_js.toLocaleString()}</p>` : ''}
+          </div>
 
-    html += `
-    <tr class="glass-hover ${rowClass}" data-idx="${allCards.indexOf(c)}">
-      <td class="px-4 py-3">
-        <input type="checkbox" class="approve-check card-check"
-          ${c.approved ? 'checked' : ''}
-          onchange="toggleCard(${allCards.indexOf(c)}, this.checked)">
-      </td>
-      <td class="px-4 py-3 font-bold text-white max-w-[200px] truncate" title="${c.name}">${c.name}</td>
-      <td class="px-4 py-3 text-center">${stapleHtml}</td>
-      <td class="px-4 py-3 text-center text-slate-300">${c.qty_csv}</td>
-      <td class="px-4 py-3 text-right text-slate-400 font-mono text-xs">$${c.price_usd.toFixed(2)}</td>
-      <td class="px-4 py-3 text-right">
-        ${c.stock_actual !== null && c.stock_actual !== undefined
-          ? `<span class="${c.stock_actual < c.min_stock ? 'text-amber-400 font-bold' : 'text-slate-300'}">${c.stock_actual}</span>`
-          : '<span class="text-slate-600 text-xs italic">—</span>'}
-        <span class="text-slate-600 text-[10px] block">mín:${c.min_stock}</span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        <span class="${c.stock_proyectado > c.min_stock * 3 ? 'text-red-400 font-bold' : c.stock_proyectado > c.min_stock * 2 ? 'text-amber-400' : 'text-green-400'} font-bold">
-          ${c.stock_proyectado}
-        </span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        ${c.price_js > 0
-          ? `<span class="${priceClass}">$${c.price_js.toLocaleString()}</span>
-             ${c.js_id ? `<button onclick="editPrice(${c.js_id}, ${c.price_js}, '${c.name.replace(/'/g,"\\'")}', ${allCards.indexOf(c)})"
-               class="ml-1 text-[10px] text-yellow-500 hover:text-yellow-300 transition">
-               <i class="fas fa-pencil"></i></button>` : ''}`
-          : '<span class="text-slate-600 italic text-xs">—</span>'}
-      </td>
-      <td class="px-4 py-3 text-right text-xs text-slate-400">$${c.min_price_venta.toLocaleString()}</td>
-      <td class="px-4 py-3 max-w-[280px]">
-        <div class="flex flex-wrap gap-1">${alertsHtml || '<span class="text-green-500 text-xs">Sin alertas</span>'}</div>
-      </td>
-      <td class="px-4 py-3 text-center">
-        <div class="flex gap-1 justify-center">
-          <button onclick="markAsStaple('${c.name.replace(/'/g,"\\'")}')"
-            title="Agregar / cambiar lista de demanda"
-            class="w-7 h-7 rounded-lg text-xs transition flex items-center justify-center
-              ${c.tier==='muy_alta' ? 'bg-amber-700/50 text-amber-300 hover:bg-amber-600/70'
-              : c.tier==='alta'    ? 'bg-green-800/50 text-green-300 hover:bg-green-700/60'
-              : c.tier==='normal'  ? 'bg-slate-600/50 text-slate-300 hover:bg-slate-500/70'
-              : 'bg-purple-900/40 text-purple-400 hover:bg-purple-800/60'}">
-            <i class="fas fa-layer-group"></i>
+          <!-- Botón de lista -->
+          <button onclick="openTierMenu('${c.key.replace(/'/g,"\\'")}', '${(c.display_name||'').replace(/'/g,"\\'")}', '${c.tier||''}', ${c.staple_id||'null'}, ${i})"
+            class="flex flex-col items-center justify-center w-12 h-12 rounded-xl transition text-[10px] font-bold gap-0.5
+                   ${inList
+                     ? c.tier==='muy_alta' ? 'bg-amber-600/40 text-amber-300 border border-amber-500/40 hover:bg-amber-500/50'
+                     : c.tier==='alta'     ? 'bg-green-700/35 text-green-300 border border-green-500/30 hover:bg-green-600/50'
+                     :                       'bg-slate-600/35 text-slate-300 border border-slate-500/30 hover:bg-slate-500/50'
+                     : 'bg-slate-800/70 text-slate-500 border border-slate-700/50 hover:bg-slate-700/70 hover:text-white'
+                   }">
+            <i class="fas fa-layer-group text-base"></i>
+            <span>${inList ? 'Lista' : 'Agregar'}</span>
           </button>
         </div>
-      </td>
-    </tr>`;
+      </div>`;
+
+    list.appendChild(card);
   });
 
-  tbody.innerHTML = html || '<tr><td colspan="11" class="text-center py-8 text-slate-600 italic">No hay resultados para este filtro</td></tr>';
-  document.getElementById('results-count').textContent    = `${cards.length} resultados`;
-  document.getElementById('approved-count').textContent   = `${allCards.filter(c=>c.approved).length} aprobados`;
+  document.getElementById('results-wrap').classList.remove('hidden');
 }
 
-// ── ACCIONES TABLA ────────────────────────────────────────────────────────
-function toggleCard(idx, checked) {
-  allCards[idx].approved = checked;
-  document.getElementById('approved-count').textContent = `${allCards.filter(c=>c.approved).length} aprobados`;
-}
+// ── Menú de Tier ───────────────────────────────────────────────────────────────
+async function openTierMenu(key, displayName, currentTier, stapleId, idx) {
+  let selected = null;
 
-function toggleAll(el) {
-  getVisible().forEach(c => {
-    const i = allCards.indexOf(c);
-    allCards[i].approved = el.checked;
-  });
-  renderTable(allCards);
-}
+  const btns = TIER_OPTIONS.map(t => `
+    <button class="tier-btn ${currentTier===t.v?'active':''}" data-tier="${t.v}">
+      ${t.label}
+      <span style="display:block;font-size:10px;font-weight:400;color:#64748b;margin-top:2px">${t.desc}</span>
+    </button>`).join('') + (currentTier ? `
+    <button class="tier-btn" data-tier="quitar"
+      style="color:#f87171;border-color:rgba(239,68,68,.2);margin-top:4px">
+      <i class="fas fa-trash-can mr-1.5 text-xs"></i> Quitar de la lista
+    </button>` : '');
 
-function approveFiltered(val) {
-  getVisible().forEach(c => { allCards[allCards.indexOf(c)].approved = val; });
-  renderTable(allCards);
-}
-
-async function editPrice(jsId, currentPrice, name, cardIdx) {
-  const { value: newPrice } = await Swal.fire({
-    title: `Editar precio: ${name}`,
-    input: 'number',
-    inputLabel: 'Nuevo precio en CLP',
-    inputValue: currentPrice,
-    inputAttributes: { min: 0, step: 100 },
-    showCancelButton: true,
-    confirmButtonColor: '#eab308',
-    confirmButtonText: 'Actualizar en Jumpseller',
-  });
-  if (!newPrice || parseFloat(newPrice) <= 0) return;
-
-  Swal.fire({ title:'Actualizando...', didOpen:()=>Swal.showLoading() });
-  try {
-    const res = await fetch(`${API}/api/admin/js_update_price`, {
-      method:'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ product_id: jsId, new_price: parseFloat(newPrice) })
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    allCards[cardIdx].price_js = parseFloat(newPrice);
-    // Recalcular alerta de precio
-    const c = allCards[cardIdx];
-    c.alerts = c.alerts.filter(a => !a.msg.includes('Precio JS'));
-    if (c.price_js < c.min_price_venta) {
-      c.alerts.push({ type:'danger', msg:`Precio JS $${c.price_js.toLocaleString()} aún bajo mínimo $${c.min_price_venta.toLocaleString()}` });
-      c.status = 'danger';
-    }
-    renderTable(allCards);
-    Swal.fire({ icon:'success', title:'Actualizado', timer:1500, showConfirmButton:false });
-  } catch(e) {
-    Swal.fire('Error', e.message, 'error');
-  }
-}
-
-async function markAsStaple(name) {
-  const tierOpts = [
-    { value:'muy_alta', label:'⭐ Muy Alta Demanda', desc:'Comprar siempre — sin límite de stock' },
-    { value:'alta',     label:'🟢 Alta Demanda',     desc:'Stock mínimo: 8 unidades' },
-    { value:'normal',   label:'📄 Normal',           desc:'Stock mínimo: 4 unidades' },
-    { value:'quitar',   label:'— Quitar de lista',   desc:'No aparece en filtros de demanda' },
-  ];
-  let selectedTier = null;
   await Swal.fire({
     title: 'Lista de Demanda',
-    html: `<p class="text-sm mb-3" style="color:#94a3b8"><strong style="color:#fff">${name}</strong></p>
-           <div style="display:flex;flex-direction:column;gap:8px">
-             ${tierOpts.map(t => `
-               <button class="tier-opt-sc" data-tier="${t.value}"
-                 style="width:100%;text-align:left;padding:12px 16px;border-radius:12px;
-                        background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);
-                        color:#cbd5e1;font-weight:700;font-size:13px;cursor:pointer;transition:background .15s">
-                 ${t.label}<br>
-                 <span style="font-size:10px;font-weight:400;color:#64748b">${t.desc}</span>
-               </button>`).join('')}
-           </div>`,
-    showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Cancelar',
+    html: `
+      <p style="font-size:12px;color:#64748b;margin:-4px 0 12px">
+        <strong style="color:#e2e8f0">${displayName || key}</strong>
+      </p>
+      <div style="display:flex;flex-direction:column;gap:5px">${btns}</div>`,
+    showConfirmButton: false,
+    showCancelButton: true,
+    cancelButtonText: 'Cancelar',
+    background: '#1e293b',
+    color: '#e2e8f0',
+    customClass: { popup: 'rounded-2xl' },
     didOpen: () => {
-      document.querySelectorAll('.tier-opt-sc').forEach(btn => {
-        btn.addEventListener('mouseover', () => btn.style.background = 'rgba(255,255,255,0.12)');
-        btn.addEventListener('mouseout',  () => btn.style.background = 'rgba(255,255,255,0.05)');
-        btn.addEventListener('click', () => { selectedTier = btn.dataset.tier; Swal.close(); });
+      document.querySelectorAll('.tier-btn').forEach(b => {
+        b.addEventListener('click', () => { selected = b.dataset.tier; Swal.close(); });
       });
     }
   });
-  if (!selectedTier) return;
+
+  if (!selected) return;
+
   try {
-    if (selectedTier === 'quitar') {
-      const listRes = await fetch(`${API}/api/admin/staples`, { headers: authHeaders() });
-      const list    = await listRes.json();
-      const ex = list.find(s => s.name.toLowerCase() === name.toLowerCase());
-      if (ex) {
-        await fetch(`${API}/api/admin/staples/${ex.id}`, { method:'DELETE', headers: authHeaders() });
+    if (selected === 'quitar') {
+      if (!stapleId) {
+        // buscar por nombre canónico (inmune a apóstrofes tipográficos)
+        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
+        const ll = await lr.json();
+        const nameCanon = canonical(displayName || key);
+        const ex = ll.find(s => canonical(s.name) === nameCanon);
+        if (ex) {
+          await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
+        }
+      } else {
+        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
       }
-      allCards.forEach(c => { if (c.name === name) { c.tier = null; c.is_staple = false; } });
+      lastResults[idx].in_list   = false;
+      lastResults[idx].tier      = null;
+      lastResults[idx].staple_id = null;
     } else {
-      const res = await fetch(`${API}/api/admin/staples`, {
-        method:'POST', headers: authHeaders(),
-        body: JSON.stringify({ name, tier: selectedTier, margin_factor: 2.5 })
+      const r = await fetch(`${API}/api/admin/staples`, {
+        method: 'POST', headers: ah(),
+        body: JSON.stringify({ name: displayName || key, tier: selected, margin_factor: 2.5 })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
-      allCards.forEach(c => { if (c.name === name) { c.tier = selectedTier; c.is_staple = true; } });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Error guardando');
+      const saved = await r.json();
+      lastResults[idx].in_list   = true;
+      lastResults[idx].tier      = selected;
+      lastResults[idx].staple_id = saved.id;
     }
-    renderTable(allCards);
-    Swal.fire({ icon:'success', title:'Lista actualizada', timer:1200, showConfirmButton:false });
+
+    // Re-render sin volver a buscar (ya tenemos los datos)
+    renderResults({ results: lastResults, total_matches: lastResults.length,
+                    q_normalized: document.getElementById('res-q').textContent.replace(/"/g,'') });
+    showToast(selected === 'quitar' ? '🗑 Quitado de la lista' : `✅ Guardado como ${selected}`);
+    checkCacheStatus();
+
   } catch(e) {
-    Swal.fire('Error', e.message, 'error');
+    showToast(`❌ ${e.message}`, 'error');
   }
 }
 
-function exportApproved() {
-  const approved = allCards.filter(c => c.approved);
-  if (!approved.length) return Swal.fire('Sin aprobados','Selecciona al menos una carta','warning');
-
-  const rows = [
-    ['Nombre','Cantidad','USD Compra','Precio Credito CLP','Precio Cash CLP','Stock Actual JS','Stock Final','Tier'],
-    ...approved.map(c => [
-      c.name, c.qty_csv, c.price_usd.toFixed(2),
-      c.price_credito, c.price_cash,
-      c.stock_actual ?? 'N/A', c.stock_proyectado, c.tier || 'sin_lista'
-    ])
-  ];
-  const csv = rows.map(r => r.join(',')).join('\n');
-  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = `gamequest_compra_aprobada_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click(); URL.revokeObjectURL(url);
-}
-
-// ── STAPLES CRUD ──────────────────────────────────────────────────────────
-async function loadStaples() {
-  try {
-    const res  = await fetch(`${API}/api/admin/staples`, { headers: authHeaders() });
-    staples    = await res.json();
-    renderStaples(staples);
-  } catch(e) { console.error(e); }
-}
-
-function filterStaples() {
-  const q = document.getElementById('staple-search').value.toLowerCase();
-  renderStaples(staples.filter(s => s.name.toLowerCase().includes(q)));
-}
-
-function renderStaples(list) {
-  const tbody = document.getElementById('staples-tbody');
-  document.getElementById('staples-empty').classList.toggle('hidden', list.length > 0);
-  if (!list.length) { tbody.innerHTML = ''; return; }
-
-  const TIER_BADGE = {
-    muy_alta: '<span class="badge badge-muyalta">⭐ Muy Alta</span>',
-    alta:     '<span class="badge badge-alta">🟢 Alta</span>',
-    normal:   '<span class="badge badge-bnormal">📄 Normal</span>',
-  };
-  const DEF_STOCK = { muy_alta:'∞', alta:8, normal:4 };
-  tbody.innerHTML = list.map(s => `
-    <tr class="glass-hover border-b border-white/5">
-      <td class="px-5 py-3 font-bold text-white">${s.name}</td>
-      <td class="px-5 py-3 text-center">
-        ${TIER_BADGE[s.tier] || '<span class="badge badge-bnormal">📄 Normal</span>'}
-      </td>
-      <td class="px-5 py-3 text-center text-slate-300">
-        ${s.min_stock_override ?? DEF_STOCK[s.tier] ?? 4}
-        ${s.min_stock_override ? '<span class="text-yellow-500 text-[10px] ml-1">(custom)</span>' : ''}
-      </td>
-      <td class="px-5 py-3 text-center text-slate-300">×${s.margin_factor}</td>
-      <td class="px-5 py-3 text-center">
-        <button onclick="editStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}', '${s.tier||'normal'}', ${s.min_stock_override ?? 'null'}, ${s.margin_factor})"
-          class="w-7 h-7 rounded-lg bg-yellow-900/30 text-yellow-400 hover:bg-yellow-800/50 text-xs transition mr-1">
-          <i class="fas fa-pencil"></i>
-        </button>
-        <button onclick="deleteStaple(${s.id}, '${s.name.replace(/'/g,"\\'")}')"
-          class="w-7 h-7 rounded-lg bg-red-900/30 text-red-400 hover:bg-red-800/50 text-xs transition">
-          <i class="fas fa-trash"></i>
-        </button>
-      </td>
-    </tr>`).join('');
-}
-
-async function saveSingle() {
-  const name     = document.getElementById('s-name').value.trim();
-  const tier     = document.getElementById('s-type').value;
-  const minStock = document.getElementById('s-minstock').value;
-  const margin   = parseFloat(document.getElementById('s-margin').value) || 2.5;
-  if (!name) return Swal.fire('Falta nombre','Escribe el nombre de la carta','warning');
-  await upsertStaple({ name, tier, min_stock_override: minStock ? parseInt(minStock) : null, margin_factor: margin });
-  document.getElementById('s-name').value = '';
-}
-
-async function saveBulk() {
-  const lines = document.getElementById('bulk-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
-  const tier  = document.getElementById('bulk-type').value;
-  if (!lines.length) return Swal.fire('Sin cartas','Escribe al menos una carta','warning');
-
-  Swal.fire({ title:`Guardando ${lines.length} cartas...`, didOpen:()=>Swal.showLoading() });
-  let ok = 0;
-  for (const name of lines) {
-    const res = await fetch(`${API}/api/admin/staples`, {
-      method:'POST', headers: authHeaders(),
-      body: JSON.stringify({ name, tier, margin_factor: 2.5 })
-    });
-    if (res.ok) ok++;
-  }
-  document.getElementById('bulk-input').value = '';
-  await loadStaples();
-  Swal.fire({ icon:'success', title:`${ok}/${lines.length} guardadas`, timer:1500, showConfirmButton:false });
-}
-
-async function upsertStaple(payload) {
-  try {
-    const res = await fetch(`${API}/api/admin/staples`, {
-      method:'POST', headers: authHeaders(), body: JSON.stringify(payload)
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    await loadStaples();
-    Swal.fire({ icon:'success', title:'Guardado', timer:1000, showConfirmButton:false });
-  } catch(e) {
-    Swal.fire('Error', e.message, 'error');
-  }
-}
-
-function editStaple(id, name, tier, minStock, margin) {
-  document.getElementById('s-name').value     = name;
-  document.getElementById('s-type').value     = tier || 'normal';
-  document.getElementById('s-minstock').value = minStock ?? '';
-  document.getElementById('s-margin').value   = margin;
-  window.scrollTo(0,0);
-  document.getElementById('s-name').focus();
-}
-
-async function deleteStaple(id, name) {
-  const { isConfirmed } = await Swal.fire({
-    title:`¿Eliminar ${name}?`, icon:'warning',
-    showCancelButton:true, confirmButtonColor:'#ef4444', confirmButtonText:'Eliminar'
-  });
-  if (!isConfirmed) return;
-  const res = await fetch(`${API}/api/admin/staples/${id}`, {
-    method:'DELETE', headers: authHeaders()
-  });
-  if (res.ok) { await loadStaples(); }
-  else Swal.fire('Error','No se pudo eliminar','error');
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  Swal.mixin({
+    toast: true, position: 'top-end', showConfirmButton: false,
+    timer: 2500, timerProgressBar: true,
+    background: '#1e293b', color: '#e2e8f0',
+    iconColor: type === 'error' ? '#f87171' : '#4ade80'
+  }).fire({ icon: type === 'error' ? 'error' : 'success', title: msg });
 }
 </script>
 </body>

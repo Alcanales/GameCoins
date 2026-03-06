@@ -129,10 +129,30 @@ def _items_table(items: list, show_alerts: bool = False) -> str:
 
     rows = ""
     for it in items:
-        foil = foil_label.get(it.get("foil", "normal"), "")
-        cond = cond_label.get(it.get("condition", "near_mint"), "")
-        tags = " ".join(filter(None, [foil, cond]))
-        tag_html = f' <span style="font-size:10px;color:#7c3aed;">{tags}</span>' if tags else ""
+        foil    = foil_label.get(it.get("foil", "normal"), "")
+        cond    = cond_label.get(it.get("condition", "near_mint"), "")
+        version = (it.get("version") or "").strip()
+        is_est  = it.get("is_estaca", False)
+
+        # Tags de versión: Foil, condición, versión especial
+        tag_parts = []
+        if foil:
+            tag_parts.append(f'<span style="background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">{foil}</span>')
+        if version:
+            tag_parts.append(f'<span style="background:#f0fdf4;color:#166534;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">{version}</span>')
+        elif is_est and not foil:
+            tag_parts.append('<span style="background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">✦ Premium</span>')
+        if cond:
+            tag_parts.append(f'<span style="background:#fef9c3;color:#713f12;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">{cond}</span>')
+        tags_html = (" " + " ".join(tag_parts)) if tag_parts else ""
+
+        # Precio: mostrar raw (CK original) + nota de estaca si aplica
+        price_raw = it.get("price_usd_raw") or it.get("price_usd") or 0
+        price_adj = it.get("price_usd") or 0
+        if is_est and price_raw != price_adj:
+            price_html = f'${price_raw:.2f} <span style="color:#7c3aed;font-size:10px;">→ ${price_adj:.2f} ×est.</span>'
+        else:
+            price_html = f'${price_adj:.2f}'
 
         alerts_html = ""
         if show_alerts and it.get("alerts"):
@@ -140,10 +160,11 @@ def _items_table(items: list, show_alerts: bool = False) -> str:
                 color = {"danger": "#dc2626", "warning": "#d97706", "info": "#3b82f6"}.get(a["type"], "#64748b")
                 alerts_html += f'<br><span style="font-size:10px;color:{color};">⚠ {a["msg"]}</span>'
 
+        qty = it.get("qty") or it.get("qty_csv") or 1
         rows += f"""<tr>
-          <td>{it.get('name','')}{tag_html}{alerts_html}</td>
-          <td style="text-align:center">{it.get('qty', it.get('qty_csv', 1))}</td>
-          <td style="text-align:right;color:#64748b;font-size:12px;">${it.get('price_usd',0):.2f} USD</td>
+          <td>{it.get('name','')}{tags_html}{alerts_html}</td>
+          <td style="text-align:center">{qty}</td>
+          <td style="text-align:right;color:#64748b;font-size:12px;">{price_html} USD</td>
           <td style="text-align:right"><strong>${it.get('price_credito',0):,}</strong></td>
           <td style="text-align:right"><strong>${it.get('price_cash',0):,}</strong></td>
         </tr>"""
@@ -151,7 +172,7 @@ def _items_table(items: list, show_alerts: bool = False) -> str:
     return f"""<table class="t">
       <thead><tr>
         <th>Carta</th><th style="text-align:center">Cant.</th>
-        <th style="text-align:right">USD Compra</th>
+        <th style="text-align:right">Ref. CK (USD)</th>
         <th style="text-align:right">💎 Crédito QP</th>
         <th style="text-align:right">💵 Cash CLP</th>
       </tr></thead>
@@ -190,17 +211,14 @@ async def send_public_buylist_vendor(
     {_items_table(items)}
     {_totals_table(total_credito, total_cash)}
     <div class="alert-box alert-warn">
-      <strong>⚠️ Importante:</strong> Esta cotización es referencial. Sujeta a revisión
-      presencial. Las cartas se evalúan en estado Near Mint. Los precios foil y condición
-      se aplicaron automáticamente pero pueden ajustarse en inspección. Las ofertas se
-      procesan en estricto orden de llegada.
+      <strong>📋 Nota:</strong> Los precios son referenciales y no constituyen una obligación de compra. Las cartas se evalúan presencialmente en Near Mint — foil y condición pueden ajustarse en inspección. Nos contactaremos contigo para coordinar.
     </div>
     <p>Te contactaremos pronto. ¡Gracias por elegir GameQuest! 🎮</p>"""
 
     return await _send(
         vendor_email,
-        f"✅ GameQuest — Orden Buylist #{order_id} Recibida",
-        _base("Confirmación de Cotización", f"Orden #{order_id} · {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
+        f"✅ GameQuest — Cotización Buylist #{order_id} Recibida",
+        _base("Cotización Recibida — Sin Compromiso", f"Orden #{order_id} · {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
     )
 
 
@@ -223,13 +241,13 @@ async def send_public_buylist_store(
     {_totals_table(total_credito, total_cash)}
     <div class="alert-box alert-info">
       <strong>ℹ️ Acción requerida:</strong> Contactar al vendedor en <strong>{vendor_email}</strong>
-      para coordinar la entrega de las cartas y confirmar precios finales.
+      para coordinar la revisión de las cartas.
     </div>"""
 
     return await _send(
         settings.TARGET_EMAIL,
         f"📋 Buylist #{order_id} — {vendor_email} [{payment_pref.upper()}] ${total_cash:,.0f} CLP",
-        _base("Nueva Orden Buylist Pública", f"Recibida {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
+        _base("Nueva Cotización Buylist Pública", f"Recibida {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
     )
 
 
