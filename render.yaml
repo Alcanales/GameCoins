@@ -7,14 +7,14 @@ services:
     buildCommand: >
       pip install --upgrade pip setuptools wheel &&
       pip install -r requirements.txt
-    # 1 worker (free tier tiene 512MB — más workers causan OOM)
-    # timeout 120s para dar tiempo al fetch de las ~213 páginas JS en primer arranque
+    # 1 worker (free tier 512MB — más workers causan OOM)
+    # timeout 180s para dar margen al fetch paralelo en boot frío inicial
     startCommand: >
       gunicorn app.main:app
       -w 1
       -k uvicorn.workers.UvicornWorker
       --bind 0.0.0.0:$PORT
-      --timeout 120
+      --timeout 180
       --graceful-timeout 30
       --keep-alive 5
     envVars:

@@ -25,6 +25,25 @@
                 color:#cbd5e1;font-weight:700;font-size:13px;cursor:pointer;transition:.15s; }
     .tier-btn:hover { background:rgba(255,255,255,.09); }
     .tier-btn.active { border-color:#eab308;background:rgba(234,179,8,.12);color:#fde68a; }
+    /* Tabs */
+    .tab-btn { color:#475569; }
+    .tab-btn.active { background:rgba(255,255,255,.07); color:#e2e8f0; }
+    /* Filtros catálogo */
+    .cf-btn.active { color:#e2e8f0!important; border-color:rgba(255,255,255,.2)!important;
+                     background:rgba(255,255,255,.09)!important; }
+    /* Tabla catálogo */
+    #cat-table tr { border-bottom:1px solid rgba(255,255,255,.04); transition:.1s; }
+    #cat-table tr:hover { background:rgba(255,255,255,.025); }
+    #cat-table td { vertical-align:middle; }
+    .tier-badge { display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
+                  font-size:9px;font-weight:700;cursor:pointer;transition:.15s; }
+    .tier-badge:hover { opacity:.8; }
+    .tier-none  { background:#1e293b;color:#475569;border:1px solid #334155; }
+    .tier-norm  { background:#1e3a5f;color:#7dd3fc;border:1px solid #1e40af; }
+    .tier-alta  { background:#78350f;color:#fde68a;border:1px solid #92400e; }
+    .tier-muy   { background:#450a0a;color:#fca5a5;border:1px solid #991b1b; }
+    .expand-row { display:none; background:rgba(0,0,0,.25); }
+    .expand-row.open { display:table-row; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .spin { animation:spin .8s linear infinite; display:inline-block; }
     /* Variante row */
@@ -77,6 +96,14 @@
       </div>
     </div>
     <div class="flex items-center gap-2">
+      <!-- Importar CSV masivo -->
+      <button onclick="openBulkImport()"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+               bg-purple-500/10 text-purple-400 border border-purple-500/20
+               hover:bg-purple-500/25 transition">
+        <i class="fas fa-file-import"></i>
+        <span class="hidden sm:inline">Importar CSV</span>
+      </button>
       <!-- Sync -->
       <button onclick="syncCache()" id="btn-sync"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
@@ -93,7 +120,23 @@
   </header>
 
   <!-- Main -->
-  <main class="flex-1 p-4 md:p-6 max-w-3xl mx-auto w-full space-y-4">
+  <main class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full space-y-4">
+
+    <!-- Tabs de navegación -->
+    <div class="flex gap-1 glass p-1 rounded-xl">
+      <button id="tab-buscar" onclick="showTab('buscar')"
+        class="tab-btn flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition">
+        <i class="fas fa-magnifying-glass mr-1.5"></i>Buscar
+      </button>
+      <button id="tab-catalogo" onclick="showTab('catalogo')"
+        class="tab-btn flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition">
+        <i class="fas fa-book-open mr-1.5"></i>Catálogo
+        <span id="catalog-count-badge" class="ml-1 hidden text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full"></span>
+      </button>
+    </div>
+
+    <!-- ══════════ PANEL BUSCAR ══════════ -->
+    <div id="panel-buscar">
 
     <!-- Buscador -->
     <div class="glass p-4">
@@ -134,7 +177,98 @@
       <p class="text-xs text-slate-700 mt-1">Prueba con otro nombre o revisa la ortografía</p>
     </div>
 
-    <!-- Resultados -->
+    </div><!-- /panel-buscar -->
+
+    <!-- ══════════ PANEL CATÁLOGO ══════════ -->
+    <div id="panel-catalogo" class="hidden space-y-3">
+
+      <!-- Stats + controles -->
+      <div id="catalog-stats" class="glass p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="text-center">
+          <div class="text-xl font-black text-white" id="cs-cards">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Cartas únicas</div>
+        </div>
+        <div class="text-center">
+          <div class="text-xl font-black text-purple-400" id="cs-skus">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">SKUs en JS</div>
+        </div>
+        <div class="text-center">
+          <div class="text-xl font-black text-green-400" id="cs-stock">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Stock total</div>
+        </div>
+        <div class="text-center">
+          <div class="text-xs font-black text-yellow-400" id="cs-sync">—</div>
+          <div class="text-[9px] text-slate-600 uppercase font-bold">Última sync</div>
+        </div>
+      </div>
+
+      <!-- Controles del catálogo -->
+      <div class="glass p-3 flex flex-wrap gap-2 items-center">
+        <!-- Búsqueda -->
+        <div class="relative flex-1 min-w-[160px]">
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs pointer-events-none"></i>
+          <input id="cat-q" type="text" placeholder="Filtrar por nombre…" oninput="catalogFilter()"
+            class="inp w-full pl-8 py-2 text-xs">
+        </div>
+        <!-- Filtros tier -->
+        <div class="flex gap-1">
+          <button onclick="setCatalogTierFilter('all')"   id="cf-all"      class="cf-btn active px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-400">Todas</button>
+          <button onclick="setCatalogTierFilter('sin_tier')" id="cf-sin"   class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-500">Sin tier</button>
+          <button onclick="setCatalogTierFilter('normal')" id="cf-normal"  class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-500">📦 Normal</button>
+          <button onclick="setCatalogTierFilter('alta')"   id="cf-alta"    class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-yellow-500/30 bg-yellow-500/10 text-yellow-500">⭐ Alta</button>
+          <button onclick="setCatalogTierFilter('muy_alta')" id="cf-muy"   class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-red-500/30 bg-red-500/10 text-red-400">🔥 Muy Alta</button>
+        </div>
+        <!-- Sync -->
+        <button onclick="syncCatalog()" id="btn-cat-sync"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+                 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition ml-auto">
+          <i class="fas fa-arrows-rotate"></i> Sync Catálogo
+        </button>
+      </div>
+
+      <!-- Tabla catálogo -->
+      <div class="glass overflow-hidden">
+        <div id="cat-loading" class="hidden p-8 text-center">
+          <i class="fas fa-circle-notch spin text-purple-400 text-xl mb-2 block"></i>
+          <p class="text-xs text-slate-500">Cargando catálogo…</p>
+        </div>
+        <div id="cat-empty" class="hidden p-10 text-center">
+          <i class="fas fa-database text-3xl text-slate-700 mb-3 block"></i>
+          <p class="font-bold text-slate-500">Catálogo vacío</p>
+          <p class="text-xs text-slate-600 mt-2">Haz clic en <strong>Sync Catálogo</strong> para poblar desde Jumpseller</p>
+        </div>
+        <table id="cat-table" class="hidden w-full text-xs">
+          <thead>
+            <tr class="border-b border-white/5">
+              <th class="text-left px-4 py-3 text-[9px] font-bold text-slate-600 uppercase tracking-widest">Carta</th>
+              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Stock</th>
+              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">SKUs JS</th>
+              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Scryfall IDs</th>
+              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Tier</th>
+              <th class="text-right px-4 py-3 text-[9px] font-bold text-slate-600 uppercase">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="cat-tbody"></tbody>
+        </table>
+        <!-- Paginación -->
+        <div id="cat-pagination" class="hidden flex items-center justify-between px-4 py-3 border-t border-white/5">
+          <span id="cat-page-info" class="text-[10px] text-slate-600"></span>
+          <div class="flex gap-2">
+            <button onclick="catalogPage(-1)" id="cat-prev"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 transition disabled:opacity-30">
+              ← Anterior
+            </button>
+            <button onclick="catalogPage(1)" id="cat-next"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 transition disabled:opacity-30">
+              Siguiente →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /panel-catalogo -->
+
+    <!-- Resultados (búsqueda) -->
     <div id="results-wrap" class="hidden space-y-3">
       <div class="flex items-center justify-between px-1">
         <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
@@ -440,6 +574,506 @@ async function openTierMenu(key, displayName, currentTier, stapleId, idx) {
   } catch(e) {
     showToast(`❌ ${e.message}`, 'error');
   }
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+function showTab(tab) {
+  ['buscar','catalogo'].forEach(t => {
+    document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+    document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+  });
+  if (tab === 'catalogo' && !catalogLoaded) loadCatalog();
+}
+
+// ── Estado del catálogo ────────────────────────────────────────────────────────
+let catalogLoaded = false;
+let catalogPage_  = 1;
+let catalogLimit  = 50;
+let catalogTotal  = 0;
+let catalogTierF  = 'all';
+let catalogQ      = '';
+let catalogDebounce = null;
+
+// ── Cargar stats del catálogo ──────────────────────────────────────────────────
+async function loadCatalogStats() {
+  try {
+    const r = await fetch(`${API}/api/admin/catalog/stats`, { headers: ah() });
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('cs-cards').textContent  = d.total_cards?.toLocaleString() || '0';
+    document.getElementById('cs-skus').textContent   = d.total_skus?.toLocaleString()  || '0';
+    document.getElementById('cs-stock').textContent  = d.total_stock?.toLocaleString() || '0';
+    document.getElementById('cs-sync').textContent   = d.last_sync
+      ? new Date(d.last_sync).toLocaleString('es-CL', {dateStyle:'short',timeStyle:'short'})
+      : 'Nunca';
+    const badge = document.getElementById('catalog-count-badge');
+    if (d.total_cards > 0) {
+      badge.textContent = d.total_cards.toLocaleString();
+      badge.classList.remove('hidden');
+    }
+  } catch(e) {}
+}
+
+// ── Cargar tabla catálogo ──────────────────────────────────────────────────────
+async function loadCatalog() {
+  document.getElementById('cat-loading').classList.remove('hidden');
+  document.getElementById('cat-table').classList.add('hidden');
+  document.getElementById('cat-empty').classList.add('hidden');
+  document.getElementById('cat-pagination').classList.add('hidden');
+
+  const params = new URLSearchParams({
+    page:  catalogPage_,
+    limit: catalogLimit,
+    ...(catalogQ    ? { q:    catalogQ }    : {}),
+    ...(catalogTierF !== 'all' ? { tier: catalogTierF } : {}),
+  });
+
+  try {
+    const r = await fetch(`${API}/api/admin/catalog?${params}`, { headers: ah() });
+    if (!r.ok) throw new Error('Error cargando catálogo');
+    const data = await r.json();
+
+    document.getElementById('cat-loading').classList.add('hidden');
+    catalogTotal  = data.total;
+    catalogLoaded = true;
+
+    if (!data.results?.length) {
+      document.getElementById('cat-empty').classList.remove('hidden');
+      return;
+    }
+
+    renderCatalogTable(data.results);
+    renderCatalogPagination(data);
+    await loadCatalogStats();
+  } catch(e) {
+    document.getElementById('cat-loading').classList.add('hidden');
+    document.getElementById('cat-empty').classList.remove('hidden');
+    showToast(`❌ ${e.message}`, 'error');
+  }
+}
+
+// ── Render tabla ───────────────────────────────────────────────────────────────
+function renderCatalogTable(rows) {
+  const tbody = document.getElementById('cat-tbody');
+  tbody.innerHTML = '';
+
+  rows.forEach((c, idx) => {
+    const tierBadge = tierBadgeHtml(c.tier, c.staple_id, c.canonical, c.name);
+    const stockColor = c.total_stock === 0 ? 'text-red-400'
+                     : c.total_stock < 3   ? 'text-yellow-400' : 'text-green-400';
+    const sfCount    = (c.scryfall_ids || []).length;
+    const varCount   = (c.variants    || []).length;
+    const hasDetail  = varCount > 0 || sfCount > 0;
+
+    // Fila principal
+    const tr = document.createElement('tr');
+    tr.id = `crow-${idx}`;
+    tr.innerHTML = `
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          ${hasDetail ? `<button onclick="toggleExpand(${idx})"
+            class="text-slate-600 hover:text-white transition text-xs w-4 text-center">
+            <i id="exp-icon-${idx}" class="fas fa-chevron-right"></i></button>` : '<span class="w-4"></span>'}
+          <div>
+            <div class="font-bold text-white text-[13px]">${esc(c.name)}</div>
+            <div class="text-[10px] text-slate-600 font-mono">${esc(c.canonical)}</div>
+          </div>
+        </div>
+      </td>
+      <td class="px-3 py-3 text-center">
+        <span class="font-black text-sm ${stockColor}">${c.total_stock ?? '—'}</span>
+      </td>
+      <td class="px-3 py-3 text-center">
+        <span class="text-[11px] text-slate-400">${varCount}</span>
+      </td>
+      <td class="px-3 py-3 text-center">
+        ${sfCount > 0
+          ? `<span class="text-[10px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full">${sfCount} IDs</span>`
+          : `<span class="text-[10px] text-slate-700">—</span>`}
+      </td>
+      <td class="px-3 py-3 text-center">
+        ${tierBadge}
+      </td>
+      <td class="px-4 py-3 text-right">
+        <button onclick="addToCatalogSync('${esc(c.canonical)}', '${esc(c.name)}')"
+          class="text-[10px] text-slate-600 hover:text-yellow-400 transition font-bold px-2 py-1 rounded-lg hover:bg-yellow-500/10">
+          <i class="fas fa-plus mr-1"></i>SF IDs
+        </button>
+      </td>`;
+    tbody.appendChild(tr);
+
+    // Fila expandible
+    if (hasDetail) {
+      const tr2 = document.createElement('tr');
+      tr2.id = `cexp-${idx}`;
+      tr2.className = 'expand-row';
+      tr2.innerHTML = `
+        <td colspan="6" class="px-6 pb-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+            <!-- Variantes JS -->
+            <div>
+              <p class="text-[9px] font-bold text-slate-600 uppercase mb-2">
+                <i class="fas fa-store mr-1"></i>Variantes en Jumpseller
+              </p>
+              ${(c.variants || []).map(v => `
+                <div class="var-row">
+                  <span class="vname">${esc(v.name || '—')}</span>
+                  <span class="vstk ${v.stock === 0 ? 'text-red-400' : 'text-green-400'}">${v.stock ?? 0} u.</span>
+                  <span class="text-[10px] text-slate-500">${v.price ? '$'+Number(v.price).toLocaleString('es-CL') : '—'}</span>
+                </div>`).join('') || '<p class="text-[11px] text-slate-700 mt-1">Sin variantes en JS</p>'}
+            </div>
+            <!-- Scryfall IDs -->
+            <div>
+              <p class="text-[9px] font-bold text-slate-600 uppercase mb-2">
+                <i class="fas fa-fingerprint mr-1"></i>Scryfall IDs vinculados
+              </p>
+              ${(c.scryfall_ids || []).map(s => {
+                const sid = typeof s === 'string' ? s : s?.scryfall_id || '—';
+                const set = typeof s === 'object' ? (s.set_code || '') : '';
+                const fn  = typeof s === 'object' ? (s.foil || 'normal') : 'normal';
+                return `
+                <div class="var-row">
+                  <span class="vname font-mono text-[10px]">${esc(sid)}</span>
+                  ${set ? `<span class="text-[10px] font-bold text-slate-500 uppercase">${esc(set)}</span>` : ''}
+                  ${fn !== 'normal' ? `<span class="text-[9px] font-bold text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded-full">${fn}</span>` : '<span></span>'}
+                </div>`;
+              }).join('') || '<p class="text-[11px] text-slate-700 mt-1">Sin Scryfall IDs — sube un CSV de Manabox en Sync Catálogo</p>'}
+            </div>
+          </div>
+        </td>`;
+      tbody.appendChild(tr2);
+    }
+  });
+
+  document.getElementById('cat-table').classList.remove('hidden');
+}
+
+function toggleExpand(idx) {
+  const row  = document.getElementById(`cexp-${idx}`);
+  const icon = document.getElementById(`exp-icon-${idx}`);
+  if (!row) return;
+  const open = row.classList.toggle('open');
+  icon.className = `fas fa-chevron-${open ? 'down' : 'right'}`;
+}
+
+function tierBadgeHtml(tier, stapleId, canonical, name) {
+  const t = tier || null;
+  const cls = !t ? 'tier-none' : t === 'muy_alta' ? 'tier-muy' : t === 'alta' ? 'tier-alta' : 'tier-norm';
+  const lbl = !t ? '— sin tier' : t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : '📦 Normal';
+  return `<span class="tier-badge ${cls}" onclick="openTierMenuCatalog('${esc(canonical)}','${esc(name)}',${stapleId||'null'})">${lbl}</span>`;
+}
+
+// ── Cambiar tier desde el catálogo ────────────────────────────────────────────
+async function openTierMenuCatalog(canonical, displayName, stapleId) {
+  let selected = null;
+  await Swal.fire({
+    title: `Tier: ${displayName}`,
+    html: `<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+      ${['muy_alta','alta','normal','quitar'].map(t => `
+        <button data-tier="${t}" onclick="document.querySelectorAll('[data-tier]').forEach(b=>b.classList.remove('active'));this.classList.add('active')"
+          class="tier-btn ${t === 'quitar' ? 'border-red-900 text-red-400' : ''}">
+          ${t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : t === 'normal' ? '📦 Normal' : '🗑 Quitar de la lista'}
+        </button>`).join('')}
+    </div>`,
+    showConfirmButton: true, confirmButtonText: 'Guardar',
+    showCancelButton: true,  confirmButtonColor: '#eab308',
+    didOpen: () => {
+      document.querySelectorAll('[data-tier]').forEach(b => {
+        b.addEventListener('click', () => { selected = b.dataset.tier; Swal.close(); });
+      });
+    }
+  });
+  if (!selected) return;
+  try {
+    if (selected === 'quitar') {
+      if (stapleId) {
+        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
+      } else {
+        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
+        const ll = await lr.json();
+        const ex = ll.find(s => canonical(s.name) === canonical);
+        if (ex) await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
+      }
+    } else {
+      await fetch(`${API}/api/admin/staples`, {
+        method: 'POST', headers: ah(),
+        body: JSON.stringify({ name: displayName, tier: selected, margin_factor: 2.5 })
+      });
+    }
+    showToast(selected === 'quitar' ? '🗑 Quitado de la lista' : `✅ ${displayName} → ${selected}`);
+    catalogLoaded = false;
+    loadCatalog();
+  } catch(e) { showToast(`❌ ${e.message}`, 'error'); }
+}
+
+// ── Sync catálogo desde JS + CSV opcional ─────────────────────────────────────
+async function syncCatalog() {
+  const { isConfirmed, value: uploadCsv } = await Swal.fire({
+    title: '🔄 Sync Catálogo',
+    html: `<p style="font-size:13px;color:#94a3b8;margin-bottom:14px">
+      Esto sincroniza el catálogo desde Jumpseller.<br>
+      Opcionalmente sube un CSV de Manabox para vincular Scryfall IDs.
+    </p>
+    <label style="font-size:11px;color:#64748b;font-weight:700;display:block;margin-bottom:8px">
+      CSV Manabox (opcional — aporta Scryfall IDs)
+    </label>
+    <input type="file" id="sync-csv" accept=".csv,.txt"
+      style="width:100%;padding:8px;background:#1e293b;border:1px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:11px">`,
+    confirmButtonText: 'Sincronizar',
+    showCancelButton: true,
+    confirmButtonColor: '#3b82f6',
+    preConfirm: () => document.getElementById('sync-csv').files[0] || null,
+  });
+  if (!isConfirmed) return;
+
+  Swal.fire({ title: 'Sincronizando…',
+    html: '<p style="color:#94a3b8;font-size:13px">Leyendo catálogo de Jumpseller…</p>',
+    allowOutsideClick: false, showConfirmButton: false,
+    didOpen: () => Swal.showLoading() });
+
+  try {
+    const form = new FormData();
+    if (uploadCsv) form.append('file', uploadCsv);
+
+    // Si no hay CSV, enviar como GET-like con form vacío
+    const r = await fetch(`${API}/api/admin/catalog/sync`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: form,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error en sync');
+
+    Swal.fire({
+      icon: 'success', title: '✅ Catálogo sincronizado',
+      html: `<div style="font-size:13px;color:#94a3b8;line-height:1.8">
+        <strong style="color:#e2e8f0">Jumpseller → BD:</strong>
+        ${d.phase1_inserted} nuevas · ${d.phase1_updated} actualizadas<br>
+        ${d.phase2_sf_added !== undefined ? `<strong style="color:#e2e8f0">Scryfall IDs añadidos:</strong> ${d.phase2_sf_added} nuevos · ${d.phase2_sf_skip} ya existían<br>` : ''}
+        <strong style="color:#e2e8f0">Total índice Scryfall:</strong> ${d.scryfall_map_size?.toLocaleString() || '—'} IDs en RAM
+      </div>`,
+      confirmButtonColor: '#3b82f6',
+    });
+    catalogLoaded = false;
+    loadCatalog();
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
+
+// ── Añadir Scryfall IDs desde CSV a una carta específica ──────────────────────
+async function addToCatalogSync(canonical_key, displayName) {
+  const { value: file } = await Swal.fire({
+    title: `🔗 Vincular SF IDs: ${displayName}`,
+    html: `<p style="font-size:12px;color:#94a3b8;margin-bottom:12px">
+      Sube un CSV de Manabox que contenga esta carta.<br>
+      Se extraerán solo los Scryfall IDs de <strong style="color:#e2e8f0">${esc(displayName)}</strong>.
+    </p>
+    <input type="file" id="sf-csv" accept=".csv"
+      style="width:100%;padding:8px;background:#1e293b;border:1px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:11px">`,
+    confirmButtonText: 'Vincular',
+    showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+    preConfirm: () => {
+      const f = document.getElementById('sf-csv').files[0];
+      if (!f) { Swal.showValidationMessage('Selecciona un CSV'); return false; }
+      return f;
+    }
+  });
+  if (!file) return;
+  // Reutilizar el endpoint catalog/sync que también acepta CSV
+  const form = new FormData();
+  form.append('file', file);
+  Swal.fire({ title: 'Vinculando…', allowOutsideClick: false, showConfirmButton: false,
+    didOpen: () => Swal.showLoading() });
+  try {
+    const r = await fetch(`${API}/api/admin/catalog/sync`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error');
+    showToast(`✅ ${d.phase2_sf_added} Scryfall IDs vinculados`);
+    catalogLoaded = false;
+    loadCatalog();
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+}
+
+// ── Filtros y paginación del catálogo ─────────────────────────────────────────
+function setCatalogTierFilter(tier) {
+  catalogTierF = tier;
+  catalogPage_ = 1;
+  document.querySelectorAll('.cf-btn').forEach(b => b.classList.remove('active'));
+  const map = { all:'cf-all', sin_tier:'cf-sin', normal:'cf-normal', alta:'cf-alta', muy_alta:'cf-muy' };
+  document.getElementById(map[tier] || 'cf-all')?.classList.add('active');
+  loadCatalog();
+}
+
+function catalogFilter() {
+  clearTimeout(catalogDebounce);
+  catalogDebounce = setTimeout(() => {
+    catalogQ = document.getElementById('cat-q').value.trim();
+    catalogPage_ = 1;
+    loadCatalog();
+  }, 350);
+}
+
+function catalogPage(dir) {
+  const maxPage = Math.ceil(catalogTotal / catalogLimit);
+  catalogPage_ = Math.max(1, Math.min(maxPage, catalogPage_ + dir));
+  loadCatalog();
+}
+
+function renderCatalogPagination(data) {
+  const pag = document.getElementById('cat-pagination');
+  const from = (data.page - 1) * data.limit + 1;
+  const to   = Math.min(data.page * data.limit, data.total);
+  document.getElementById('cat-page-info').textContent =
+    `${from}–${to} de ${data.total.toLocaleString()} cartas`;
+  document.getElementById('cat-prev').disabled = data.page <= 1;
+  document.getElementById('cat-next').disabled = data.page >= data.pages;
+  pag.classList.remove('hidden');
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Inicializar tabs al cargar
+document.addEventListener('DOMContentLoaded', () => {
+  showTab('buscar');
+});
+
+// ── Importación masiva de staples ─────────────────────────────────────────────
+async function openBulkImport() {
+  // Paso 1: elegir tier por defecto para todo el CSV
+  const { value: tier } = await Swal.fire({
+    title: '📥 Importar CSV Masivo',
+    html: `
+      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">
+        Sube un CSV de Manabox.<br>
+        <strong style="color:#e2e8f0">Todas las cartas únicas</strong> se agregarán a la lista de demanda con el tier que elijas.
+        <br><span style="color:#f59e0b;font-size:11px">Si una carta ya existe, solo se actualiza su tier.</span>
+      </p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Tier para TODAS las cartas</label>
+        <div style="display:flex;gap:8px;justify-content:center" id="tier-btns">
+          <button data-tier="normal"   onclick="selectBulkTier(this)" 
+            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer">
+            📦 Normal
+          </button>
+          <button data-tier="alta"     onclick="selectBulkTier(this)" 
+            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #f59e0b;background:#fef3c7;color:#92400e;cursor:pointer">
+            ⭐ Alta
+          </button>
+          <button data-tier="muy_alta" onclick="selectBulkTier(this)"
+            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer">
+            🔥 Muy Alta
+          </button>
+        </div>
+        <p id="tier-hint" style="font-size:11px;color:#64748b;margin-top:4px">Selecciona un tier para continuar</p>
+      </div>`,
+    confirmButtonText: 'Siguiente →',
+    showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+    didOpen: () => {
+      window._bulkTierSelected = null;
+      // Seleccionar 'alta' por defecto
+      const btn = document.querySelector('[data-tier="alta"]');
+      if (btn) selectBulkTier(btn);
+    },
+    preConfirm: () => {
+      if (!window._bulkTierSelected) {
+        Swal.showValidationMessage('Elige un tier antes de continuar');
+        return false;
+      }
+      return window._bulkTierSelected;
+    }
+  });
+
+  if (!tier) return;
+
+  // Paso 2: subir el CSV
+  const { value: file } = await Swal.fire({
+    title: `📂 Subir CSV (tier: ${tier})`,
+    html: `
+      <p style="font-size:12px;color:#94a3b8;margin-bottom:14px">
+        Sube tu CSV exportado de Manabox.<br>
+        Se leerá la columna <code>Name</code> y se importarán todas las cartas únicas.
+      </p>
+      <input type="file" id="bulk-csv" accept=".csv,.txt"
+        style="width:100%;padding:10px;background:#1e293b;border:2px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:12px;cursor:pointer">
+      <p style="font-size:10px;color:#475569;margin-top:8px">Máximo 5 MB — cualquier CSV de Manabox funciona</p>`,
+    confirmButtonText: 'Importar',
+    showCancelButton: true,
+    confirmButtonColor: '#7c3aed',
+    preConfirm: () => {
+      const f = document.getElementById('bulk-csv').files[0];
+      if (!f) { Swal.showValidationMessage('Selecciona un archivo CSV'); return false; }
+      return f;
+    }
+  });
+
+  if (!file) return;
+
+  // Paso 3: enviar al endpoint bulk
+  Swal.fire({
+    title: 'Importando...',
+    html: `<p style="color:#94a3b8;font-size:13px">Procesando <strong>${file.name}</strong><br>Esto puede tardar unos segundos...</p>`,
+    allowOutsideClick: false,
+    showConfirmButton: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  try {
+    const form = new FormData();
+    form.append('file', file);
+
+    const res  = await fetch(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: form,
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.detail || 'Error en el servidor');
+
+    Swal.fire({
+      icon: 'success',
+      title: '✅ Importación completada',
+      html: `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px">
+          <div style="background:#dcfce7;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#166534">${data.inserted}</div>
+            <div style="font-size:10px;font-weight:700;color:#166534;text-transform:uppercase">Nuevas</div>
+          </div>
+          <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#92400e">${data.updated}</div>
+            <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase">Actualizadas</div>
+          </div>
+          <div style="background:#f1f5f9;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#475569">${data.skipped}</div>
+            <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase">Sin cambios</div>
+          </div>
+        </div>
+        <p style="margin-top:14px;font-size:12px;color:#64748b">
+          ${data.total} cartas únicas procesadas con tier <strong>${data.tier}</strong>
+        </p>`,
+      confirmButtonColor: '#7c3aed',
+    });
+    checkCacheStatus();   // refrescar el badge del caché
+
+  } catch(e) {
+    Swal.fire('Error', e.message, 'error');
+  }
+}
+
+function selectBulkTier(btn) {
+  document.querySelectorAll('[data-tier]').forEach(b => {
+    b.style.opacity = '0.45';
+    b.style.transform = 'scale(0.95)';
+  });
+  btn.style.opacity = '1';
+  btn.style.transform = 'scale(1.05)';
+  window._bulkTierSelected = btn.dataset.tier;
+  const hint = document.getElementById('tier-hint');
+  if (hint) hint.textContent = `✅ Tier seleccionado: ${btn.dataset.tier}`;
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────

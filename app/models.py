@@ -43,18 +43,46 @@ class StapleCard(Base):
     __tablename__ = "staple_cards"
 
     id              = Column(Integer, primary_key=True, autoincrement=True)
-    # Nombre normalizado en minúsculas para búsqueda
     name_normalized = Column(String, nullable=False, unique=True, index=True)
-    # Nombre original tal como viene de Manabox / Jumpseller
     name_display    = Column(String, nullable=False)
-    # Tier: "normal" | "alta" | "muy_alta"
     tier            = Column(String, default="alta", nullable=False)
-    # Stock mínimo personalizado (None = usa el default según tier)
     min_stock_override = Column(Integer, nullable=True)
-    # Precio mínimo de venta personalizado en CLP (None = calculado automático)
     min_price_override = Column(Numeric(12, 2), nullable=True)
-    # Factor de margen mínimo
     margin_factor   = Column(Float, default=2.5)
     added_by        = Column(String, nullable=True)
+    created_at      = Column(DateTime, server_default=func.now())
+    updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class CardCatalog(Base):
+    """
+    Catálogo persistente: nombre canónico → todos los product IDs de Jumpseller.
+
+    Resuelve el problema de que el caché RAM se pierde al reiniciar:
+    - Cada fila = una carta única identificada por su nombre canónico
+    - js_product_ids: lista de IDs de productos JS (todas las ediciones/versiones)
+    - js_variants: snapshot de las variantes con stock y precio
+    - total_stock: suma de stock de todas las variantes (cacheado)
+    - last_synced: cuándo se sincronizó desde la API de JS
+
+    Lookup flow (analyze_buylist / stock_check):
+      canonical = _canonical(csv_name)
+      catalog_entry = catalog_map[canonical]     # O(1), cargado en RAM al arrancar
+      product_ids   = catalog_entry.js_product_ids
+      total_stock   = sum(js_by_id[pid]["stock"] for pid in product_ids if pid in js_by_id)
+    """
+    __tablename__ = "card_catalog"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    name_normalized = Column(String, nullable=False, unique=True, index=True)  # clave canónica
+    name_display    = Column(String, nullable=False)                            # nombre para mostrar
+    js_product_ids  = Column(JSON,   default=list)   # [12345, 12346, ...]
+    js_variants     = Column(JSON,   default=list)   # [{id, name, stock, price}, ...]
+    # scryfall_ids: lista de UUIDs de Scryfall (una por edición/impresión)
+    # Formato: [{"scryfall_id": "uuid", "set_code": "M10", "set_name": "Magic 2010",
+    #            "collector_number": "152", "lang": "en"}]
+    scryfall_ids    = Column(JSON,   default=list)
+    total_stock     = Column(Integer, default=0)
+    last_synced     = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
