@@ -1276,3 +1276,4 @@ def cache_status():
         "total_stock":     sum(v["stock"] for v in _js_stock_cache.values()),
         "sample_5":        list(_js_stock_cache.keys())[:5],
     }
+""
