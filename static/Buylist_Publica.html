@@ -4,319 +4,596 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Buylist — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-    body { background:#f8f9fa; font-family:'Inter',system-ui,sans-serif; color:#1e293b; }
-    .card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; }
-    .pill { display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap; }
-    .p-muyalta { background:#fef3c7;color:#92400e;border:1px solid #fde68a; }
-    .p-buscamos{ background:#dcfce7;color:#166534;border:1px solid #bbf7d0; }
-    .p-stockok { background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0; }
-    .p-estaca  { background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd; }
-    .p-sinlista{ background:#f8fafc;color:#cbd5e1;border:1px solid #f1f5f9; }
-    .f-btn { padding:5px 13px;border-radius:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:all .15s;border:1px solid transparent; }
-    .f-on  { background:#1e293b;color:#fff; }
-    .f-off { background:#f1f5f9;color:#64748b;border-color:#e2e8f0; }
-    .f-off:hover { background:#e2e8f0;color:#334155; }
-    .row-stockok { opacity:.45; }
-    .row-estaca td:first-child { padding-left:9px; border-left:3px solid #7c3aed; }
-    thead th { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;padding:10px 12px; }
-    tbody td { padding:11px 12px;font-size:13px; }
-    tbody tr { border-bottom:1px solid #f8fafc; }
-    tbody tr:hover { background:#fafafa; }
-    .upload-zone { border:2px dashed #cbd5e1;border-radius:14px;cursor:pointer;transition:all .2s; }
-    .upload-zone:hover { border-color:#dc2626;background:#fff5f5; }
-    .col-qp   { color:#b45309;font-weight:800; }
-    .col-cash { color:#15803d;font-weight:800; }
-    label[for=csv-file] { display:block; }
-    input[type=file] { display:none; }
+/* ═══════════════════════════════════════════════
+   GAMEQUEST DESIGN SYSTEM — PALETA OFICIAL v1
+   ═══════════════════════════════════════════════
+   --gq-bg       #09090f   fondo app
+   --gq-s1       #111118   superficie primaria
+   --gq-s2       #1a1a24   superficie elevada
+   --gq-s3       #23232f   superficie interactiva
+   --gq-bd       #2a2a3a   borde base
+   --gq-bd2      #3d3d52   borde activo
+   --gq-gold     #f59e0b   amarillo GameQuest (primario)
+   --gq-gold-d   #d97706   hover dorado
+   --gq-qp       #7c3aed   QuestPoints morado
+   --gq-qp-l     #a78bfa   texto QP
+   --gq-cash     #059669   Cash verde
+   --gq-cash-l   #34d399   texto Cash
+   --gq-buying   #10b981   compramos verde
+   --gq-partial  #f59e0b   compra parcial amber
+   --gq-full     #475569   stock completo gris
+   --gq-danger   #ef4444   rojo alerta
+   --gq-text     #f1f5f9   texto principal
+   --gq-text2    #94a3b8   texto secundario
+   --gq-text3    #64748b   texto terciario
+═══════════════════════════════════════════════ */
+:root {
+  --gq-bg:#09090f; --gq-s1:#111118; --gq-s2:#1a1a24; --gq-s3:#23232f;
+  --gq-bd:#2a2a3a; --gq-bd2:#3d3d52;
+  --gq-gold:#f59e0b; --gq-gold-d:#d97706;
+  --gq-qp:#7c3aed; --gq-qp-l:#a78bfa;
+  --gq-cash:#059669; --gq-cash-l:#34d399;
+  --gq-buying:#10b981; --gq-partial:#f59e0b; --gq-full:#475569;
+  --gq-danger:#ef4444;
+  --gq-text:#f1f5f9; --gq-text2:#94a3b8; --gq-text3:#64748b;
+}
+*{box-sizing:border-box}
+body{background:var(--gq-bg);color:var(--gq-text);font-family:'Inter',system-ui,sans-serif;min-height:100vh}
+/* Header */
+.gq-header{background:rgba(17,17,24,.97);border-bottom:1px solid var(--gq-bd);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
+.gq-logo{font-size:1.2rem;font-weight:900;color:var(--gq-gold);letter-spacing:-.02em}
+.gq-logo span{color:var(--gq-text)}
+/* Surfaces */
+.gq-card{background:var(--gq-s1);border:1px solid var(--gq-bd);border-radius:14px}
+.gq-inner{background:var(--gq-s2);border:1px solid var(--gq-bd);border-radius:10px}
+/* Dropzone */
+#drop-zone{border:2px dashed var(--gq-bd2);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--gq-s2)}
+#drop-zone:hover,#drop-zone.drag-over{border-color:var(--gq-gold);background:rgba(245,158,11,.07)}
+#drop-zone.has-file{border-color:var(--gq-buying);background:rgba(16,185,129,.05)}
+/* Badges */
+.gq-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid}
+.gb-buying{background:rgba(16,185,129,.15);color:#34d399;border-color:rgba(16,185,129,.3)}
+.gb-partial{background:rgba(245,158,11,.15);color:#fbbf24;border-color:rgba(245,158,11,.3)}
+.gb-full{background:rgba(71,85,105,.2);color:var(--gq-full);border-color:rgba(71,85,105,.3)}
+.gb-unlisted{background:rgba(30,30,42,.5);color:var(--gq-text3);border-color:var(--gq-bd)}
+.gb-muyalta{background:rgba(239,68,68,.15);color:#f87171;border-color:rgba(239,68,68,.3)}
+.gb-foil{background:rgba(124,58,237,.15);color:var(--gq-qp-l);border-color:rgba(124,58,237,.3)}
+.gb-estaca{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25)}
+/* Filter buttons */
+.gq-fb{border:1px solid var(--gq-bd);background:var(--gq-s2);color:var(--gq-text2);border-radius:8px;padding:4px 13px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:.15s;white-space:nowrap}
+.gq-fb:hover{background:var(--gq-s3);color:var(--gq-text)}
+.gq-fb.active{background:var(--gq-s3);border-color:var(--gq-bd2);color:var(--gq-text)}
+.gq-fb.fb-buying.active{border-color:var(--gq-buying);color:var(--gq-buying)}
+.gq-fb.fb-partial.active{border-color:var(--gq-partial);color:var(--gq-partial)}
+.gq-fb.fb-full.active{border-color:var(--gq-bd2);color:var(--gq-text3)}
+/* Checkbox */
+.gq-check{width:17px;height:17px;border:2px solid var(--gq-bd2);border-radius:4px;background:var(--gq-s2);cursor:pointer;appearance:none;-webkit-appearance:none;flex-shrink:0;transition:.15s;position:relative}
+.gq-check:checked{background:var(--gq-buying);border-color:var(--gq-buying)}
+.gq-check:checked::after{content:'';position:absolute;top:1px;left:4px;width:5px;height:8px;border:2px solid #fff;border-top:none;border-left:none;transform:rotate(45deg)}
+.gq-check:disabled{opacity:.3;cursor:not-allowed}
+/* Qty */
+.gq-qty{background:var(--gq-s3);border:1px solid var(--gq-bd2);color:var(--gq-text);border-radius:7px;width:50px;text-align:center;font-size:13px;font-weight:700;padding:3px 5px}
+.gq-qty:focus{outline:none;border-color:var(--gq-gold)}
+.gq-qty:disabled{opacity:.3}
+/* Card row */
+.card-row{border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s;padding:14px 16px}
+.card-row:last-child{border-bottom:none}
+.card-row:hover{background:rgba(255,255,255,.02)}
+.row-full{opacity:.42}
+.row-unlisted{opacity:.3}
+.row-hidden{display:none!important}
+/* Cupo bar */
+.cupo-bar{height:3px;background:var(--gq-bd);border-radius:999px;overflow:hidden;margin-top:4px}
+.cupo-fill{height:100%;background:var(--gq-buying);border-radius:999px;transition:width .3s}
+/* Payment options */
+.pay-opt{border:1.5px solid var(--gq-bd);border-radius:12px;padding:14px 16px;cursor:pointer;transition:.2s;background:var(--gq-s2)}
+.pay-opt:hover{border-color:var(--gq-bd2);background:var(--gq-s3)}
+.pay-opt.sel-qp{border-color:var(--gq-qp);background:rgba(124,58,237,.1)}
+.pay-opt.sel-cash{border-color:var(--gq-cash);background:rgba(5,150,105,.1)}
+/* Normas */
+.norma{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gq-bd);font-size:13px}
+.norma:last-child{border-bottom:none}
+.norma-n{min-width:22px;height:22px;background:var(--gq-gold);color:#09090f;border-radius:999px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+/* Totals bar */
+#totals-bar{position:sticky;bottom:0;background:rgba(17,17,24,.98);border-top:1px solid var(--gq-bd);backdrop-filter:blur(10px);z-index:90}
+/* Buttons */
+.btn-gq{background:var(--gq-gold);color:#09090f;font-weight:800;font-size:13px;border:none;border-radius:10px;padding:10px 22px;cursor:pointer;transition:.15s}
+.btn-gq:hover:not(:disabled){background:var(--gq-gold-d)}
+.btn-gq:disabled{opacity:.4;cursor:not-allowed}
+.btn-gq-out{background:transparent;color:var(--gq-text2);border:1px solid var(--gq-bd2);font-weight:700;font-size:11px;border-radius:8px;padding:5px 12px;cursor:pointer;transition:.15s}
+.btn-gq-out:hover{color:var(--gq-text);border-color:var(--gq-text3)}
+/* Misc */
+.lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gq-text3)}
+.text-qp{color:var(--gq-qp-l)} .text-cash{color:var(--gq-cash-l)} .text-gold{color:var(--gq-gold)}
+.spin{animation:spin .8s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.form-control{background:var(--gq-s2)!important;border:1px solid var(--gq-bd)!important;color:var(--gq-text)!important;border-radius:9px!important}
+.form-control:focus{border-color:var(--gq-gold)!important;box-shadow:none!important;outline:none!important}
+.form-control::placeholder{color:var(--gq-text3)!important}
   </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
-<div class="max-w-5xl mx-auto space-y-5">
+<body>
 
-  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-    <div>
-      <h1 class="text-3xl font-black uppercase tracking-tighter">Buylist <span class="text-red-600">Quest</span></h1>
-      <p class="text-[11px] text-slate-400 font-medium mt-0.5 uppercase tracking-wider">Cotización de Cartas</p>
+<!-- Header -->
+<header class="gq-header px-3 py-3">
+  <div class="d-flex align-items-center justify-content-between" style="max-width:860px;margin:0 auto">
+    <div class="gq-logo">game<span>quest</span></div>
+    <a href="/" class="btn-gq-out text-decoration-none"><i class="fas fa-store me-1"></i>Tienda</a>
+  </div>
+</header>
+
+<!-- Closed banner -->
+<div id="closed-banner" style="display:none">
+  <div style="max-width:440px;margin:80px auto;padding:0 16px" class="text-center">
+    <div class="gq-card p-5">
+      <div style="font-size:2.5rem;margin-bottom:12px">🔒</div>
+      <h4 class="fw-bold mb-2">Buylist Temporalmente Cerrada</h4>
+      <p style="font-size:13px;color:var(--gq-text2)" class="mb-3">Estamos evaluando cotizaciones anteriores o reponiendo stock. ¡Vuelve pronto!</p>
+      <a href="mailto:contacto@gamequest.cl" class="btn-gq-out text-decoration-none"><i class="fas fa-envelope me-2"></i>contacto@gamequest.cl</a>
     </div>
-    <div id="cash-banner" class="hidden text-[11px] font-bold px-4 py-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
-      <i class="fas fa-info-circle mr-1"></i> Solo recibiendo por QuestPoints
+  </div>
+</div>
+
+<!-- App -->
+<div id="app-section" style="display:none">
+<div style="max-width:860px;margin:0 auto;padding:24px 16px 140px">
+
+  <div class="text-center mb-4">
+    <h1 class="fw-black mb-1" style="font-size:1.65rem">Cotiza tus cartas <span class="text-gold">al instante</span></h1>
+    <p style="font-size:13px;color:var(--gq-text2)">Exporta desde Manabox, sube tu CSV y ve exactamente cuánto te pagamos.</p>
+  </div>
+
+  <!-- Normas -->
+  <div class="gq-card p-4 mb-4">
+    <div class="lbl mb-3"><i class="fas fa-scroll me-2"></i>Normas de compra</div>
+    <div class="norma"><div class="norma-n">1</div><div>Compramos <strong>NM y LP</strong>. MP/HP/DMG con descuento automático según condición.</div></div>
+    <div class="norma"><div class="norma-n">2</div><div>El <strong>cupo</strong> indica cuántas unidades necesitamos para completar nuestro stock objetivo. No compramos más allá del cupo.</div></div>
+    <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ✦ Estaca tienen multiplicador especial.</div></div>
+    <div class="norma"><div class="norma-n">4</div><div>Al confirmar recibirás un email de respaldo. Cotización válida <strong>48 horas</strong>. Coordina entrega en tienda.</div></div>
+  </div>
+
+  <!-- Upload -->
+  <div class="gq-card p-4 mb-4" id="upload-card">
+    <div class="lbl mb-3"><i class="fas fa-file-csv me-2"></i>1. Sube tu colección (CSV Manabox)</div>
+    <div id="drop-zone" onclick="document.getElementById('csv-inp').click()">
+      <div style="font-size:2rem;color:var(--gq-text3);margin-bottom:8px"><i class="fas fa-cloud-arrow-up"></i></div>
+      <p class="fw-bold mb-1" style="font-size:14px" id="drop-text">Arrastra tu CSV o haz clic para seleccionar</p>
+      <p style="font-size:12px;color:var(--gq-text3)">Manabox → Mi Colección → Exportar CSV</p>
+    </div>
+    <input type="file" id="csv-inp" accept=".csv,.txt" class="d-none" onchange="setFile(this.files[0])">
+    <div id="upload-actions" class="mt-3 d-none d-flex gap-2">
+      <button class="btn-gq flex-grow-1" onclick="analyze()"><i class="fas fa-magnifying-glass me-2"></i>Analizar Colección</button>
+      <button class="btn-gq-out" onclick="resetFile()"><i class="fas fa-xmark"></i></button>
     </div>
   </div>
 
-  <!-- Banner buylist cerrada -->
-  <div id="closed-banner" class="hidden card p-8 text-center border-2 border-red-100">
-    <div class="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
-      <i class="fas fa-lock text-red-400 text-xl"></i>
-    </div>
-    <h2 class="text-xl font-black text-slate-800 mb-2">Buylist Temporalmente Cerrada</h2>
-    <p class="text-sm text-slate-500">Estamos evaluando cotizaciones anteriores o reponiendo stock. Vuelve pronto.</p>
-    <p class="text-xs text-slate-400 mt-3"><i class="fas fa-envelope mr-1"></i> contacto@gamequest.cl para consultas urgentes.</p>
+  <!-- Loading -->
+  <div id="loading-state" class="gq-card p-5 text-center mb-4" style="display:none">
+    <i class="fas fa-circle-notch spin text-gold mb-3" style="font-size:1.8rem"></i>
+    <p class="fw-bold mb-1">Analizando tu colección…</p>
+    <p style="font-size:12px;color:var(--gq-text2)">Consultando precios y stock</p>
   </div>
 
-  <div id="upload-section">
-    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Condiciones del Servicio</p>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5 text-[11px] text-slate-500 leading-relaxed">
-      <p>• Exporta el CSV el mismo día — precios de mercado actuales.</p>
-      <p>• Cotización referencial, no constituye obligación de compra.</p>
-      <p>• Cupos mensuales limitados — primera revisión gana prioridad.</p>
-      <p>• Estado NM asumido — desgastes ajustan valor en inspección.</p>
-    </div>
-  </div>
+  <!-- Results -->
+  <div id="results-section" style="display:none">
 
-  <div class="card p-5">
-    <label for="csv-file" class="upload-zone flex flex-col items-center py-8 px-6 text-center">
-      <i class="fas fa-file-csv text-3xl text-slate-300 mb-2"></i>
-      <p class="font-bold text-slate-400 text-sm uppercase tracking-wider">Sube tu CSV de Manabox</p>
-      <p id="fname" class="text-xs text-slate-400 mt-1">Ningún archivo seleccionado</p>
-    </label>
-    <input type="file" id="csv-file" accept=".csv" onchange="onFile()">
-  </div>
-
-  <div id="results" class="hidden space-y-4">
-    <div class="card p-3 flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
-      <div class="flex gap-1.5 flex-wrap">
-        <button onclick="setFilter('all')"       id="f-all"       class="f-btn f-on">Todas</button>
-        <button onclick="setFilter('muy_alta')"  id="f-muy_alta"  class="f-btn f-off">⭐ Muy Alta</button>
-        <button onclick="setFilter('buscamos')"  id="f-buscamos"  class="f-btn f-off">🟢 Buscamos</button>
-        <button onclick="setFilter('estaca')"    id="f-estaca"    class="f-btn f-off">✦ Estaca</button>
-        <button onclick="setFilter('sin_lista')" id="f-sin_lista" class="f-btn f-off">Sin lista</button>
+    <!-- Summary -->
+    <div class="gq-card p-4 mb-3">
+      <div class="row g-3 text-center mb-3">
+        <div class="col-6 col-md-3">
+          <div class="fw-black text-gold" style="font-size:1.5rem" id="sum-total">0</div>
+          <div class="lbl">Cartas</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="fw-black" style="font-size:1.5rem;color:var(--gq-buying)" id="sum-buying">0</div>
+          <div class="lbl">Compramos</div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="fw-black text-qp" style="font-size:1.4rem" id="sum-qp">$0</div>
+          <div class="lbl">💎 QP</div>
+        </div>
+        <div class="col-6 col-md-3" id="sum-cash-col">
+          <div class="fw-black text-cash" style="font-size:1.4rem" id="sum-cash">$0</div>
+          <div class="lbl">💵 Cash</div>
+        </div>
       </div>
-      <div class="flex gap-4 text-xs font-bold">
-        <span class="text-slate-400"><span id="cnt" class="text-slate-700 text-sm font-black">0</span> cartas</span>
-        <span class="col-qp">💎 <span id="t-qp">$0</span></span>
-        <span id="tcash-wrap" class="col-cash">💵 <span id="t-cash">$0</span></span>
+      <div id="full-alert" class="d-none" style="background:rgba(71,85,105,.12);border:1px solid var(--gq-bd);border-radius:9px;padding:9px 14px;font-size:12px;color:var(--gq-text2)">
+        <i class="fas fa-info-circle me-2" style="color:var(--gq-text3)"></i><span id="full-alert-txt"></span>
       </div>
     </div>
 
-    <div class="card overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead class="bg-slate-50 border-b border-slate-100">
-            <tr>
-              <th class="text-left min-w-[160px]">Carta</th>
-              <th class="text-center">Estado</th>
-              <th class="text-center">Cant.</th>
-              <th class="text-right text-slate-300">Ref. CK (USD)</th>
-              <th class="text-right col-qp">💎 QP Crédito</th>
-              <th id="th-cash" class="text-right col-cash">💵 Cash CLP</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
+    <!-- Filters + select-all -->
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <button class="gq-fb fb-all active" onclick="setFilter('all',this)">🔍 Todas</button>
+      <button class="gq-fb fb-buying"     onclick="setFilter('buying',this)">✅ Compramos</button>
+      <button class="gq-fb fb-partial"    onclick="setFilter('partial',this)">⚡ Parcial</button>
+      <button class="gq-fb fb-full"       onclick="setFilter('full',this)">🚫 Completo</button>
+      <button class="gq-fb"               onclick="setFilter('unlisted',this)">— Sin lista</button>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn-gq-out" onclick="selectAll(true)"><i class="fas fa-check-double me-1"></i>Todas</button>
+        <button class="btn-gq-out" onclick="selectAll(false)"><i class="fas fa-xmark me-1"></i>Ninguna</button>
       </div>
-      <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap justify-between items-center gap-3">
-        <p class="text-[10px] text-slate-400 italic">Valores referenciales — sujetos a revisión presencial</p>
-        <div class="flex gap-5">
-          <div class="text-right">
-            <p class="text-[9px] text-slate-400 uppercase tracking-wider">Total 💎 QP</p>
-            <p id="footer-qp" class="text-lg font-black col-qp">$0</p>
+    </div>
+
+    <!-- Cards table -->
+    <div class="gq-card mb-4" id="cards-wrap">
+      <div style="padding:10px 16px 6px" class="d-flex align-items-center gap-2">
+        <input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)">
+        <span class="lbl ms-1" style="flex:1">Carta</span>
+        <span class="lbl" style="min-width:90px;text-align:right">QP / Cash</span>
+        <span class="lbl ms-3" style="min-width:100px;text-align:center">Cantidad</span>
+      </div>
+      <div id="cards-list"></div>
+    </div>
+
+    <!-- Payment -->
+    <div class="gq-card p-4 mb-4" id="payment-card">
+      <div class="lbl mb-3"><i class="fas fa-wallet me-2"></i>2. Elige cómo cobrar</div>
+      <div class="row g-3 mb-4">
+        <div class="col-12 col-md-6">
+          <div class="pay-opt" onclick="selectPay('credito')" id="pay-qp">
+            <div class="d-flex align-items-center gap-3">
+              <span style="font-size:1.6rem">💎</span>
+              <div>
+                <div class="fw-bold" style="font-size:13px">QuestPoints (Crédito)</div>
+                <div style="font-size:11px;color:var(--gq-text2)">+11% sobre base — máximo valor</div>
+              </div>
+              <div class="ms-auto text-end">
+                <div class="fw-black text-qp" style="font-size:1.15rem" id="pay-qp-tot">$0</div>
+                <div class="lbl">Total QP</div>
+              </div>
+            </div>
           </div>
-          <div id="footer-cash-block" class="text-right">
-            <p class="text-[9px] text-slate-400 uppercase tracking-wider">Total 💵 Cash</p>
-            <p id="footer-cash" class="text-lg font-black col-cash">$0</p>
+        </div>
+        <div class="col-12 col-md-6" id="pay-cash-col">
+          <div class="pay-opt" onclick="selectPay('cash')" id="pay-cash">
+            <div class="d-flex align-items-center gap-3">
+              <span style="font-size:1.6rem">💵</span>
+              <div>
+                <div class="fw-bold" style="font-size:13px">Cash (Pesos CLP)</div>
+                <div style="font-size:11px;color:var(--gq-text2)">Pago inmediato en tienda</div>
+              </div>
+              <div class="ms-auto text-end">
+                <div class="fw-black text-cash" style="font-size:1.15rem" id="pay-cash-tot">$0</div>
+                <div class="lbl">Total Cash</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="card p-6 border-2 border-slate-100">
-      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-5">
-        <i class="fas fa-paper-plane mr-1.5 text-red-500"></i> Enviar Cotización
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">RUT Vendedor</label>
-          <input id="v-rut" type="text" placeholder="12.345.678-K"
-            class="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
+      <div class="lbl mb-2"><i class="fas fa-user me-2"></i>3. Tus datos (para la copia)</div>
+      <div class="row g-2 mb-3">
+        <div class="col-12 col-md-6">
+          <input type="email" id="inp-email" placeholder="Email *" class="form-control">
         </div>
-        <div>
-          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Email de contacto</label>
-          <input id="v-email" type="email" placeholder="correo@ejemplo.cl"
-            class="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
+        <div class="col-12 col-md-6">
+          <input type="text" id="inp-rut" placeholder="RUT * (12.345.678-9)" class="form-control">
         </div>
-        <div class="md:col-span-2">
-          <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Preferencia de Pago</label>
-          <select id="v-pay" class="w-full border border-slate-200 rounded-xl p-3 text-sm font-bold focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-50">
-            <option value="" disabled selected>Selecciona...</option>
-            <option value="credito">💎 QuestPoints / Crédito (Mayor valor)</option>
-            <option id="opt-cash"  value="cash">💵 Transferencia / Efectivo</option>
-            <option id="opt-mixto" value="mixto">🔀 Combinación</option>
-          </select>
+        <div class="col-12">
+          <input type="text" id="inp-nombre" placeholder="Nombre (opcional)" class="form-control">
         </div>
       </div>
-      <label class="flex items-start gap-3 mb-5 cursor-pointer">
-        <input id="v-terms" type="checkbox" class="mt-0.5 w-4 h-4 text-red-600 rounded">
-        <span class="text-[11px] text-slate-500 leading-relaxed">
-          Entiendo que los precios son <strong>referenciales</strong> y que GameQuest no tiene obligación de comprar la totalidad de los ítems. Las cartas son evaluadas presencialmente en Near Mint.
-        </span>
-      </label>
-      <button onclick="submitOrder()" class="w-full bg-slate-900 hover:bg-red-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-xs transition-all">
-        <i class="fas fa-paper-plane mr-2"></i> Enviar Cotización
+
+      <button class="btn-gq w-100" id="btn-submit" onclick="submitOrder()" style="padding:12px">
+        <i class="fas fa-paper-plane me-2"></i>Confirmar Cotización
+      </button>
+      <p class="text-center mt-2" style="font-size:11px;color:var(--gq-text3)">Sin compromiso de venta. Recibirás copia por email.</p>
+    </div>
+  </div><!-- /results -->
+</div>
+</div><!-- /app -->
+
+<!-- Totals bar -->
+<div id="totals-bar" style="display:none">
+  <div style="max-width:860px;margin:0 auto;padding:10px 16px" class="d-flex align-items-center gap-3 flex-wrap">
+    <div><span class="lbl">Seleccionadas: </span><strong class="text-gold ms-1" id="bar-count">0</strong></div>
+    <div class="ms-auto d-flex align-items-center gap-4">
+      <div class="text-center">
+        <div class="fw-black text-qp lh-1" style="font-size:1.05rem" id="bar-qp">$0</div>
+        <div class="lbl">💎 QP</div>
+      </div>
+      <div id="bar-cash-wrap" class="text-center">
+        <div class="fw-black text-cash lh-1" style="font-size:1.05rem" id="bar-cash">$0</div>
+        <div class="lbl">💵 Cash</div>
+      </div>
+      <button class="btn-gq" onclick="document.getElementById('payment-card').scrollIntoView({behavior:'smooth'})">
+        Cotizar <i class="fas fa-arrow-right ms-2"></i>
       </button>
     </div>
   </div>
+</div>
 
-</div><!-- /upload-section -->
-</div><!-- /max-w-5xl -->
 <script>
-const API = "https://gamecoins.onrender.com";
-let data = [], activeFilter = "all", cashEnabled = true;
+const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
+  ? 'http://localhost:8000' : 'https://gamecoins.onrender.com';
 
-async function checkStatus() {
-  try {
-    const r = await fetch(`${API}/api/public/buylist_status`);
-    const s = await r.json();
+let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
 
-    // Si la buylist está cerrada → bloquear todo y mostrar banner
-    if (!s.open) {
-      document.getElementById('upload-section').style.display = 'none';
-      const banner = document.getElementById('closed-banner');
-      banner.classList.remove('hidden');
-      return;
+// ── Init ──────────────────────────────────────────────────────────
+(async()=>{
+  try{
+    const r=await fetch(`${API}/api/public/buylist_status`);
+    const s=await r.json();
+    cashEnabled=s.cash_enabled;
+    if(!s.open){
+      document.getElementById('closed-banner').style.display='';
+    } else {
+      document.getElementById('app-section').style.display='';
     }
-
-    cashEnabled = s.cash_enabled !== false;
-    if (!cashEnabled) {
-      ['cash-banner','th-cash','tcash-wrap','footer-cash-block'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.toggle('hidden', true);
-      });
-      ['opt-cash','opt-mixto'].forEach(id => {
-        const el = document.getElementById(id); if(el) el.style.display='none';
+    if(!cashEnabled){
+      ['sum-cash-col','pay-cash-col','bar-cash-wrap'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.style.display='none';
       });
     }
-  } catch(_) {}
+  }catch(e){ document.getElementById('app-section').style.display=''; }
+})();
+
+// ── Drag & Drop ───────────────────────────────────────────────────
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0])});
+
+function setFile(f){
+  csvFile=f;
+  dz.classList.add('has-file');
+  document.getElementById('drop-text').textContent=f.name;
+  document.getElementById('upload-actions').classList.remove('d-none');
+  document.getElementById('upload-actions').style.display='flex';
+}
+function resetFile(){
+  csvFile=null; dz.classList.remove('has-file');
+  document.getElementById('drop-text').textContent='Arrastra tu CSV o haz clic para seleccionar';
+  document.getElementById('upload-actions').classList.add('d-none');
+  document.getElementById('csv-inp').value='';
 }
 
-function onFile() {
-  const f = document.getElementById('csv-file').files[0];
-  if (!f) return;
-  document.getElementById('fname').textContent = f.name;
-  processFile(f);
+// ── Analyze ───────────────────────────────────────────────────────
+async function analyze(){
+  if(!csvFile) return;
+  show('upload-card',false); show('loading-state',true); show('results-section',false);
+  try{
+    const fd=new FormData(); fd.append('file',csvFile);
+    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||`Error ${r.status}`)}
+    allCards=await r.json();
+    renderResults();
+  }catch(e){
+    show('loading-state',false); show('upload-card',true);
+    swal('Error',e.message,'error');
+  }
 }
 
-async function processFile(file) {
-  Swal.fire({ title:'Analizando...', text:'Consultando precios y stock en tiempo real', didOpen:()=>Swal.showLoading() });
-  const fd = new FormData(); fd.append('file', file);
-  try {
-    const r = await fetch(`${API}/api/public/analyze_buylist`, { method:'POST', body:fd });
-    if (!r.ok) { const e=await r.json(); throw new Error(e.detail||'Error del servidor'); }
-    data = await r.json();
-    renderTable();
-    document.getElementById('results').classList.remove('hidden');
-    Swal.close();
-  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+// ── Render ────────────────────────────────────────────────────────
+function statusOf(c){
+  const s=c.buying_status;
+  if(s==='muy_alta'||s==='compramos') return 'buying';
+  if(s==='compra_parcial') return 'partial';
+  if(s==='stock_completo') return 'full';
+  return 'unlisted';
 }
 
-function setFilter(f) {
-  activeFilter = f;
-  ['all','muy_alta','buscamos','estaca','sin_lista'].forEach(k => {
-    document.getElementById(`f-${k}`).className = `f-btn ${k===f?'f-on':'f-off'}`;
+function renderResults(){
+  show('loading-state',false); show('results-section',true);
+  show('totals-bar',true);
+  const list=document.getElementById('cards-list');
+  list.innerHTML='';
+  let nBuying=0, nFull=0;
+
+  allCards.forEach((c,idx)=>{
+    const st=statusOf(c);
+    const canBuy=st==='buying'||st==='partial';
+    if(canBuy) nBuying++;
+    if(st==='full') nFull++;
+
+    const maxQty = c.qty_comprar ?? (canBuy ? c.qty : 0);
+    const cond={near_mint:'NM',light_played:'LP',moderately_played:'MP',heavily_played:'HP',damaged:'DMG'}[c.condition]||'';
+    const condColor={near_mint:'#34d399',light_played:'#a3e635',moderately_played:'#fbbf24',heavily_played:'#f87171',damaged:'#ef4444'}[c.condition]||'#94a3b8';
+    const isFoil=c.foil&&c.foil!=='normal';
+
+    const badgeMap={
+      buying:`<span class="gq-badge gb-buying"><i class="fas fa-circle-check"></i> Compramos</span>`,
+      partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt"></i> Parcial: ${maxQty} de ${c.qty}</span>`,
+      full:`<span class="gq-badge gb-full"><i class="fas fa-ban"></i> Stock completo</span>`,
+      unlisted:`<span class="gq-badge gb-unlisted">— Sin lista</span>`,
+    };
+    const maBadge=c.buying_status==='muy_alta'?`<span class="gq-badge gb-muyalta ms-1"><i class="fas fa-fire"></i> Alta demanda</span>`:'';
+
+    const cupoFill=c.max_stock?Math.min(100,Math.round(((c.stock_actual||0)/c.max_stock)*100)):0;
+
+    const div=document.createElement('div');
+    div.className=`card-row d-flex align-items-start gap-3 ${st==='full'?'row-full':st==='unlisted'?'row-unlisted':''}`;
+    div.dataset.status=st; div.id=`row-${idx}`;
+    div.innerHTML=`
+      <input type="checkbox" class="gq-check mt-1 cc" data-idx="${idx}"
+        ${canBuy?'checked':''} ${canBuy?'':'disabled'}
+        onchange="onChk(${idx})">
+      <div style="flex:1;min-width:0">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+          <span class="fw-bold" style="font-size:13.5px">${esc(c.name)}</span>
+          ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
+          ${c.is_estaca?`<span class="gq-badge gb-estaca">✦ ×${c.stake_mult}</span>`:''}
+          <span style="font-size:11px;font-weight:700;color:${condColor}">${cond}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          ${badgeMap[st]||''}${maBadge}
+        </div>
+        ${canBuy&&c.max_stock?`<div style="max-width:160px;margin-top:6px">
+          <div class="d-flex justify-content-between" style="font-size:9px;color:var(--gq-text3)">
+            <span>Stock: ${c.stock_actual??'?'} / ${c.max_stock}</span>
+            <span>Cupo: ${maxQty}</span>
+          </div>
+          <div class="cupo-bar"><div class="cupo-fill" style="width:${cupoFill}%"></div></div>
+        </div>`:''}
+      </div>
+      <div class="text-end flex-shrink-0" style="min-width:140px">
+        <div class="fw-black text-qp lh-1 mb-1" style="font-size:.95rem" id="pqp-${idx}">
+          ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
+        </div>
+        ${cashEnabled?`<div class="fw-bold text-cash" style="font-size:11px" id="pcs-${idx}">
+          ${canBuy?fmtCLP(c.price_cash*maxQty):''}
+        </div>`:''}
+        <div style="font-size:10px;color:var(--gq-text3)">Ref. ${fmtUSD(c.price_usd_raw)}</div>
+        ${canBuy?`
+        <div class="d-flex align-items-center justify-content-end gap-1 mt-2">
+          <button class="btn-gq-out" style="padding:2px 7px;font-size:12px" onclick="changeQty(${idx},-1)">−</button>
+          <input type="number" class="gq-qty" id="qty-${idx}" value="${maxQty}" min="1" max="${maxQty}"
+            oninput="onQtyChange(${idx})">
+          <button class="btn-gq-out" style="padding:2px 7px;font-size:12px" onclick="changeQty(${idx},1)">+</button>
+        </div>
+        <div style="font-size:9px;color:var(--gq-text3);margin-top:2px">máx ${maxQty}</div>`:''}
+      </div>`;
+    list.appendChild(div);
   });
-  renderTable();
+
+  const t=recalcTotals();
+  setText('sum-total',allCards.length);
+  setText('sum-buying',nBuying);
+  setText('sum-qp',fmtCLP(t.qp));
+  setText('sum-cash',fmtCLP(t.cash));
+  setText('pay-qp-tot',fmtCLP(t.qp));
+  setText('pay-cash-tot',fmtCLP(t.cash));
+
+  if(nFull>0){
+    document.getElementById('full-alert').classList.remove('d-none');
+    setText('full-alert-txt',`${nFull} carta${nFull>1?'s':''} en gris — ya tenemos stock completo para esas. Solo se cotizarán las seleccionadas.`);
+  }
+  updateBar();
 }
 
-function getVisible() {
-  const m = { all:()=>true, estaca:c=>c.is_estaca, muy_alta:c=>c.buying_status==='muy_alta',
-              buscamos:c=>['muy_alta','buscamos'].includes(c.buying_status),
-              sin_lista:c=>c.buying_status==='sin_lista' };
-  return data.filter(m[activeFilter]||m.all);
+// ── Interactions ──────────────────────────────────────────────────
+function onChk(idx){updateBar()}
+
+function changeQty(idx,d){
+  const inp=document.getElementById(`qty-${idx}`);
+  if(!inp) return;
+  const mx=parseInt(inp.max)||1;
+  inp.value=Math.max(1,Math.min(mx,parseInt(inp.value||1)+d));
+  onQtyChange(idx);
+}
+function onQtyChange(idx){
+  const c=allCards[idx];
+  const inp=document.getElementById(`qty-${idx}`);
+  if(!inp) return;
+  const mx=parseInt(inp.max)||1;
+  let v=parseInt(inp.value)||1;
+  if(v<1) v=1; if(v>mx) v=mx; inp.value=v;
+  const el=document.getElementById(`pqp-${idx}`);
+  const ec=document.getElementById(`pcs-${idx}`);
+  if(el) el.textContent=fmtCLP(c.price_credito*v);
+  if(ec) ec.textContent=fmtCLP(c.price_cash*v);
+  updateBar();
 }
 
-const PILL = {
-  muy_alta:  '<span class="pill p-muyalta">⭐ Muy Alta</span>',
-  buscamos:  '<span class="pill p-buscamos">🟢 Buscamos</span>',
-  stock_ok:  '<span class="pill p-stockok">Stock OK</span>',
-  sin_lista: '<span class="pill p-sinlista">—</span>',
-};
-const FOIL = { foil:'✨ Foil', etched:'⬡ Etched', normal:'' };
-const COND = { near_mint:'', lightly_played:'LP', moderately_played:'MP', heavily_played:'HP', damaged:'DMG' };
-
-function renderTable() {
-  const vis = getVisible();
-  let tQP=0, tCash=0, html='';
-
-  vis.forEach(c => {
-    const qpSub   = (c.price_credito||0)*(c.qty||1);
-    const cashSub = (c.price_cash||0)*(c.qty||1);
-    tQP += qpSub; tCash += cashSub;
-
-    const foilT = FOIL[c.foil||'normal']||'';
-    const condT = COND[c.condition||'near_mint']||'';
-    const tags  = [
-      foilT&&`<span class="pill p-estaca" style="font-size:9px">${foilT}</span>`,
-      condT&&`<span class="pill p-stockok" style="font-size:9px">${condT}</span>`,
-      (c.is_estaca&&!foilT)&&`<span class="pill p-estaca" style="font-size:9px">✦ Prem.</span>`,
-    ].filter(Boolean).join('');
-
-    const isOk = c.buying_status==='stock_ok';
-    html += `<tr class="${isOk?'row-stockok':''}${c.is_estaca?' row-estaca':''}">
-      <td>
-        <p class="font-bold text-slate-800">${c.name}</p>
-        <div class="flex gap-1 mt-0.5 flex-wrap">${tags}</div>
-      </td>
-      <td class="text-center">${PILL[c.buying_status]||PILL.sin_lista}</td>
-      <td class="text-center text-slate-500 font-mono">${c.qty||1}</td>
-      <td class="text-right font-mono text-xs text-slate-400">
-        $${(c.price_usd_raw||c.price_usd||0).toFixed(2)}
-        ${c.is_estaca?`<span class="block text-purple-400" style="font-size:9px">→ $${(c.price_usd_base||0).toFixed(2)} eff.</span>`:''}
-      </td>
-      <td class="text-right col-qp">$${qpSub.toLocaleString()}</td>
-      ${cashEnabled?`<td class="text-right col-cash">$${cashSub.toLocaleString()}</td>`:''}
-    </tr>`;
+function recalcTotals(){
+  let qp=0,cash=0,count=0;
+  document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
+    const idx=parseInt(cb.dataset.idx);
+    const c=allCards[idx];
+    const qty=parseInt(document.getElementById(`qty-${idx}`)?.value||1);
+    qp+=c.price_credito*qty; cash+=c.price_cash*qty; count++;
   });
-
-  document.getElementById('tbody').innerHTML = html || `<tr><td colspan="6" class="text-center py-10 text-slate-400 italic text-sm">Sin cartas para este filtro</td></tr>`;
-  document.getElementById('cnt').textContent      = vis.length;
-  document.getElementById('t-qp').textContent     = `$${tQP.toLocaleString()}`;
-  document.getElementById('t-cash').textContent   = `$${tCash.toLocaleString()}`;
-  document.getElementById('footer-qp').textContent   = `$${tQP.toLocaleString()}`;
-  document.getElementById('footer-cash').textContent = `$${tCash.toLocaleString()}`;
+  return {qp,cash,count};
 }
 
-async function submitOrder() {
-  const rut   = document.getElementById('v-rut').value.trim();
-  const email = document.getElementById('v-email').value.trim();
-  const pay   = document.getElementById('v-pay').value;
-  const terms = document.getElementById('v-terms').checked;
-  if (!rut||!email||!pay) return Swal.fire('Faltan datos','Completa RUT, email y preferencia de pago.','warning');
-  if (!terms) return Swal.fire('Términos','Debes aceptar los términos para continuar.','info');
-  if (!data.length) return Swal.fire('Sin datos','Sube un CSV primero.','warning');
+function updateBar(){
+  const t=recalcTotals();
+  setText('bar-count',`${t.count} carta${t.count!==1?'s':''}`);
+  setText('bar-qp',fmtCLP(t.qp)); setText('bar-cash',fmtCLP(t.cash));
+  setText('pay-qp-tot',fmtCLP(t.qp)); setText('pay-cash-tot',fmtCLP(t.cash));
+  document.getElementById('btn-submit').disabled=(!t.count||!payMode);
+}
 
-  // Calcular totales reales desde todos los ítems del CSV
-  const totalCredito = data.reduce((s,c) => s + (c.price_credito||0)*(c.qty||1), 0);
-  const totalCash    = data.reduce((s,c) => s + (c.price_cash||0)*(c.qty||1), 0);
-
-  const {isConfirmed} = await Swal.fire({
-    title:'¿Enviar cotización?', text:'Los precios son referenciales y quedan sujetos a revisión.',
-    icon:'question', showCancelButton:true, confirmButtonColor:'#1e293b', confirmButtonText:'ENVIAR'
+function setFilter(f,btn){
+  document.querySelectorAll('.gq-fb').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  document.querySelectorAll('.card-row').forEach(row=>{
+    const st=row.dataset.status;
+    row.classList.toggle('row-hidden',f!=='all'&&st!==f);
   });
-  if (!isConfirmed) return;
+}
+function selectAll(v){
+  document.querySelectorAll('.cc:not(:disabled)').forEach(cb=>cb.checked=v);
+  document.getElementById('chk-all').checked=v;
+  updateBar();
+}
+function toggleAll(v){selectAll(v)}
+function selectPay(m){
+  payMode=m;
+  document.getElementById('pay-qp').className='pay-opt'+(m==='credito'?' sel-qp':'');
+  document.getElementById('pay-cash').className='pay-opt'+(m==='cash'?' sel-cash':'');
+  updateBar();
+}
 
-  Swal.fire({ title:'Enviando...', didOpen:()=>Swal.showLoading() });
-  try {
-    const r = await fetch(`${API}/api/public/commit_buylist`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        email, rut,
-        payment_preference: pay,
-        items:          data,
-        total_credito:  totalCredito,
-        total_cash:     totalCash,
-      })
+// ── Submit ────────────────────────────────────────────────────────
+async function submitOrder(){
+  const email=document.getElementById('inp-email').value.trim();
+  const rut=document.getElementById('inp-rut').value.trim();
+  if(!email||!email.includes('@')) return swal('Email requerido','Ingresa un email válido','warning');
+  if(!rut) return swal('RUT requerido','Ingresa tu RUT','warning');
+  if(!payMode) return swal('Selecciona forma de pago','','warning');
+
+  const items=[];
+  document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
+    const idx=parseInt(cb.dataset.idx);
+    const qty=parseInt(document.getElementById(`qty-${idx}`)?.value||1);
+    items.push({...allCards[idx],qty,qty_selected:qty});
+  });
+  if(!items.length) return swal('Sin cartas seleccionadas','','warning');
+
+  const totalQP=items.reduce((s,i)=>s+i.price_credito*i.qty,0);
+  const totalCash=items.reduce((s,i)=>s+i.price_cash*i.qty,0);
+
+  const {isConfirmed}=await Swal.fire({
+    title:'¿Confirmar cotización?',
+    html:`<div style="font-size:13px;color:#94a3b8;line-height:1.9">
+      <strong style="color:#f1f5f9">${items.length} cartas</strong> · 
+      <strong style="color:#f1f5f9">${payMode==='credito'?'💎 QP':'💵 Cash'}</strong><br>
+      Total: <strong style="color:${payMode==='credito'?'#a78bfa':'#34d399'};font-size:1.1rem">
+        ${fmtCLP(payMode==='credito'?totalQP:totalCash)}</strong><br>
+      <span style="color:#64748b;font-size:11px">Copia → ${email}</span>
+    </div>`,
+    confirmButtonText:'Confirmar',showCancelButton:true,cancelButtonText:'Revisar',
+    confirmButtonColor:'#f59e0b',background:'#111118',color:'#f1f5f9',
+  });
+  if(!isConfirmed) return;
+
+  const btn=document.getElementById('btn-submit');
+  btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin me-2"></i>Enviando…';
+
+  try{
+    const r=await fetch(`${API}/api/public/commit_buylist`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,rut,nombre:document.getElementById('inp-nombre').value.trim(),
+        payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash}),
     });
-    const res = await r.json();
-    if (!r.ok) throw new Error(res.detail||'Error al enviar');
-    Swal.fire({ icon:'success', title:`Cotización #${res.order_id||''} Recibida`,
-      text:`Resumen enviado a ${email} — nos contactaremos para coordinar.`, confirmButtonColor:'#1e293b' });
-  } catch(e) { Swal.fire('Error', e.message, 'error'); }
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||'Error');
+    Swal.fire({icon:'success',title:'¡Cotización enviada! 🎉',
+      html:`<div style="font-size:13px;color:#94a3b8">Orden <strong style="color:#f1f5f9">#${d.order_id}</strong> — copia enviada a <strong style="color:#f1f5f9">${email}</strong></div>`,
+      confirmButtonText:'Entendido',confirmButtonColor:'#10b981',background:'#111118',color:'#f1f5f9',
+    }).then(()=>location.reload());
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='<i class="fas fa-paper-plane me-2"></i>Confirmar Cotización';
+    swal('Error',e.message,'error');
+  }
 }
 
-checkStatus();
+// ── Utils ─────────────────────────────────────────────────────────
+function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
+function fmtUSD(n){return '$'+(n||0).toFixed(2)}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function show(id,v){const el=document.getElementById(id);if(el)el.style.display=v?'':'none'}
+function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v}
+function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#f59e0b',background:'#111118',color:'#f1f5f9'})}
 </script>
 </body>
 </html>

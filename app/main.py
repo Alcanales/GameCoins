@@ -1087,17 +1087,35 @@ async def analyze_buylist(
                      else settings.MIN_STOCK_ALTA   if tier_pub == "alta"
                      else settings.MIN_STOCK_NORMAL)
 
+        # ── Lógica de cupo (max_stock es el MÁXIMO que queremos tener) ─────
+        # min_s_pub almacena el valor configurado → tratar como máximo deseado
+        max_s_pub = min_s_pub   # renombre semántico dentro del scope
         if tier_pub == "muy_alta":
+            cupo          = qty          # sin límite — compramos todo
+            qty_comprar   = qty
             buying_status = "muy_alta"
         elif tier_pub in ("alta", "normal"):
-            buying_status = "buscamos" if (stock_pub is None or stock_pub < min_s_pub * 3) else "stock_ok"
+            stock_now   = stock_pub if stock_pub is not None else 0
+            cupo        = max(0, max_s_pub - stock_now)
+            qty_comprar = min(qty, cupo)
+            if cupo <= 0:
+                buying_status = "stock_completo"
+            elif qty_comprar < qty:
+                buying_status = "compra_parcial"   # solo compramos una parte
+            else:
+                buying_status = "compramos"
         else:
+            cupo          = 0
+            qty_comprar   = 0
             buying_status = "sin_lista"
 
         p_cred = int(adjusted_price * fcred)
         results.append({
             "name":           nm,
             "qty":            qty,
+            "qty_comprar":    qty_comprar,   # cuántas unidades compramos realmente
+            "cupo":           cupo,          # cuántas necesitamos para llegar al máximo
+            "max_stock":      max_s_pub,     # stock máximo deseado para esta carta
             "price_usd":      round(adjusted_price, 2),
             "price_usd_raw":  round(raw_usd, 2),
             "price_usd_base": round(eff_usd, 2),
@@ -1111,7 +1129,6 @@ async def analyze_buylist(
             "price_normal":   p_cred,
             "tier":           tier_pub,
             "stock_actual":   stock_pub,
-            "min_stock":      min_s_pub,
             "buying_status":  buying_status,
             "canonical":      key_pub,
             "scryfall_id":    sf_str or None,
