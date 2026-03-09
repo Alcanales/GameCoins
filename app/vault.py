@@ -329,6 +329,7 @@ class VaultController:
         return None
 
     @staticmethod
+@staticmethod
     async def process_canje(db: Session, email: str, amount: int, cart_total: int):
         """
         Canjea QuestPoints del usuario por un cupón de descuento en Jumpseller.
@@ -339,35 +340,11 @@ class VaultController:
           Si el cliente quiere canjear 50.000 QP pero el carrito vale 30.000,
           solo se debitan 30.000 QP y el cupón vale 30.000. Cero pérdida.
 
-        QA-03 (Unicidad): antes de debitar se consulta Jumpseller para verificar
-          que el usuario no tenga ya un cupón QP activo sin usar.  Si lo tiene,
-          se retorna 409 con el código existente — el usuario lo aplica y ya.
-          Fail-open: si la consulta a JS falla, se permite el canje (prioridad
-          de UX sobre protección perfecta ante fallo de red).
-
-        ORDEN DE OPERACIONES:
-        ──────────────────────
-          1. [QA-03] Unicidad: ¿tiene cupón QP activo en Jumpseller?
-          2. Bloquear fila con FOR UPDATE (evita canje concurrente).
-          3. [QA-02] effective_amount = min(amount, cart_total).
-          4. Verificar saldo suficiente para effective_amount.
-          5. Descontar effective_amount y commitear.
-          6. Crear cupón en JS por effective_amount.
-          7a. Éxito → devolver código + info de ajuste si hubo.
-          7b. Fallo JS → compensating transaction + 502.
+        QA-03 (Unicidad): ELIMINADO por reglas de negocio. El usuario ahora
+          puede generar múltiples cupones simultáneos. Asume la responsabilidad
+          de administrar sus códigos generados.
         """
-        # ── Paso 1 [QA-03]: Bloqueo de unicidad ─────────────────────────────
-        existing_code = await VaultController.get_active_qp_coupon(email)
-        if existing_code:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Ya tienes el cupón activo {existing_code}. "
-                    f"Úsalo en tu próxima compra antes de canjear nuevamente."
-                )
-            )
-
-        # ── Paso 2: Bloqueo de fila ──────────────────────────────────────────
+        # ── Paso 1: Bloqueo de fila (Seguridad Concurrente) ──────────────────
         user = db.query(Gampoint).filter(
             Gampoint.email == email.lower()
         ).with_for_update().first()
@@ -375,7 +352,7 @@ class VaultController:
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        # ── Paso 3 [QA-02]: Cap del monto al total del carrito ───────────────
+        # ── Paso 2 [QA-02]: Cap del monto al total del carrito ───────────────
         effective_amount = min(amount, cart_total)
         adjusted = effective_amount < amount
 
@@ -385,14 +362,14 @@ class VaultController:
                 f"carrito = {cart_total} CLP → cupón emitido por {effective_amount} QP."
             )
 
-        # ── Paso 4: Verificar saldo ──────────────────────────────────────────
+        # ── Paso 3: Verificar saldo ──────────────────────────────────────────
         if user.saldo < effective_amount:
             raise HTTPException(
                 status_code=400,
                 detail=f"Saldo insuficiente. Tienes ${float(user.saldo):,.0f} QP."
             )
 
-        # ── Paso 5: Descontar saldo primero y commitear ──────────────────────
+        # ── Paso 4: Descontar saldo primero y commitear ──────────────────────
         amount_dec = Decimal(effective_amount)
         user.saldo              -= amount_dec
         user.historico_canjeado += amount_dec
@@ -403,11 +380,11 @@ class VaultController:
             logger.error(f"[CANJE] Error al debitar saldo para {email}: {e}")
             raise HTTPException(status_code=500, detail="Error interno al procesar el canje.")
 
-        # ── Paso 6: Crear cupón en Jumpseller ────────────────────────────────
+        # ── Paso 5: Crear cupón en Jumpseller ────────────────────────────────
         coupon_code = await VaultController.create_js_coupon(email, effective_amount)
 
         if not coupon_code:
-            # ── Paso 7b: Compensating transaction — revertir el débito ───────
+            # ── Paso 6: Compensating transaction — revertir el débito ───────
             from .database import SessionLocal
             comp_db = SessionLocal()
             try:
@@ -441,7 +418,7 @@ class VaultController:
                 detail="Error creando cupón en Jumpseller. Tu saldo ha sido restaurado."
             )
 
-        # ── Paso 7a: Éxito ───────────────────────────────────────────────────
+        # ── Paso 7: Éxito ───────────────────────────────────────────────────
         response: dict = {"status": "ok", "cupon_codigo": coupon_code}
         if adjusted:
             response["monto_ajustado"]  = True

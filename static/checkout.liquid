@@ -42,7 +42,7 @@
         <script>
           const GC_API = "https://gamecoins.onrender.com";
           const GC_EMAIL = "{{ customer.email }}";
-          const GC_TOKEN = "gq_public_key_2025_secure";
+          const GC_TOKEN = "f98yWtYyIpvJDjLhnssu8ntuKfFSnA7NSft0NoaFZIE";
           let maxSaldoCart = 0;
 
           // Cargar Saldo
@@ -51,7 +51,7 @@
               'x-store-token': GC_TOKEN
             }
           })
-            .then(r => r.json())        
+            .then(r => r.json())
             .then(d => {
               if (d.saldo >= 100) {
                 maxSaldoCart = d.saldo;
@@ -86,7 +86,7 @@
                   'Content-Type': 'application/json',
                   'x-store-token': GC_TOKEN
                 },
-                body: JSON.stringify({ email: GC_EMAIL, monto: monto })
+                body: JSON.stringify({ email: GC_EMAIL, monto: monto, cart_total: monto })
               });
 
               const data = await res.json();
@@ -115,7 +115,13 @@
                 }
 
               } else {
-                throw new Error(data.detail || 'Error al canjear');
+                let errorMsg = 'Error al canjear';
+                if (typeof data.detail === 'string') {
+                    errorMsg = data.detail;
+                } else if (Array.isArray(data.detail)) {
+                    errorMsg = 'Datos incompletos en la petición.';
+                }
+                throw new Error(errorMsg);
               }
             } catch (e) {
               msg.innerText = "Error: " + e.message;
