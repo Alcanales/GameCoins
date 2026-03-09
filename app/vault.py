@@ -97,7 +97,7 @@ class VaultController:
         """
         Quema un cupón QP buscándolo en las promotions de Jumpseller.
 
-        FIX B-02: max_pages=10 evita O(n) sin límite sobre stores con miles de
+        max_pages=10 evita O(n) sin límite sobre stores con miles de
         promotions. Con limit=100 y max_pages=10 se cubren 1.000 promotions —
         más que suficiente dado que las promotions QP se eliminan al usarse.
         Si el cupón no se encuentra en max_pages páginas, se asume que ya fue
@@ -255,94 +255,10 @@ class VaultController:
         return user
 
     @staticmethod
-    async def get_active_qp_coupon(email: str) -> str | None:
-        """
-        QA-03 — Guarda de unicidad: detecta si el usuario ya tiene un cupón QP
-        activo (emitido pero no usado aún) en Jumpseller.
-
-        Lógica de detección:
-        ─────────────────────
-        • Pagina sobre GET /promotions.json hasta encontrar una promotion cuyo
-          nombre empiece con "Canje QuestPoints - {email}" y esté enabled=True.
-        • Solo considera códigos que coincidan con el patrón QP-[A-F0-9]{6}
-          (evita colisiones con promotions manuales del admin).
-        • Si la API de Jumpseller falla, retorna None con log de error y deja
-          continuar el canje (fail-open): preferimos un posible duplicado a
-          bloquear al usuario por un fallo de red ajeno.
-
-        Retorna: el código existente (str) o None si no hay ninguno activo.
-        """
-        url = f"{settings.JUMPSELLER_API_BASE}/promotions.json"
-        params_base = {
-            "login":     settings.JS_LOGIN_CODE,
-            "authtoken": settings.JS_AUTH_TOKEN,
-        }
-        # Prefijo exacto que usamos al crear — lowercase para comparación robusta
-        name_prefix = f"canje questpoints - {email.lower()}"
-
-        # FIX B-02: max_pages=10 — cubre 1.000 promotions recientes (más que suficiente).
-        # Los cupones QP emitidos para este email son recientes → están en las primeras páginas.
-        _MAX_PAGES = 10
-
-        async with aiohttp.ClientSession() as session:
-            try:
-                for page in range(1, _MAX_PAGES + 1):
-                    params = {**params_base, "limit": 100, "page": page}
-                    async with session.get(url, params=params) as resp:
-                        if resp.status != 200:
-                            logger.error(
-                                f"[QA03] Error consultando promotions JS: {resp.status}"
-                            )
-                            return None  # fail-open
-                        promotions = await resp.json()
-                        if not promotions:
-                            break  # sin más páginas
-
-                        for p in promotions:
-                            promo      = p.get("promotion", {})
-                            promo_name = promo.get("name", "").lower()
-                            promo_code = promo.get("code", "")
-                            is_enabled = promo.get("enabled", False)
-
-                            if (is_enabled
-                                    and promo_name.startswith(name_prefix)
-                                    and re.fullmatch(r"QP-[A-F0-9]{6}", promo_code)):
-                                logger.info(
-                                    f"[QA03] Cupón activo encontrado para {email}: "
-                                    f"{promo_code} — canje bloqueado hasta que se use."
-                                )
-                                return promo_code
-                else:
-                    # Agotadas max_pages sin encontrar el cupón
-                    logger.debug(
-                        f"[QA03] Cupón activo para {email} no encontrado en "
-                        f"{_MAX_PAGES} páginas — no hay cupón pendiente."
-                    )
-
-            except Exception as e:
-                logger.error(
-                    f"[QA03] Fallo verificando cupón activo para {email}: {e} "
-                    f"— continuando en fail-open"
-                )
-                return None  # fail-open: no bloquear al usuario por fallo de red
-
-        return None
-
-    @staticmethod
-@staticmethod
     async def process_canje(db: Session, email: str, amount: int, cart_total: int):
         """
         Canjea QuestPoints del usuario por un cupón de descuento en Jumpseller.
-
-        FIXES ACTIVOS:
-        ──────────────
-        QA-02 (Cart-cap): el cupón se emite por min(amount, cart_total).
-          Si el cliente quiere canjear 50.000 QP pero el carrito vale 30.000,
-          solo se debitan 30.000 QP y el cupón vale 30.000. Cero pérdida.
-
-        QA-03 (Unicidad): ELIMINADO por reglas de negocio. El usuario ahora
-          puede generar múltiples cupones simultáneos. Asume la responsabilidad
-          de administrar sus códigos generados.
+        (Versión Responsabilidad del Usuario: permite múltiples cupones simultáneos)
         """
         # ── Paso 1: Bloqueo de fila (Seguridad Concurrente) ──────────────────
         user = db.query(Gampoint).filter(
@@ -352,9 +268,9 @@ class VaultController:
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        # ── Paso 2 [QA-02]: Cap del monto al total del carrito ───────────────
+        # ── Paso 2: Cap del monto al total del carrito ───────────────────────
         effective_amount = min(amount, cart_total)
-        adjusted = effective_amount < amount
+        adjusted = (effective_amount < amount)
 
         if adjusted:
             logger.info(
@@ -370,15 +286,16 @@ class VaultController:
             )
 
         # ── Paso 4: Descontar saldo primero y commitear ──────────────────────
-        amount_dec = Decimal(effective_amount)
-        user.saldo              -= amount_dec
+        amount_dec = Decimal(str(effective_amount))
+        user.saldo -= amount_dec
         user.historico_canjeado += amount_dec
+        
         try:
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.error(f"[CANJE] Error al debitar saldo para {email}: {e}")
-            raise HTTPException(status_code=500, detail="Error interno al procesar el canje.")
+            logger.error(f"[CANJE] Error en BD al debitar saldo para {email}: {e}")
+            raise HTTPException(status_code=500, detail="Error interno de base de datos.")
 
         # ── Paso 5: Crear cupón en Jumpseller ────────────────────────────────
         coupon_code = await VaultController.create_js_coupon(email, effective_amount)
@@ -392,24 +309,15 @@ class VaultController:
                     Gampoint.email == email.lower()
                 ).with_for_update().first()
                 if comp_user:
-                    comp_user.saldo              += amount_dec
+                    comp_user.saldo += amount_dec
                     comp_user.historico_canjeado -= amount_dec
                     comp_db.commit()
-                    logger.warning(
-                        f"[CANJE] Cupón JS falló para {email} — "
-                        f"saldo revertido ({effective_amount} QP)"
-                    )
+                    logger.warning(f"[CANJE] Cupón JS falló para {email} — saldo revertido")
                 else:
-                    logger.error(
-                        f"[CANJE] CRÍTICO: cupón JS falló Y usuario {email} no encontrado "
-                        f"en compensación. Débito de {effective_amount} QP sin cupón generado."
-                    )
+                    logger.error(f"[CANJE] CRÍTICO: Usuario {email} no encontrado en compensación.")
             except Exception as comp_e:
                 comp_db.rollback()
-                logger.error(
-                    f"[CANJE] CRÍTICO: cupón JS falló Y compensación falló para {email}: "
-                    f"{comp_e}. Débito de {effective_amount} QP sin cupón generado."
-                )
+                logger.error(f"[CANJE] CRÍTICO: Compensación falló para {email}: {comp_e}")
             finally:
                 comp_db.close()
 
@@ -418,14 +326,19 @@ class VaultController:
                 detail="Error creando cupón en Jumpseller. Tu saldo ha sido restaurado."
             )
 
-        # ── Paso 7: Éxito ───────────────────────────────────────────────────
-        response: dict = {"status": "ok", "cupon_codigo": coupon_code}
+        # ── Paso 7: Éxito (Fix Estricto Anti-Tuplas) ─────────────────────────
+        # Al usar dict() evitamos cualquier bug de sintaxis por comas residuales
+        response = dict()
+        response["status"] = "ok"
+        response["cupon_codigo"] = str(coupon_code)
+        
         if adjusted:
-            response["monto_ajustado"]  = True
-            response["monto_original"]  = amount
-            response["monto_efectivo"]  = effective_amount
-            response["motivo_ajuste"]   = (
-                f"Cupón emitido por {effective_amount:,} QP (= total de tu carrito). "
-                f"Los {amount - effective_amount:,} QP restantes siguen en tu saldo."
+            response["monto_ajustado"] = True
+            response["monto_original"] = int(amount)
+            response["monto_efectivo"] = int(effective_amount)
+            response["motivo_ajuste"] = (
+                f"Cupón emitido por {effective_amount} QP (= total de tu carrito). "
+                f"Los {amount - effective_amount} QP restantes siguen en tu saldo."
             )
+            
         return response
