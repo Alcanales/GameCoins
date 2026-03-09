@@ -17,6 +17,7 @@ services:
       --timeout 180
       --graceful-timeout 30
       --keep-alive 5
+    healthCheckPath: /health
     envVars:
       # ── Secretos (configurar manualmente en Render Dashboard) ──
       - key: DATABASE_URL
@@ -27,9 +28,18 @@ services:
         sync: false
       - key: STORE_TOKEN
         sync: false
+      # C-02: Token público para account.liquid (browser del cliente).
+      # DEBE ser un valor diferente al STORE_TOKEN.
+      # Generar: python -c "import secrets; print(secrets.token_urlsafe(32))"
+      - key: PUBLIC_STORE_TOKEN
+        sync: false
       - key: JS_LOGIN_CODE
         sync: false
       - key: JS_AUTH_TOKEN
+        sync: false
+      # FIX A1: Hooks Token para verificar firma HMAC-SHA256 de webhooks Jumpseller.
+      # Obtener desde: Admin Jumpseller → Config → Notificaciones / Webhooks → "Hooks Token"
+      - key: JUMPSELLER_HOOKS_TOKEN
         sync: false
       - key: SMTP_EMAIL
         sync: false
@@ -66,6 +76,11 @@ services:
       # ── Control operacional ──
       - key: BUYLIST_OPEN
         value: "true"
+      # ── Presupuesto diario de compras CASH en CLP ──
+      # 0 = sin límite (default). Ej: 500000 = $500.000 CLP/día máximo.
+      # Solo aplica al endpoint público /api/public/commit_buylist.
+      - key: BUYLIST_DAILY_BUDGET_CASH
+        value: "0"
       - key: CASH_ENABLED
         value: "true"
       - key: MAINTENANCE_MODE_CANJE

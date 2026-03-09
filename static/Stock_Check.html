@@ -4,116 +4,117 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stock Check — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"><\/script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-    body { background:#0f172a; font-family:'Inter',sans-serif; color:#e2e8f0; }
-    .glass  { background:rgba(255,255,255,0.035); backdrop-filter:blur(12px);
-              border:1px solid rgba(255,255,255,0.07); border-radius:14px; }
-    .pill   { display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
-              font-size:9px;font-weight:700;white-space:nowrap; }
-    .p-ma   { background:#78350f;color:#fde68a;border:1px solid #92400e; }
-    .p-al   { background:#14532d;color:#86efac;border:1px solid #166534; }
-    .p-no   { background:#1e293b;color:#94a3b8;border:1px solid #334155; }
-    .inp    { background:#1e293b;border:1px solid #334155;color:#e2e8f0;
-              border-radius:10px;padding:9px 14px;font-size:13px;transition:border .15s; }
-    .inp:focus  { outline:none;border-color:#eab308;box-shadow:0 0 0 3px rgba(234,179,8,.1); }
-    .inp::placeholder { color:#334155; }
-    .tier-btn { width:100%;text-align:left;padding:10px 14px;border-radius:10px;
-                background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);
-                color:#cbd5e1;font-weight:700;font-size:13px;cursor:pointer;transition:.15s; }
-    .tier-btn:hover { background:rgba(255,255,255,.09); }
-    .tier-btn.active { border-color:#eab308;background:rgba(234,179,8,.12);color:#fde68a; }
+    body { font-family:'Inter',system-ui,sans-serif; background:#f8fafc; color:#1e293b; }
+    .card-shadow { box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04); }
+    /* Input */
+    .inp { background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:10px; padding:9px 14px; font-size:13px; transition:border .15s; }
+    .inp:focus { outline:none; border-color:#eab308; box-shadow:0 0 0 3px rgba(234,179,8,.1); }
+    .inp::placeholder { color:#94a3b8; }
+    /* Pills */
+    .pill   { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:9px; font-weight:700; white-space:nowrap; }
+    .p-ma   { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; }
+    .p-al   { background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; }
+    .p-no   { background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; }
     /* Tabs */
-    .tab-btn { color:#475569; }
-    .tab-btn.active { background:rgba(255,255,255,.07); color:#e2e8f0; }
-    /* Filtros catálogo */
-    .cf-btn.active { color:#e2e8f0!important; border-color:rgba(255,255,255,.2)!important;
-                     background:rgba(255,255,255,.09)!important; }
-    /* Tabla catálogo */
-    #cat-table tr { border-bottom:1px solid rgba(255,255,255,.04); transition:.1s; }
-    #cat-table tr:hover { background:rgba(255,255,255,.025); }
-    #cat-table td { vertical-align:middle; }
-    .tier-badge { display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
-                  font-size:9px;font-weight:700;cursor:pointer;transition:.15s; }
-    .tier-badge:hover { opacity:.8; }
-    .tier-none  { background:#1e293b;color:#475569;border:1px solid #334155; }
-    .tier-norm  { background:#1e3a5f;color:#7dd3fc;border:1px solid #1e40af; }
-    .tier-alta  { background:#78350f;color:#fde68a;border:1px solid #92400e; }
-    .tier-muy   { background:#450a0a;color:#fca5a5;border:1px solid #991b1b; }
-    .expand-row { display:none; background:rgba(0,0,0,.25); }
+    .tab-btn { padding:8px 18px; border-radius:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:all .15s; border:1px solid transparent; color:#64748b; }
+    .tab-btn.active { background:#0f172a; color:#fff; }
+    /* Tier filter buttons */
+    .tier-btn { width:100%; text-align:left; padding:9px 13px; border-radius:9px; background:#fff; border:1px solid #e2e8f0; color:#475569; font-weight:700; font-size:13px; cursor:pointer; transition:.15s; }
+    .tier-btn:hover { background:#f8fafc; border-color:#cbd5e1; }
+    .tier-btn.active { border-color:#eab308; background:#fffbeb; color:#b45309; }
+    /* Catalog filter btns */
+    .cf-btn { background:#fff; border:1px solid #e2e8f0; color:#64748b; border-radius:8px; padding:5px 12px; font-size:11px; font-weight:700; text-transform:uppercase; cursor:pointer; transition:.15s; }
+    .cf-btn:hover { background:#f8fafc; border-color:#cbd5e1; }
+    .cf-btn.active { background:#0f172a !important; border-color:#0f172a !important; color:#fff !important; }
+    /* Catalog table */
+    #cat-table tr { border-bottom:1px solid #f1f5f9; transition:.1s; }
+    #cat-table tr:hover { background:#fafafa; }
+    #cat-table td { vertical-align:middle; padding:10px 12px; }
+    /* Tier badges */
+    .tier-badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:9px; font-weight:700; cursor:pointer; transition:.15s; border:1px solid; }
+    .tier-badge:hover { opacity:.75; }
+    .tier-none  { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
+    .tier-norm  { background:#eff6ff; color:#2563eb; border-color:#bfdbfe; }
+    .tier-alta  { background:#fffbeb; color:#d97706; border-color:#fde68a; }
+    .tier-muy   { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
+    /* Expand rows */
+    .expand-row { display:none; background:#fafafa; }
     .expand-row.open { display:table-row; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    .spin { animation:spin .8s linear infinite; display:inline-block; }
-    /* Variante row */
-    .var-row { display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
-               padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.025);
-               border:1px solid rgba(255,255,255,.04);margin-top:4px; }
-    .var-row .vname { font-size:11px;color:#94a3b8;line-height:1.3; }
-    .var-row .vstk  { font-size:12px;font-weight:700;text-align:right; }
-    .var-row .vprc  { font-size:11px;color:#64748b;text-align:right; }
+    /* Variante */
+    .var-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center;
+               padding:6px 10px; border-radius:8px; background:#fff; border:1px solid #e2e8f0; margin-top:4px; }
+    .var-row .vname { font-size:11px; color:#475569; line-height:1.3; }
+    .var-row .vstk  { font-size:12px; font-weight:700; text-align:right; }
+    .var-row .vprc  { font-size:11px; color:#94a3b8; text-align:right; }
+    /* Progress */
+    .spin { animation:_spin .8s linear infinite; display:inline-block; }
+    @keyframes _spin { to { transform:rotate(360deg); } }
+    /* Enrich panel subtle */
+    #enrich-panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; }
   </style>
 </head>
 <body class="min-h-screen">
 
-<!-- ═══════════════════ LOGIN ═══════════════════ -->
+<!-- ══ LOGIN ══ -->
 <div id="login-view" class="flex min-h-screen items-center justify-center p-4">
-  <div class="glass p-8 w-full max-w-xs text-center">
-    <div class="w-11 h-11 bg-yellow-500/10 rounded-xl flex items-center justify-center mx-auto mb-4">
+  <div class="bg-white rounded-2xl border border-slate-100 p-8 w-full max-w-xs text-center card-shadow">
+    <div class="w-11 h-11 bg-slate-900 rounded-xl flex items-center justify-center mx-auto mb-4">
       <i class="fas fa-magnifying-glass text-yellow-400 text-lg"></i>
     </div>
-    <h1 class="text-xl font-black text-white">Stock Check</h1>
-    <p class="text-xs text-slate-500 mt-1 mb-6">Consulta de stock · GameQuest</p>
+    <h1 class="text-xl font-black text-slate-800">Stock Check</h1>
+    <p class="text-xs text-slate-400 mt-1 mb-6">Consulta de stock · GameQuest</p>
     <div class="space-y-3 text-left">
       <input id="lu" type="text"     class="inp w-full" placeholder="Usuario">
       <input id="lp" type="password" class="inp w-full" placeholder="Contraseña"
              onkeydown="if(event.key==='Enter')doLogin()">
       <button onclick="doLogin()"
-        class="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black py-3
+        class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3
                rounded-xl text-xs uppercase tracking-wide transition">
         INGRESAR
       </button>
     </div>
-    <p id="login-err" class="hidden text-red-400 text-xs mt-3"></p>
+    <p id="login-err" class="hidden text-red-500 text-xs mt-3"></p>
   </div>
 </div>
 
-<!-- ═══════════════════ APP ═══════════════════ -->
+<!-- ══ APP ══ -->
 <div id="app" class="hidden min-h-screen flex flex-col">
 
   <!-- Header -->
-  <header class="px-5 py-3 border-b border-white/5 bg-slate-900/80 backdrop-blur sticky top-0 z-50
-                 flex items-center justify-between">
+  <header class="px-5 py-3 border-b border-slate-200 bg-white sticky top-0 z-50
+                 flex items-center justify-between card-shadow">
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 bg-yellow-500/12 rounded-lg flex items-center justify-center">
+      <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
         <i class="fas fa-magnifying-glass text-yellow-400 text-sm"></i>
       </div>
       <div>
-        <span class="font-black text-white text-sm">Stock Check</span>
+        <span class="font-black text-slate-800 text-sm">Stock Check</span>
         <span id="cache-badge" class="ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full
-               bg-slate-800 text-slate-500 border border-slate-700">cache —</span>
+               bg-slate-100 text-slate-500 border border-slate-200">cache —</span>
       </div>
     </div>
     <div class="flex items-center gap-2">
-      <!-- Importar CSV masivo -->
       <button onclick="openBulkImport()"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-               bg-purple-500/10 text-purple-400 border border-purple-500/20
-               hover:bg-purple-500/25 transition">
+               bg-violet-50 text-violet-600 border border-violet-200
+               hover:bg-violet-100 transition">
         <i class="fas fa-file-import"></i>
         <span class="hidden sm:inline">Importar CSV</span>
       </button>
-      <!-- Sync -->
       <button onclick="syncCache()" id="btn-sync"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-               bg-yellow-500/10 text-yellow-400 border border-yellow-500/20
-               hover:bg-yellow-500/25 transition">
+               bg-yellow-50 text-yellow-700 border border-yellow-200
+               hover:bg-yellow-100 transition">
         <i id="sync-icon" class="fas fa-rotate-right"></i>
         <span class="hidden sm:inline">Sync JS</span>
       </button>
       <button onclick="doLogout()"
-        class="text-slate-600 text-xs font-bold hover:text-white transition px-2">
+        class="text-slate-400 text-xs font-bold hover:text-slate-700 transition px-2">
         <i class="fas fa-sign-out-alt"></i>
       </button>
     </div>
@@ -122,252 +123,260 @@
   <!-- Main -->
   <main class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full space-y-4">
 
-    <!-- Tabs de navegación -->
-    <div class="flex gap-1 glass p-1 rounded-xl">
+    <!-- Tabs -->
+    <div class="flex gap-1 bg-white border border-slate-200 p-1 rounded-xl card-shadow">
       <button id="tab-buscar" onclick="showTab('buscar')"
-        class="tab-btn flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition">
+        class="tab-btn flex-1 py-2 px-3 text-xs">
         <i class="fas fa-magnifying-glass mr-1.5"></i>Buscar
       </button>
       <button id="tab-catalogo" onclick="showTab('catalogo')"
-        class="tab-btn flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition">
+        class="tab-btn flex-1 py-2 px-3 text-xs">
         <i class="fas fa-book-open mr-1.5"></i>Catálogo
-        <span id="catalog-count-badge" class="ml-1 hidden text-[9px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full"></span>
+        <span id="catalog-count-badge" class="ml-1 hidden text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full"></span>
       </button>
     </div>
 
-    <!-- ══════════ PANEL BUSCAR ══════════ -->
+    <!-- ══ PANEL BUSCAR ══ -->
     <div id="panel-buscar">
 
-    <!-- Buscador -->
-    <div class="glass p-4">
-      <p class="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-3">
-        Buscar carta en Jumpseller
-      </p>
-      <div class="flex gap-2">
-        <div class="relative flex-1">
-          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-sm pointer-events-none"></i>
-          <input id="q" type="text" class="inp w-full pl-10" placeholder="Escribe el nombre…  ej: sol ring"
-                 onkeydown="if(event.key==='Enter')search()" oninput="onInput()">
-          <button id="btn-clear" onclick="clearSearch()"
-            class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-white transition text-sm">
-            <i class="fas fa-xmark"></i>
+      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
+        <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+          Buscar carta en Jumpseller
+        </p>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+            <input id="q" type="text" class="inp w-full pl-10" placeholder="Escribe el nombre…  ej: sol ring"
+                   onkeydown="if(event.key==='Enter')search()" oninput="onInput()">
+            <button id="btn-clear" onclick="clearSearch()"
+              class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition text-sm">
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+          <button onclick="search()" id="btn-search"
+            class="bg-slate-900 hover:bg-slate-800 text-white font-black px-5 rounded-xl
+                   text-xs uppercase tracking-wide transition whitespace-nowrap">
+            BUSCAR
           </button>
         </div>
-        <button onclick="search()" id="btn-search"
-          class="bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-black px-5 rounded-xl
-                 text-xs uppercase tracking-wide transition whitespace-nowrap">
-          BUSCAR
-        </button>
+        <p id="q-hint" class="text-[10px] text-slate-400 mt-2">
+          La búsqueda normaliza el nombre y suma el stock de <strong class="text-slate-500">todas las versiones</strong> (foil, set, condición, etc.)
+        </p>
       </div>
-      <p id="q-hint" class="text-[10px] text-slate-600 mt-2">
-        La búsqueda normaliza el nombre y suma el stock de <strong class="text-slate-500">todas las versiones</strong> (foil, set, condición, etc.)
-      </p>
-    </div>
 
-    <!-- Estado cache / loading -->
-    <div id="loading" class="hidden glass p-6 text-center">
-      <i class="fas fa-circle-notch spin text-yellow-400 text-xl mb-2 block"></i>
-      <p class="text-xs text-slate-500">Consultando catálogo…</p>
-    </div>
+      <!-- Loading -->
+      <div id="loading" class="hidden bg-white rounded-2xl border border-slate-100 p-6 text-center card-shadow">
+        <i class="fas fa-circle-notch spin text-yellow-500 text-xl mb-2 block"></i>
+        <p class="text-xs text-slate-400">Consultando catálogo…</p>
+      </div>
 
-    <!-- Sin resultados -->
-    <div id="no-results" class="hidden glass p-8 text-center">
-      <i class="fas fa-ghost text-3xl text-slate-700 mb-3 block"></i>
-      <p class="font-bold text-slate-500" id="no-results-msg">Sin resultados</p>
-      <p class="text-xs text-slate-700 mt-1">Prueba con otro nombre o revisa la ortografía</p>
-    </div>
+      <!-- Sin resultados -->
+      <div id="no-results" class="hidden bg-white rounded-2xl border border-slate-100 p-8 text-center card-shadow">
+        <i class="fas fa-ghost text-3xl text-slate-300 mb-3 block"></i>
+        <p class="font-bold text-slate-500" id="no-results-msg">Sin resultados</p>
+        <p class="text-xs text-slate-400 mt-1">Prueba con otro nombre o revisa la ortografía</p>
+      </div>
 
     </div><!-- /panel-buscar -->
 
-    <!-- ══════════ PANEL CATÁLOGO ══════════ -->
+    <!-- ══ PANEL CATÁLOGO ══ -->
     <div id="panel-catalogo" class="hidden space-y-3">
 
-      <!-- Stats + controles -->
-      <div id="catalog-stats" class="glass p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <!-- Stats -->
+      <div id="catalog-stats" class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow grid grid-cols-2 md:grid-cols-4 gap-3">
         <div class="text-center">
-          <div class="text-xl font-black text-white" id="cs-cards">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Cartas únicas</div>
+          <div class="text-xl font-black text-slate-800" id="cs-cards">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">Cartas únicas</div>
         </div>
         <div class="text-center">
-          <div class="text-xl font-black text-purple-400" id="cs-skus">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">SKUs en JS</div>
+          <div class="text-xl font-black text-violet-600" id="cs-skus">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">SKUs en JS</div>
         </div>
         <div class="text-center">
-          <div class="text-xl font-black text-green-400" id="cs-stock">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Stock total</div>
+          <div class="text-xl font-black text-green-600" id="cs-stock">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">Stock total</div>
         </div>
         <div class="text-center">
-          <div class="text-xl font-black text-yellow-400" id="cs-enriched">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Con Scryfall IDs</div>
-        </div>
-        <div class="col-span-2 md:col-span-2 text-center">
-          <div class="text-xs font-black text-slate-400" id="cs-sync">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Última sync JS</div>
+          <div class="text-xl font-black text-yellow-600" id="cs-enriched">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">Con Scryfall IDs</div>
         </div>
         <div class="col-span-2 text-center">
-          <div class="text-xs font-black text-purple-300" id="cs-sfmap">—</div>
-          <div class="text-[9px] text-slate-600 uppercase font-bold">Índice Scryfall en RAM</div>
+          <div class="text-xs font-black text-slate-500" id="cs-sync">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">Última sync JS</div>
+        </div>
+        <div class="col-span-2 text-center">
+          <div class="text-xs font-black text-violet-500" id="cs-sfmap">—</div>
+          <div class="text-[9px] text-slate-400 uppercase font-bold">Índice Scryfall en RAM</div>
         </div>
       </div>
 
-      <!-- Panel de enriquecimiento Scryfall -->
-      <div id="enrich-panel" class="glass p-4">
+      <!-- Panel Enriquecimiento Scryfall — compacto y no invasivo -->
+      <div id="enrich-panel" class="p-4">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">
-            <div class="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <i class="fas fa-wand-magic-sparkles text-purple-400 text-xs"></i>
+            <div class="w-6 h-6 rounded-lg bg-violet-50 flex items-center justify-center">
+              <i class="fas fa-wand-magic-sparkles text-violet-500 text-xs"></i>
             </div>
             <div>
-              <div class="text-xs font-black text-white">Poblar Scryfall IDs</div>
-              <div class="text-[9px] text-slate-600">Vincula todos los UUIDs de Scryfall a cada carta del catálogo</div>
+              <div class="text-xs font-black text-slate-700">Poblar Scryfall IDs</div>
+              <div class="text-[9px] text-slate-400">Vincula UUIDs de Scryfall al catálogo</div>
             </div>
           </div>
           <div class="flex gap-2">
             <button onclick="startEnrich(true)"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-600 text-slate-400
-                     hover:text-white hover:border-slate-400 transition">
+              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-200 text-slate-500
+                     hover:text-slate-700 hover:border-slate-400 transition bg-white">
               <i class="fas fa-refresh mr-1"></i>Re-procesar todo
             </button>
             <button id="btn-enrich" onclick="startEnrich()"
               class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-                     bg-purple-500/15 text-purple-300 border border-purple-500/30
-                     hover:bg-purple-500/25 transition">
-              <i class="fas fa-play mr-1"></i>Iniciar enriquecimiento
+                     bg-violet-50 text-violet-600 border border-violet-200
+                     hover:bg-violet-100 transition">
+              <i class="fas fa-play mr-1"></i>Iniciar
             </button>
           </div>
         </div>
 
-        <!-- Barra de progreso (oculta cuando no corre) -->
+        <!-- Progreso (oculto cuando no corre) -->
         <div id="enrich-progress-wrap" class="hidden">
-          <!-- Fase actual -->
-          <div class="flex items-center gap-2 mb-3 p-2 rounded-lg bg-purple-500/5 border border-purple-500/10">
-            <i class="fas fa-circle-notch spin text-purple-400 text-xs"></i>
-            <span class="text-[11px] text-purple-300 font-bold" id="enrich-phase-label">Iniciando…</span>
+          <div class="flex items-center gap-2 mb-3 p-2 rounded-lg bg-violet-50 border border-violet-100">
+            <i class="fas fa-circle-notch spin text-violet-500 text-xs"></i>
+            <span class="text-[11px] text-violet-600 font-bold" id="enrich-phase-label">Iniciando…</span>
           </div>
-          <!-- Progreso descarga -->
           <div class="mb-2">
             <div class="flex justify-between mb-1">
-              <span class="text-[9px] text-slate-600 uppercase font-bold">Descarga bulk data</span>
-              <span class="text-[10px] font-black text-slate-400" id="enrich-mb">0 MB</span>
+              <span class="text-[9px] text-slate-400 uppercase font-bold">Descarga bulk data</span>
+              <span class="text-[10px] font-black text-slate-500" id="enrich-mb">0 MB</span>
             </div>
-            <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div id="enrich-dl-bar" class="h-full bg-blue-500/60 rounded-full transition-all duration-300"
-                   style="width:0%"></div>
+            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div id="enrich-dl-bar" class="h-full bg-blue-400 rounded-full transition-all duration-300" style="width:0%"></div>
             </div>
           </div>
-          <!-- Progreso upsert -->
           <div>
             <div class="flex items-center justify-between mb-1">
-              <span class="text-[9px] text-slate-600 uppercase font-bold">Guardando en BD</span>
-              <span class="text-[10px] font-black text-purple-300" id="enrich-pct">0%</span>
+              <span class="text-[9px] text-slate-400 uppercase font-bold">Guardando en BD</span>
+              <span class="text-[10px] font-black text-violet-600" id="enrich-pct">0%</span>
             </div>
-            <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div id="enrich-bar" class="h-full bg-gradient-to-r from-purple-600 to-purple-400
+            <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div id="enrich-bar" class="h-full bg-gradient-to-r from-violet-400 to-violet-600
                                           rounded-full transition-all duration-500" style="width:0%"></div>
             </div>
           </div>
           <div class="flex items-center justify-between mt-2">
-            <span class="text-[9px] text-slate-600 font-mono" id="enrich-counts">—</span>
+            <span class="text-[9px] text-slate-400 font-mono" id="enrich-counts">—</span>
             <button onclick="cancelEnrich()"
-              class="text-[9px] text-red-500 hover:text-red-400 transition font-bold">
+              class="text-[9px] text-red-500 hover:text-red-600 transition font-bold">
               <i class="fas fa-stop mr-1"></i>Detener
             </button>
           </div>
         </div>
 
-        <!-- Mensaje final -->
-        <div id="enrich-done-msg" class="hidden text-[10px] text-green-400 font-bold text-center py-1">
+        <div id="enrich-done-msg" class="hidden text-[10px] text-green-600 font-bold text-center py-1">
           <i class="fas fa-circle-check mr-1"></i>
           <span id="enrich-done-text">Enriquecimiento completado</span>
         </div>
 
-        <p class="text-[9px] text-slate-700 mt-3">
-          Descarga bulk data de Scryfall (~100MB, streaming). Tarda ~2 minutos.
-          El servidor sigue disponible. Requiere haber corrido <strong class="text-slate-600">Sync Catálogo</strong> primero.
+        <p class="text-[9px] text-slate-400 mt-3">
+          Descarga bulk data de Scryfall (~100 MB, streaming). Tarda ~2 min.
+          El servidor sigue disponible. Requiere haber corrido <strong class="text-slate-500">Sync Catálogo</strong> primero.
         </p>
       </div>
 
-      <!-- Controles del catálogo -->
-      <div class="glass p-3 flex flex-wrap gap-2 items-center">
-        <!-- Búsqueda -->
+      <!-- Controles catálogo -->
+      <div class="bg-white rounded-2xl border border-slate-100 p-3 card-shadow flex flex-wrap gap-2 items-center">
         <div class="relative flex-1 min-w-[160px]">
-          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs pointer-events-none"></i>
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
           <input id="cat-q" type="text" placeholder="Filtrar por nombre…" oninput="catalogFilter()"
             class="inp w-full pl-8 py-2 text-xs">
         </div>
-        <!-- Filtros tier -->
-        <div class="flex gap-1">
-          <button onclick="setCatalogTierFilter('all')"   id="cf-all"      class="cf-btn active px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-400">Todas</button>
-          <button onclick="setCatalogTierFilter('sin_tier')" id="cf-sin"   class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-500">Sin tier</button>
-          <button onclick="setCatalogTierFilter('normal')" id="cf-normal"  class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-slate-700 bg-slate-800 text-slate-500">📦 Normal</button>
-          <button onclick="setCatalogTierFilter('alta')"   id="cf-alta"    class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-yellow-500/30 bg-yellow-500/10 text-yellow-500">⭐ Alta</button>
-          <button onclick="setCatalogTierFilter('muy_alta')" id="cf-muy"   class="cf-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase border border-red-500/30 bg-red-500/10 text-red-400">🔥 Muy Alta</button>
+        <div class="flex gap-1 flex-wrap">
+          <button onclick="setCatalogTierFilter('all')"    id="cf-all"    class="cf-btn active">Todas</button>
+          <button onclick="setCatalogTierFilter('sin_tier')" id="cf-sin"  class="cf-btn">Sin tier</button>
+          <button onclick="setCatalogTierFilter('normal')"  id="cf-normal" class="cf-btn" style="color:#2563eb;border-color:#bfdbfe">📦 Normal</button>
+          <button onclick="setCatalogTierFilter('alta')"    id="cf-alta"   class="cf-btn" style="color:#d97706;border-color:#fde68a">⭐ Alta</button>
+          <button onclick="setCatalogTierFilter('muy_alta')" id="cf-muy"  class="cf-btn" style="color:#dc2626;border-color:#fecaca">🔥 Muy Alta</button>
         </div>
-        <!-- Sync -->
         <button onclick="syncCatalog()" id="btn-cat-sync"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-                 bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition ml-auto">
-          <i class="fas fa-arrows-rotate"></i> Sync Catálogo
+                 bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition whitespace-nowrap">
+          <i class="fas fa-rotate-right"></i>Sync Catálogo
         </button>
       </div>
 
       <!-- Tabla catálogo -->
-      <div class="glass overflow-hidden">
+      <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
         <div id="cat-loading" class="hidden p-8 text-center">
-          <i class="fas fa-circle-notch spin text-purple-400 text-xl mb-2 block"></i>
-          <p class="text-xs text-slate-500">Cargando catálogo…</p>
+          <i class="fas fa-circle-notch spin text-yellow-500 text-xl mb-2 block"></i>
+          <p class="text-xs text-slate-400">Cargando catálogo…</p>
         </div>
-        <div id="cat-empty" class="hidden p-10 text-center">
-          <i class="fas fa-database text-3xl text-slate-700 mb-3 block"></i>
-          <p class="font-bold text-slate-500">Catálogo vacío</p>
-          <p class="text-xs text-slate-600 mt-2">Haz clic en <strong>Sync Catálogo</strong> para poblar desde Jumpseller</p>
+        <div id="cat-empty" class="hidden p-8 text-center">
+          <i class="fas fa-box-open text-3xl text-slate-300 mb-3 block"></i>
+          <p class="text-sm font-bold text-slate-400">Sin cartas en el catálogo</p>
         </div>
-        <table id="cat-table" class="hidden w-full text-xs">
+        <table id="cat-table" class="w-full text-left" style="border-collapse:collapse">
           <thead>
-            <tr class="border-b border-white/5">
-              <th class="text-left px-4 py-3 text-[9px] font-bold text-slate-600 uppercase tracking-widest">Carta</th>
-              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Stock</th>
-              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">SKUs JS</th>
-              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Scryfall IDs</th>
-              <th class="text-center px-3 py-3 text-[9px] font-bold text-slate-600 uppercase">Tier</th>
-              <th class="text-right px-4 py-3 text-[9px] font-bold text-slate-600 uppercase">Acciones</th>
+            <tr class="bg-slate-50 border-b border-slate-200">
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Carta</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Tier</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">Stock</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">SKUs</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Scryfall</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Ver</th>
             </tr>
           </thead>
           <tbody id="cat-tbody"></tbody>
         </table>
+
         <!-- Paginación -->
-        <div id="cat-pagination" class="hidden flex items-center justify-between px-4 py-3 border-t border-white/5">
-          <span id="cat-page-info" class="text-[10px] text-slate-600"></span>
-          <div class="flex gap-2">
-            <button onclick="catalogPage(-1)" id="cat-prev"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 transition disabled:opacity-30">
-              ← Anterior
-            </button>
-            <button onclick="catalogPage(1)" id="cat-next"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 transition disabled:opacity-30">
-              Siguiente →
-            </button>
+        <div id="cat-pagination" class="hidden bg-slate-50 border-t border-slate-200 p-3 flex items-center justify-between text-xs">
+          <button id="cat-prev" onclick="catPrevPage()"
+            class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 transition font-bold disabled:opacity-40">
+            ← Anterior
+          </button>
+          <span id="cat-page-info" class="text-slate-500 font-bold"></span>
+          <button id="cat-next" onclick="catNextPage()"
+            class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 transition font-bold disabled:opacity-40">
+            Siguiente →
+          </button>
+        </div>
+      </div>
+
+      <!-- Tier management sidebar -->
+      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">Gestión de Tiers (Staples)</div>
+        <div id="tier-btns" class="space-y-1">
+          <button class="tier-btn active" onclick="loadStaples('all')">Todos los tiers</button>
+          <button class="tier-btn" onclick="loadStaples('muy_alta')">🔥 Muy Alta demanda</button>
+          <button class="tier-btn" onclick="loadStaples('alta')">⭐ Alta demanda</button>
+          <button class="tier-btn" onclick="loadStaples('normal')">📦 Normal</button>
+        </div>
+        <p id="tier-hint" class="text-[9px] text-slate-400 mt-3">Haz click en una carta del catálogo para cambiar su tier.</p>
+      </div>
+
+      <!-- Bulk import modal trigger + SF CSV -->
+      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow space-y-3">
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Importación / Exportación</div>
+        <div class="flex gap-2 flex-wrap">
+          <div>
+            <label class="text-[10px] font-bold text-slate-500 block mb-1">Bulk CSV Jumpseller</label>
+            <input type="file" id="bulk-csv" accept=".csv" class="inp text-xs py-1.5">
+          </div>
+          <div>
+            <label class="text-[10px] font-bold text-slate-500 block mb-1">CSV con Scryfall IDs</label>
+            <input type="file" id="sf-csv" accept=".csv" class="inp text-xs py-1.5">
+          </div>
+          <div>
+            <label class="text-[10px] font-bold text-slate-500 block mb-1">Sync desde CSV</label>
+            <input type="file" id="sync-csv" accept=".csv" class="inp text-xs py-1.5">
           </div>
         </div>
       </div>
 
     </div><!-- /panel-catalogo -->
 
-    <!-- Resultados (búsqueda) -->
-    <div id="results-wrap" class="hidden space-y-3">
-      <div class="flex items-center justify-between px-1">
-        <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-          Resultados — <span id="res-count" class="text-slate-400">0</span>
-        </p>
-        <p id="res-q" class="text-[10px] text-slate-700 italic"></p>
-      </div>
-      <div id="results-list" class="space-y-2"></div>
-    </div>
-
   </main>
-</div>
+</div><!-- /app -->
 
-<!-- ═══════════════════ CARD TEMPLATE (JS) ═══════════════════ -->
 <script>
 const API = "https://gamecoins.onrender.com";
 let TOKEN = null;

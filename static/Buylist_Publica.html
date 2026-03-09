@@ -4,154 +4,119 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Buylist — GameQuest</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-/* ═══════════════════════════════════════════════
-   GAMEQUEST DESIGN SYSTEM — PALETA OFICIAL v1
-   ═══════════════════════════════════════════════
-   --gq-bg       #09090f   fondo app
-   --gq-s1       #111118   superficie primaria
-   --gq-s2       #1a1a24   superficie elevada
-   --gq-s3       #23232f   superficie interactiva
-   --gq-bd       #2a2a3a   borde base
-   --gq-bd2      #3d3d52   borde activo
-   --gq-gold     #f59e0b   amarillo GameQuest (primario)
-   --gq-gold-d   #d97706   hover dorado
-   --gq-qp       #7c3aed   QuestPoints morado
-   --gq-qp-l     #a78bfa   texto QP
-   --gq-cash     #059669   Cash verde
-   --gq-cash-l   #34d399   texto Cash
-   --gq-buying   #10b981   compramos verde
-   --gq-partial  #f59e0b   compra parcial amber
-   --gq-full     #475569   stock completo gris
-   --gq-danger   #ef4444   rojo alerta
-   --gq-text     #f1f5f9   texto principal
-   --gq-text2    #94a3b8   texto secundario
-   --gq-text3    #64748b   texto terciario
-═══════════════════════════════════════════════ */
-:root {
-  --gq-bg:#09090f; --gq-s1:#111118; --gq-s2:#1a1a24; --gq-s3:#23232f;
-  --gq-bd:#2a2a3a; --gq-bd2:#3d3d52;
-  --gq-gold:#f59e0b; --gq-gold-d:#d97706;
-  --gq-qp:#7c3aed; --gq-qp-l:#a78bfa;
-  --gq-cash:#059669; --gq-cash-l:#34d399;
-  --gq-buying:#10b981; --gq-partial:#f59e0b; --gq-full:#475569;
-  --gq-danger:#ef4444;
-  --gq-text:#f1f5f9; --gq-text2:#94a3b8; --gq-text3:#64748b;
-}
-*{box-sizing:border-box}
-body{background:var(--gq-bg);color:var(--gq-text);font-family:'Inter',system-ui,sans-serif;min-height:100vh}
-/* Header */
-.gq-header{background:rgba(17,17,24,.97);border-bottom:1px solid var(--gq-bd);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
-.gq-logo{font-size:1.2rem;font-weight:900;color:var(--gq-gold);letter-spacing:-.02em}
-.gq-logo span{color:var(--gq-text)}
-/* Surfaces */
-.gq-card{background:var(--gq-s1);border:1px solid var(--gq-bd);border-radius:14px}
-.gq-inner{background:var(--gq-s2);border:1px solid var(--gq-bd);border-radius:10px}
-/* Dropzone */
-#drop-zone{border:2px dashed var(--gq-bd2);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--gq-s2)}
-#drop-zone:hover,#drop-zone.drag-over{border-color:var(--gq-gold);background:rgba(245,158,11,.07)}
-#drop-zone.has-file{border-color:var(--gq-buying);background:rgba(16,185,129,.05)}
-/* Badges */
-.gq-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid}
-.gb-buying{background:rgba(16,185,129,.15);color:#34d399;border-color:rgba(16,185,129,.3)}
-.gb-partial{background:rgba(245,158,11,.15);color:#fbbf24;border-color:rgba(245,158,11,.3)}
-.gb-full{background:rgba(71,85,105,.2);color:var(--gq-full);border-color:rgba(71,85,105,.3)}
-.gb-unlisted{background:rgba(30,30,42,.5);color:var(--gq-text3);border-color:var(--gq-bd)}
-.gb-muyalta{background:rgba(239,68,68,.15);color:#f87171;border-color:rgba(239,68,68,.3)}
-.gb-foil{background:rgba(124,58,237,.15);color:var(--gq-qp-l);border-color:rgba(124,58,237,.3)}
-.gb-estaca{background:rgba(245,158,11,.12);color:#fcd34d;border-color:rgba(245,158,11,.25)}
-/* Filter buttons */
-.gq-fb{border:1px solid var(--gq-bd);background:var(--gq-s2);color:var(--gq-text2);border-radius:8px;padding:4px 13px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:.15s;white-space:nowrap}
-.gq-fb:hover{background:var(--gq-s3);color:var(--gq-text)}
-.gq-fb.active{background:var(--gq-s3);border-color:var(--gq-bd2);color:var(--gq-text)}
-.gq-fb.fb-buying.active{border-color:var(--gq-buying);color:var(--gq-buying)}
-.gq-fb.fb-partial.active{border-color:var(--gq-partial);color:var(--gq-partial)}
-.gq-fb.fb-full.active{border-color:var(--gq-bd2);color:var(--gq-text3)}
-/* Checkbox */
-.gq-check{width:17px;height:17px;border:2px solid var(--gq-bd2);border-radius:4px;background:var(--gq-s2);cursor:pointer;appearance:none;-webkit-appearance:none;flex-shrink:0;transition:.15s;position:relative}
-.gq-check:checked{background:var(--gq-buying);border-color:var(--gq-buying)}
-.gq-check:checked::after{content:'';position:absolute;top:1px;left:4px;width:5px;height:8px;border:2px solid #fff;border-top:none;border-left:none;transform:rotate(45deg)}
-.gq-check:disabled{opacity:.3;cursor:not-allowed}
-/* Qty */
-.gq-qty{background:var(--gq-s3);border:1px solid var(--gq-bd2);color:var(--gq-text);border-radius:7px;width:50px;text-align:center;font-size:13px;font-weight:700;padding:3px 5px}
-.gq-qty:focus{outline:none;border-color:var(--gq-gold)}
-.gq-qty:disabled{opacity:.3}
-/* Card row */
-.card-row{border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s;padding:14px 16px}
-.card-row:last-child{border-bottom:none}
-.card-row:hover{background:rgba(255,255,255,.02)}
-.row-full{opacity:.42}
-.row-unlisted{opacity:.3}
-.row-hidden{display:none!important}
-/* Cupo bar */
-.cupo-bar{height:3px;background:var(--gq-bd);border-radius:999px;overflow:hidden;margin-top:4px}
-.cupo-fill{height:100%;background:var(--gq-buying);border-radius:999px;transition:width .3s}
-/* Payment options */
-.pay-opt{border:1.5px solid var(--gq-bd);border-radius:12px;padding:14px 16px;cursor:pointer;transition:.2s;background:var(--gq-s2)}
-.pay-opt:hover{border-color:var(--gq-bd2);background:var(--gq-s3)}
-.pay-opt.sel-qp{border-color:var(--gq-qp);background:rgba(124,58,237,.1)}
-.pay-opt.sel-cash{border-color:var(--gq-cash);background:rgba(5,150,105,.1)}
-/* Normas */
-.norma{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--gq-bd);font-size:13px}
-.norma:last-child{border-bottom:none}
-.norma-n{min-width:22px;height:22px;background:var(--gq-gold);color:#09090f;border-radius:999px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
-/* Totals bar */
-#totals-bar{position:sticky;bottom:0;background:rgba(17,17,24,.98);border-top:1px solid var(--gq-bd);backdrop-filter:blur(10px);z-index:90}
-/* Buttons */
-.btn-gq{background:var(--gq-gold);color:#09090f;font-weight:800;font-size:13px;border:none;border-radius:10px;padding:10px 22px;cursor:pointer;transition:.15s}
-.btn-gq:hover:not(:disabled){background:var(--gq-gold-d)}
-.btn-gq:disabled{opacity:.4;cursor:not-allowed}
-.btn-gq-out{background:transparent;color:var(--gq-text2);border:1px solid var(--gq-bd2);font-weight:700;font-size:11px;border-radius:8px;padding:5px 12px;cursor:pointer;transition:.15s}
-.btn-gq-out:hover{color:var(--gq-text);border-color:var(--gq-text3)}
-/* Misc */
-.lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gq-text3)}
-.text-qp{color:var(--gq-qp-l)} .text-cash{color:var(--gq-cash-l)} .text-gold{color:var(--gq-gold)}
-.spin{animation:spin .8s linear infinite;display:inline-block}
-@keyframes spin{to{transform:rotate(360deg)}}
-.form-control{background:var(--gq-s2)!important;border:1px solid var(--gq-bd)!important;color:var(--gq-text)!important;border-radius:9px!important}
-.form-control:focus{border-color:var(--gq-gold)!important;box-shadow:none!important;outline:none!important}
-.form-control::placeholder{color:var(--gq-text3)!important}
+    body { font-family:'Inter',system-ui,sans-serif; background:#f8fafc; color:#1e293b; }
+    .card-shadow { box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04); }
+    .input-clean { background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:8px; padding:10px 14px; font-size:14px; width:100%; transition:border .2s; }
+    .input-clean:focus { border-color:#eab308; outline:none; box-shadow:0 0 0 3px rgba(234,179,8,.12); }
+    .input-clean::placeholder { color:#94a3b8; }
+    /* Dropzone */
+    #drop-zone { border:2px dashed #e2e8f0; border-radius:12px; padding:32px 20px; text-align:center; cursor:pointer; transition:.2s; background:#f8fafc; }
+    #drop-zone:hover,#drop-zone.drag-over { border-color:#eab308; background:rgba(234,179,8,.04); }
+    #drop-zone.has-file { border-color:#22c55e; background:rgba(34,197,94,.04); }
+    /* Checkbox */
+    .gq-check { width:16px; height:16px; border:2px solid #cbd5e1; border-radius:4px; background:#fff; cursor:pointer; appearance:none; -webkit-appearance:none; flex-shrink:0; transition:.15s; position:relative; }
+    .gq-check:checked { background:#0f172a; border-color:#0f172a; }
+    .gq-check:checked::after { content:''; position:absolute; top:1px; left:4px; width:4px; height:7px; border:2px solid #fff; border-top:none; border-left:none; transform:rotate(45deg); }
+    .gq-check:disabled { opacity:.3; cursor:not-allowed; }
+    /* Table layout */
+    .tbl-head,.tbl-row { display:grid; align-items:center; gap:8px; padding:10px 16px; }
+    .tbl-head { grid-template-columns:28px 1fr 96px 96px 106px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
+    .tbl-row  { grid-template-columns:28px 1fr 96px 96px 106px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
+    .tbl-row:last-child { border-bottom:none; }
+    .tbl-row:hover { background:#fafafa; }
+    .row-full    { opacity:.42; }
+    .row-unlisted{ opacity:.32; }
+    .row-hidden  { display:none !important; }
+    /* Qty */
+    .qty-wrap { display:flex; align-items:center; gap:3px; justify-content:center; }
+    .qty-btn  { width:26px; height:26px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#475569; font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:.12s; line-height:1; }
+    .qty-btn:hover:not(:disabled) { border-color:#94a3b8; background:#f8fafc; color:#0f172a; }
+    .qty-btn:disabled { opacity:.3; cursor:not-allowed; }
+    .qty-inp  { width:36px; text-align:center; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#0f172a; font-size:13px; font-weight:700; padding:3px 0; }
+    .qty-inp:focus  { outline:none; border-color:#eab308; }
+    .qty-inp:disabled { opacity:.3; background:#f8fafc; }
+    /* Cupo bar */
+    .cupo-bar  { height:3px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:3px; }
+    .cupo-fill { height:100%; background:#22c55e; border-radius:999px; transition:width .3s; }
+    /* Badges */
+    .gq-badge   { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; white-space:nowrap; border:1px solid; }
+    .gb-buying  { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
+    .gb-partial { background:#fffbeb; color:#d97706; border-color:#fde68a; }
+    .gb-full    { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
+    .gb-unlisted{ background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
+    .gb-muyalta { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
+    .gb-foil    { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; }
+    .gb-estaca  { background:#fffbeb; color:#b45309; border-color:#fde68a; }
+    /* Filter buttons */
+    .gq-fb { border:1px solid #e2e8f0; background:#fff; color:#64748b; border-radius:8px; padding:5px 13px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:.12s; white-space:nowrap; }
+    .gq-fb:hover { background:#f8fafc; border-color:#cbd5e1; color:#475569; }
+    .gq-fb.active { background:#0f172a; border-color:#0f172a; color:#fff; }
+    /* Pay options */
+    .pay-opt { border:2px solid #e2e8f0; border-radius:12px; padding:14px 16px; cursor:pointer; transition:.2s; background:#fff; }
+    .pay-opt:hover { border-color:#cbd5e1; background:#f8fafc; }
+    .pay-opt.sel-qp   { border-color:#7c3aed; background:#faf5ff; }
+    .pay-opt.sel-cash { border-color:#16a34a; background:#f0fdf4; }
+    /* Normas */
+    .norma   { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; font-size:13px; color:#334155; }
+    .norma:last-child { border-bottom:none; }
+    .norma-n { min-width:22px; height:22px; background:#0f172a; color:#fff; border-radius:999px; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+    /* Totals bar */
+    #totals-bar { position:sticky; bottom:0; background:rgba(255,255,255,.97); border-top:1px solid #e2e8f0; backdrop-filter:blur(8px); z-index:90; }
+    /* Buttons */
+    .btn-pri  { background:#0f172a; color:#fff; font-weight:700; font-size:13px; border:none; border-radius:10px; padding:10px 20px; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:7px; }
+    .btn-pri:hover:not(:disabled) { background:#1e293b; }
+    .btn-pri:disabled { opacity:.4; cursor:not-allowed; }
+    .btn-out  { background:#fff; color:#475569; border:1px solid #e2e8f0; font-weight:600; font-size:11px; border-radius:8px; padding:5px 12px; cursor:pointer; transition:.12s; display:inline-flex; align-items:center; gap:5px; }
+    .btn-out:hover { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
+    .lbl   { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#94a3b8; }
+    .spin  { animation:_spin .8s linear infinite; display:inline-block; }
+    @keyframes _spin { to { transform:rotate(360deg); } }
   </style>
 </head>
-<body>
+<body class="min-h-screen">
 
 <!-- Header -->
-<header class="gq-header px-3 py-3">
-  <div class="d-flex align-items-center justify-content-between" style="max-width:860px;margin:0 auto">
-    <div class="gq-logo">game<span>quest</span></div>
-    <a href="/" class="btn-gq-out text-decoration-none"><i class="fas fa-store me-1"></i>Tienda</a>
+<header class="sticky top-0 z-50 bg-white border-b border-slate-200" style="box-shadow:0 1px 3px rgba(0,0,0,.05)">
+  <div style="max-width:820px;margin:0 auto;padding:12px 16px" class="flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+        <span style="color:#eab308;font-size:13px;font-weight:900">G</span>
+      </div>
+      <span style="font-size:15px;font-weight:900;color:#0f172a;letter-spacing:-.02em">game<span style="color:#eab308">quest</span></span>
+    </div>
+    <a href="/" class="btn-out no-underline" style="text-decoration:none"><i class="fas fa-store"></i><span>Tienda</span></a>
   </div>
 </header>
 
-<!-- Closed banner -->
+<!-- Cerrada -->
 <div id="closed-banner" style="display:none">
-  <div style="max-width:440px;margin:80px auto;padding:0 16px" class="text-center">
-    <div class="gq-card p-5">
+  <div style="max-width:400px;margin:80px auto;padding:0 16px;text-align:center">
+    <div class="bg-white rounded-2xl border border-slate-100 p-8 card-shadow">
       <div style="font-size:2.5rem;margin-bottom:12px">🔒</div>
-      <h4 class="fw-bold mb-2">Buylist Temporalmente Cerrada</h4>
-      <p style="font-size:13px;color:var(--gq-text2)" class="mb-3">Estamos evaluando cotizaciones anteriores o reponiendo stock. ¡Vuelve pronto!</p>
-      <a href="mailto:contacto@gamequest.cl" class="btn-gq-out text-decoration-none"><i class="fas fa-envelope me-2"></i>contacto@gamequest.cl</a>
+      <h4 style="font-weight:900;color:#0f172a;font-size:1.1rem;margin-bottom:8px">Buylist Temporalmente Cerrada</h4>
+      <p style="font-size:13px;color:#64748b;margin-bottom:16px">Estamos evaluando cotizaciones anteriores o reponiendo stock. ¡Vuelve pronto!</p>
+      <a href="mailto:contacto@gamequest.cl" class="btn-out no-underline" style="text-decoration:none;display:inline-flex"><i class="fas fa-envelope"></i>contacto@gamequest.cl</a>
     </div>
   </div>
 </div>
 
 <!-- App -->
 <div id="app-section" style="display:none">
-<div style="max-width:860px;margin:0 auto;padding:24px 16px 140px">
+<div style="max-width:820px;margin:0 auto;padding:24px 16px 140px">
 
-  <div class="text-center mb-4">
-    <h1 class="fw-black mb-1" style="font-size:1.65rem">Cotiza tus cartas <span class="text-gold">al instante</span></h1>
-    <p style="font-size:13px;color:var(--gq-text2)">Exporta desde Manabox, sube tu CSV y ve exactamente cuánto te pagamos.</p>
+  <div style="text-align:center;margin-bottom:24px">
+    <h1 style="font-weight:900;font-size:1.6rem;color:#0f172a;margin-bottom:6px">Cotiza tus cartas <span style="color:#eab308">al instante</span></h1>
+    <p style="font-size:13px;color:#64748b">Exporta desde Manabox, sube tu CSV y ve exactamente cuánto te pagamos.</p>
   </div>
 
   <!-- Normas -->
-  <div class="gq-card p-4 mb-4">
-    <div class="lbl mb-3"><i class="fas fa-scroll me-2"></i>Normas de compra</div>
+  <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow">
+    <div class="lbl" style="margin-bottom:12px"><i class="fas fa-scroll mr-2 text-slate-400"></i>Normas de compra</div>
     <div class="norma"><div class="norma-n">1</div><div>Compramos <strong>NM y LP</strong>. MP/HP/DMG con descuento automático según condición.</div></div>
     <div class="norma"><div class="norma-n">2</div><div>El <strong>cupo</strong> indica cuántas unidades necesitamos para completar nuestro stock objetivo. No compramos más allá del cupo.</div></div>
     <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ✦ Estaca tienen multiplicador especial.</div></div>
@@ -159,132 +124,123 @@ body{background:var(--gq-bg);color:var(--gq-text);font-family:'Inter',system-ui,
   </div>
 
   <!-- Upload -->
-  <div class="gq-card p-4 mb-4" id="upload-card">
-    <div class="lbl mb-3"><i class="fas fa-file-csv me-2"></i>1. Sube tu colección (CSV Manabox)</div>
+  <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow" id="upload-card">
+    <div class="lbl" style="margin-bottom:12px"><i class="fas fa-file-csv mr-2 text-slate-400"></i>1. Sube tu colección (CSV Manabox)</div>
     <div id="drop-zone" onclick="document.getElementById('csv-inp').click()">
-      <div style="font-size:2rem;color:var(--gq-text3);margin-bottom:8px"><i class="fas fa-cloud-arrow-up"></i></div>
-      <p class="fw-bold mb-1" style="font-size:14px" id="drop-text">Arrastra tu CSV o haz clic para seleccionar</p>
-      <p style="font-size:12px;color:var(--gq-text3)">Manabox → Mi Colección → Exportar CSV</p>
+      <div style="font-size:2rem;color:#cbd5e1;margin-bottom:8px"><i class="fas fa-cloud-arrow-up"></i></div>
+      <p style="font-weight:700;font-size:14px;color:#475569;margin-bottom:4px" id="drop-text">Arrastra tu CSV o haz clic para seleccionar</p>
+      <p style="font-size:12px;color:#94a3b8">Manabox → Mi Colección → Exportar CSV</p>
     </div>
-    <input type="file" id="csv-inp" accept=".csv,.txt" class="d-none" onchange="setFile(this.files[0])">
-    <div id="upload-actions" class="mt-3 d-none d-flex gap-2">
-      <button class="btn-gq flex-grow-1" onclick="analyze()"><i class="fas fa-magnifying-glass me-2"></i>Analizar Colección</button>
-      <button class="btn-gq-out" onclick="resetFile()"><i class="fas fa-xmark"></i></button>
+    <input type="file" id="csv-inp" accept=".csv,.txt" style="display:none" onchange="setFile(this.files[0])">
+    <div id="upload-actions" style="display:none;gap:8px;margin-top:12px" class="flex">
+      <button class="btn-pri" style="flex:1" onclick="analyze()"><i class="fas fa-magnifying-glass"></i>Analizar Colección</button>
+      <button class="btn-out" onclick="resetFile()"><i class="fas fa-xmark"></i></button>
     </div>
   </div>
 
   <!-- Loading -->
-  <div id="loading-state" class="gq-card p-5 text-center mb-4" style="display:none">
-    <i class="fas fa-circle-notch spin text-gold mb-3" style="font-size:1.8rem"></i>
-    <p class="fw-bold mb-1">Analizando tu colección…</p>
-    <p style="font-size:12px;color:var(--gq-text2)">Consultando precios y stock</p>
+  <div id="loading-state" class="bg-white rounded-2xl border border-slate-100 p-10 text-center mb-4 card-shadow" style="display:none">
+    <i class="fas fa-circle-notch spin mb-3 block" style="font-size:1.8rem;color:#eab308"></i>
+    <p style="font-weight:700;color:#0f172a;margin-bottom:4px">Analizando tu colección…</p>
+    <p style="font-size:12px;color:#64748b">Consultando precios y stock</p>
   </div>
 
   <!-- Results -->
   <div id="results-section" style="display:none">
 
     <!-- Summary -->
-    <div class="gq-card p-4 mb-3">
-      <div class="row g-3 text-center mb-3">
-        <div class="col-6 col-md-3">
-          <div class="fw-black text-gold" style="font-size:1.5rem" id="sum-total">0</div>
+    <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-3 card-shadow">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;margin-bottom:12px">
+        <div>
+          <div style="font-weight:900;font-size:1.5rem;color:#0f172a" id="sum-total">0</div>
           <div class="lbl">Cartas</div>
         </div>
-        <div class="col-6 col-md-3">
-          <div class="fw-black" style="font-size:1.5rem;color:var(--gq-buying)" id="sum-buying">0</div>
+        <div>
+          <div style="font-weight:900;font-size:1.5rem;color:#16a34a" id="sum-buying">0</div>
           <div class="lbl">Compramos</div>
         </div>
-        <div class="col-6 col-md-3">
-          <div class="fw-black text-qp" style="font-size:1.4rem" id="sum-qp">$0</div>
+        <div>
+          <div style="font-weight:900;font-size:1.3rem;color:#7c3aed" id="sum-qp">$0</div>
           <div class="lbl">💎 QP</div>
         </div>
-        <div class="col-6 col-md-3" id="sum-cash-col">
-          <div class="fw-black text-cash" style="font-size:1.4rem" id="sum-cash">$0</div>
+        <div id="sum-cash-col">
+          <div style="font-weight:900;font-size:1.3rem;color:#16a34a" id="sum-cash">$0</div>
           <div class="lbl">💵 Cash</div>
         </div>
       </div>
-      <div id="full-alert" class="d-none" style="background:rgba(71,85,105,.12);border:1px solid var(--gq-bd);border-radius:9px;padding:9px 14px;font-size:12px;color:var(--gq-text2)">
-        <i class="fas fa-info-circle me-2" style="color:var(--gq-text3)"></i><span id="full-alert-txt"></span>
+      <div id="full-alert" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:8px 14px;font-size:12px;color:#64748b">
+        <i class="fas fa-info-circle mr-2" style="color:#94a3b8"></i><span id="full-alert-txt"></span>
       </div>
     </div>
 
-    <!-- Filters + select-all -->
-    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <button class="gq-fb fb-all active" onclick="setFilter('all',this)">🔍 Todas</button>
-      <button class="gq-fb fb-buying"     onclick="setFilter('buying',this)">✅ Compramos</button>
-      <button class="gq-fb fb-partial"    onclick="setFilter('partial',this)">⚡ Parcial</button>
-      <button class="gq-fb fb-full"       onclick="setFilter('full',this)">🚫 Completo</button>
-      <button class="gq-fb"               onclick="setFilter('unlisted',this)">— Sin lista</button>
-      <div class="ms-auto d-flex gap-2">
-        <button class="btn-gq-out" onclick="selectAll(true)"><i class="fas fa-check-double me-1"></i>Todas</button>
-        <button class="btn-gq-out" onclick="selectAll(false)"><i class="fas fa-xmark me-1"></i>Ninguna</button>
+    <!-- Filtros -->
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+      <button class="gq-fb active" onclick="setFilter('all',this)">🔍 Todas</button>
+      <button class="gq-fb"        onclick="setFilter('buying',this)">✅ Compramos</button>
+      <button class="gq-fb"        onclick="setFilter('partial',this)">⚡ Parcial</button>
+      <button class="gq-fb"        onclick="setFilter('full',this)">🚫 Completo</button>
+      <button class="gq-fb"        onclick="setFilter('unlisted',this)">— Sin lista</button>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn-out" onclick="selectAll(true)"><i class="fas fa-check-double"></i>Todas</button>
+        <button class="btn-out" onclick="selectAll(false)"><i class="fas fa-xmark"></i>Ninguna</button>
       </div>
     </div>
 
     <!-- Cards table -->
-    <div class="gq-card mb-4" id="cards-wrap">
-      <div style="padding:10px 16px 6px" class="d-flex align-items-center gap-2">
-        <input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)">
-        <span class="lbl ms-1" style="flex:1">Carta</span>
-        <span class="lbl" style="min-width:90px;text-align:right">QP / Cash</span>
-        <span class="lbl ms-3" style="min-width:100px;text-align:center">Cantidad</span>
+    <div class="bg-white rounded-2xl border border-slate-100 mb-4 card-shadow overflow-hidden" id="cards-wrap">
+      <!-- Header columnas -->
+      <div class="tbl-head">
+        <div><input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)"></div>
+        <div class="lbl">Carta</div>
+        <div class="lbl text-right" style="color:#7c3aed">💎 QP</div>
+        <div class="lbl text-right col-cash-hd" style="color:#16a34a" id="cash-col-hd">💵 Cash</div>
+        <div class="lbl text-center">Cantidad</div>
       </div>
       <div id="cards-list"></div>
     </div>
 
     <!-- Payment -->
-    <div class="gq-card p-4 mb-4" id="payment-card">
-      <div class="lbl mb-3"><i class="fas fa-wallet me-2"></i>2. Elige cómo cobrar</div>
-      <div class="row g-3 mb-4">
-        <div class="col-12 col-md-6">
-          <div class="pay-opt" onclick="selectPay('credito')" id="pay-qp">
-            <div class="d-flex align-items-center gap-3">
-              <span style="font-size:1.6rem">💎</span>
-              <div>
-                <div class="fw-bold" style="font-size:13px">QuestPoints (Crédito)</div>
-                <div style="font-size:11px;color:var(--gq-text2)">+11% sobre base — máximo valor</div>
-              </div>
-              <div class="ms-auto text-end">
-                <div class="fw-black text-qp" style="font-size:1.15rem" id="pay-qp-tot">$0</div>
-                <div class="lbl">Total QP</div>
-              </div>
+    <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow" id="payment-card">
+      <div class="lbl" style="margin-bottom:14px"><i class="fas fa-wallet mr-2 text-slate-400"></i>2. Elige cómo cobrar</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div class="pay-opt" onclick="selectPay('credito')" id="pay-qp">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:1.6rem">💎</span>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:13px;color:#0f172a">QuestPoints (Crédito)</div>
+              <div style="font-size:11px;color:#64748b">+11% sobre base — máximo valor</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:900;font-size:1.1rem;color:#7c3aed" id="pay-qp-tot">$0</div>
+              <div class="lbl">Total QP</div>
             </div>
           </div>
         </div>
-        <div class="col-12 col-md-6" id="pay-cash-col">
-          <div class="pay-opt" onclick="selectPay('cash')" id="pay-cash">
-            <div class="d-flex align-items-center gap-3">
-              <span style="font-size:1.6rem">💵</span>
-              <div>
-                <div class="fw-bold" style="font-size:13px">Cash (Pesos CLP)</div>
-                <div style="font-size:11px;color:var(--gq-text2)">Pago inmediato en tienda</div>
-              </div>
-              <div class="ms-auto text-end">
-                <div class="fw-black text-cash" style="font-size:1.15rem" id="pay-cash-tot">$0</div>
-                <div class="lbl">Total Cash</div>
-              </div>
+        <div class="pay-opt" onclick="selectPay('cash')" id="pay-cash" id="pay-cash-col">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:1.6rem">💵</span>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:13px;color:#0f172a">Cash (Pesos CLP)</div>
+              <div style="font-size:11px;color:#64748b">Pago inmediato en tienda</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:900;font-size:1.1rem;color:#16a34a" id="pay-cash-tot">$0</div>
+              <div class="lbl">Total Cash</div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="lbl mb-2"><i class="fas fa-user me-2"></i>3. Tus datos (para la copia)</div>
-      <div class="row g-2 mb-3">
-        <div class="col-12 col-md-6">
-          <input type="email" id="inp-email" placeholder="Email *" class="form-control">
-        </div>
-        <div class="col-12 col-md-6">
-          <input type="text" id="inp-rut" placeholder="RUT * (12.345.678-9)" class="form-control">
-        </div>
-        <div class="col-12">
-          <input type="text" id="inp-nombre" placeholder="Nombre (opcional)" class="form-control">
-        </div>
+      <div class="lbl" style="margin-bottom:10px"><i class="fas fa-user mr-2 text-slate-400"></i>3. Tus datos (para la copia)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <input type="email" id="inp-email"  placeholder="Email *"             class="input-clean">
+        <input type="text"  id="inp-rut"    placeholder="RUT * (12.345.678-9)" class="input-clean">
+        <input type="text"  id="inp-nombre" placeholder="Nombre (opcional)"    class="input-clean" style="grid-column:span 2">
       </div>
-
-      <button class="btn-gq w-100" id="btn-submit" onclick="submitOrder()" style="padding:12px">
-        <i class="fas fa-paper-plane me-2"></i>Confirmar Cotización
+      <button class="btn-pri" id="btn-submit" onclick="submitOrder()" style="width:100%;justify-content:center;padding:13px">
+        <i class="fas fa-paper-plane"></i>Confirmar Cotización
       </button>
-      <p class="text-center mt-2" style="font-size:11px;color:var(--gq-text3)">Sin compromiso de venta. Recibirás copia por email.</p>
+      <p style="text-align:center;margin-top:8px;font-size:11px;color:#94a3b8">Sin compromiso de venta. Recibirás copia por email.</p>
     </div>
   </div><!-- /results -->
 </div>
@@ -292,19 +248,19 @@ body{background:var(--gq-bg);color:var(--gq-text);font-family:'Inter',system-ui,
 
 <!-- Totals bar -->
 <div id="totals-bar" style="display:none">
-  <div style="max-width:860px;margin:0 auto;padding:10px 16px" class="d-flex align-items-center gap-3 flex-wrap">
-    <div><span class="lbl">Seleccionadas: </span><strong class="text-gold ms-1" id="bar-count">0</strong></div>
-    <div class="ms-auto d-flex align-items-center gap-4">
-      <div class="text-center">
-        <div class="fw-black text-qp lh-1" style="font-size:1.05rem" id="bar-qp">$0</div>
+  <div style="max-width:820px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <div><span class="lbl">Seleccionadas: </span><strong style="color:#0f172a;margin-left:4px" id="bar-count">0</strong></div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:20px">
+      <div style="text-align:center">
+        <div style="font-weight:900;font-size:1.05rem;color:#7c3aed;line-height:1" id="bar-qp">$0</div>
         <div class="lbl">💎 QP</div>
       </div>
-      <div id="bar-cash-wrap" class="text-center">
-        <div class="fw-black text-cash lh-1" style="font-size:1.05rem" id="bar-cash">$0</div>
+      <div style="text-align:center" id="bar-cash-wrap">
+        <div style="font-weight:900;font-size:1.05rem;color:#16a34a;line-height:1" id="bar-cash">$0</div>
         <div class="lbl">💵 Cash</div>
       </div>
-      <button class="btn-gq" onclick="document.getElementById('payment-card').scrollIntoView({behavior:'smooth'})">
-        Cotizar <i class="fas fa-arrow-right ms-2"></i>
+      <button class="btn-pri" onclick="document.getElementById('payment-card').scrollIntoView({behavior:'smooth'})">
+        Cotizar <i class="fas fa-arrow-right"></i>
       </button>
     </div>
   </div>
@@ -316,7 +272,6 @@ const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
 
 let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
 
-// ── Init ──────────────────────────────────────────────────────────
 (async()=>{
   try{
     const r=await fetch(`${API}/api/public/buylist_status`);
@@ -328,35 +283,37 @@ let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
       document.getElementById('app-section').style.display='';
     }
     if(!cashEnabled){
-      ['sum-cash-col','pay-cash-col','bar-cash-wrap'].forEach(id=>{
+      ['sum-cash-col','pay-cash-col','bar-cash-wrap','cash-col-hd'].forEach(id=>{
         const el=document.getElementById(id);
         if(el) el.style.display='none';
+      });
+      const pc=document.getElementById('pay-cash');
+      if(pc) pc.style.display='none';
+      // Reducir grid a 3 columnas sin cash
+      document.querySelectorAll('.tbl-head,.tbl-row').forEach(el=>{
+        el.style.gridTemplateColumns='28px 1fr 96px 106px';
       });
     }
   }catch(e){ document.getElementById('app-section').style.display=''; }
 })();
 
-// ── Drag & Drop ───────────────────────────────────────────────────
 const dz=document.getElementById('drop-zone');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over')});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0])});
 
 function setFile(f){
-  csvFile=f;
-  dz.classList.add('has-file');
+  csvFile=f; dz.classList.add('has-file');
   document.getElementById('drop-text').textContent=f.name;
-  document.getElementById('upload-actions').classList.remove('d-none');
   document.getElementById('upload-actions').style.display='flex';
 }
 function resetFile(){
   csvFile=null; dz.classList.remove('has-file');
   document.getElementById('drop-text').textContent='Arrastra tu CSV o haz clic para seleccionar';
-  document.getElementById('upload-actions').classList.add('d-none');
+  document.getElementById('upload-actions').style.display='none';
   document.getElementById('csv-inp').value='';
 }
 
-// ── Analyze ───────────────────────────────────────────────────────
 async function analyze(){
   if(!csvFile) return;
   show('upload-card',false); show('loading-state',true); show('results-section',false);
@@ -372,7 +329,6 @@ async function analyze(){
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────
 function statusOf(c){
   const s=c.buying_status;
   if(s==='muy_alta'||s==='compramos') return 'buying';
@@ -382,8 +338,7 @@ function statusOf(c){
 }
 
 function renderResults(){
-  show('loading-state',false); show('results-section',true);
-  show('totals-bar',true);
+  show('loading-state',false); show('results-section',true); show('totals-bar',true);
   const list=document.getElementById('cards-list');
   list.innerHTML='';
   let nBuying=0, nFull=0;
@@ -393,64 +348,71 @@ function renderResults(){
     const canBuy=st==='buying'||st==='partial';
     if(canBuy) nBuying++;
     if(st==='full') nFull++;
+    const maxQty=c.qty_comprar??(canBuy?c.qty:0);
 
-    const maxQty = c.qty_comprar ?? (canBuy ? c.qty : 0);
     const cond={near_mint:'NM',light_played:'LP',moderately_played:'MP',heavily_played:'HP',damaged:'DMG'}[c.condition]||'';
-    const condColor={near_mint:'#34d399',light_played:'#a3e635',moderately_played:'#fbbf24',heavily_played:'#f87171',damaged:'#ef4444'}[c.condition]||'#94a3b8';
+    const condColor={near_mint:'#16a34a',light_played:'#65a30d',moderately_played:'#d97706',heavily_played:'#dc2626',damaged:'#9f1239'}[c.condition]||'#94a3b8';
     const isFoil=c.foil&&c.foil!=='normal';
 
     const badgeMap={
-      buying:`<span class="gq-badge gb-buying"><i class="fas fa-circle-check"></i> Compramos</span>`,
-      partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt"></i> Parcial: ${maxQty} de ${c.qty}</span>`,
-      full:`<span class="gq-badge gb-full"><i class="fas fa-ban"></i> Stock completo</span>`,
+      buying:`<span class="gq-badge gb-buying"><i class="fas fa-circle-check" style="font-size:9px"></i> Compramos</span>`,
+      partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt" style="font-size:9px"></i> Parcial: ${maxQty} de ${c.qty}</span>`,
+      full:`<span class="gq-badge gb-full"><i class="fas fa-ban" style="font-size:9px"></i> Stock completo</span>`,
       unlisted:`<span class="gq-badge gb-unlisted">— Sin lista</span>`,
     };
-    const maBadge=c.buying_status==='muy_alta'?`<span class="gq-badge gb-muyalta ms-1"><i class="fas fa-fire"></i> Alta demanda</span>`:'';
-
+    const maBadge=c.buying_status==='muy_alta'?`<span class="gq-badge gb-muyalta" style="margin-left:4px"><i class="fas fa-fire" style="font-size:9px"></i> Alta demanda</span>`:'';
     const cupoFill=c.max_stock?Math.min(100,Math.round(((c.stock_actual||0)/c.max_stock)*100)):0;
 
     const div=document.createElement('div');
-    div.className=`card-row d-flex align-items-start gap-3 ${st==='full'?'row-full':st==='unlisted'?'row-unlisted':''}`;
+    div.className=`tbl-row card-row ${st==='full'?'row-full':st==='unlisted'?'row-unlisted':''}`;
     div.dataset.status=st; div.id=`row-${idx}`;
-    div.innerHTML=`
-      <input type="checkbox" class="gq-check mt-1 cc" data-idx="${idx}"
-        ${canBuy?'checked':''} ${canBuy?'':'disabled'}
-        onchange="onChk(${idx})">
-      <div style="flex:1;min-width:0">
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
-          <span class="fw-bold" style="font-size:13.5px">${esc(c.name)}</span>
-          ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-          ${c.is_estaca?`<span class="gq-badge gb-estaca">✦ ×${c.stake_mult}</span>`:''}
-          <span style="font-size:11px;font-weight:700;color:${condColor}">${cond}</span>
-        </div>
-        <div class="d-flex flex-wrap gap-1 align-items-center">
-          ${badgeMap[st]||''}${maBadge}
-        </div>
-        ${canBuy&&c.max_stock?`<div style="max-width:160px;margin-top:6px">
-          <div class="d-flex justify-content-between" style="font-size:9px;color:var(--gq-text3)">
-            <span>Stock: ${c.stock_actual??'?'} / ${c.max_stock}</span>
-            <span>Cupo: ${maxQty}</span>
-          </div>
-          <div class="cupo-bar"><div class="cupo-fill" style="width:${cupoFill}%"></div></div>
-        </div>`:''}
+
+    const col1=`<div style="display:flex;align-items:flex-start;padding-top:2px">
+      <input type="checkbox" class="gq-check cc" data-idx="${idx}"
+        ${canBuy?'checked':''} ${canBuy?'':'disabled'} onchange="onChk(${idx})">
+    </div>`;
+
+    const col2=`<div style="min-width:0">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-weight:700;font-size:13.5px;color:#0f172a">${esc(c.name)}</span>
+        ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">✦ ×${c.stake_mult}</span>`:''}
+        ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
-      <div class="text-end flex-shrink-0" style="min-width:140px">
-        <div class="fw-black text-qp lh-1 mb-1" style="font-size:.95rem" id="pqp-${idx}">
-          ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${badgeMap[st]||''}${maBadge}</div>
+      ${canBuy&&c.max_stock?`<div style="max-width:140px;margin-top:5px">
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#94a3b8">
+          <span>${c.stock_actual??'?'} / ${c.max_stock}</span><span>cupo: ${maxQty}</span>
         </div>
-        ${cashEnabled?`<div class="fw-bold text-cash" style="font-size:11px" id="pcs-${idx}">
-          ${canBuy?fmtCLP(c.price_cash*maxQty):''}
-        </div>`:''}
-        <div style="font-size:10px;color:var(--gq-text3)">Ref. ${fmtUSD(c.price_usd_raw)}</div>
-        ${canBuy?`
-        <div class="d-flex align-items-center justify-content-end gap-1 mt-2">
-          <button class="btn-gq-out" style="padding:2px 7px;font-size:12px" onclick="changeQty(${idx},-1)">−</button>
-          <input type="number" class="gq-qty" id="qty-${idx}" value="${maxQty}" min="1" max="${maxQty}"
-            oninput="onQtyChange(${idx})">
-          <button class="btn-gq-out" style="padding:2px 7px;font-size:12px" onclick="changeQty(${idx},1)">+</button>
-        </div>
-        <div style="font-size:9px;color:var(--gq-text3);margin-top:2px">máx ${maxQty}</div>`:''}
-      </div>`;
+        <div class="cupo-bar"><div class="cupo-fill" style="width:${cupoFill}%"></div></div>
+      </div>`:''}
+    </div>`;
+
+    const col3=`<div style="text-align:right">
+      <div style="font-weight:900;font-size:.95rem;color:#7c3aed;line-height:1" id="pqp-${idx}">
+        ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
+      </div>
+      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_credito)}</div>`:''}
+    </div>`;
+
+    const col4=cashEnabled?`<div style="text-align:right">
+      <div style="font-weight:700;font-size:.9rem;color:#16a34a;line-height:1" id="pcs-${idx}">
+        ${canBuy?fmtCLP(c.price_cash*maxQty):''}
+      </div>
+      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_cash)}</div>`:''}
+    </div>`:`<div></div>`;
+
+    const col5=canBuy?`<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div class="qty-wrap">
+        <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
+        <input type="number" class="qty-inp" id="qty-${idx}" value="${maxQty}" min="1" max="${maxQty}"
+          oninput="onQtyChange(${idx})">
+        <button class="qty-btn" onclick="changeQty(${idx},1)">+</button>
+      </div>
+      <div style="font-size:9px;color:#94a3b8">máx ${maxQty}</div>
+    </div>`:`<div></div>`;
+
+    div.innerHTML=col1+col2+col3+col4+col5;
     list.appendChild(div);
   });
 
@@ -461,17 +423,14 @@ function renderResults(){
   setText('sum-cash',fmtCLP(t.cash));
   setText('pay-qp-tot',fmtCLP(t.qp));
   setText('pay-cash-tot',fmtCLP(t.cash));
-
   if(nFull>0){
-    document.getElementById('full-alert').classList.remove('d-none');
+    show('full-alert',true);
     setText('full-alert-txt',`${nFull} carta${nFull>1?'s':''} en gris — ya tenemos stock completo para esas. Solo se cotizarán las seleccionadas.`);
   }
   updateBar();
 }
 
-// ── Interactions ──────────────────────────────────────────────────
 function onChk(idx){updateBar()}
-
 function changeQty(idx,d){
   const inp=document.getElementById(`qty-${idx}`);
   if(!inp) return;
@@ -485,14 +444,13 @@ function onQtyChange(idx){
   if(!inp) return;
   const mx=parseInt(inp.max)||1;
   let v=parseInt(inp.value)||1;
-  if(v<1) v=1; if(v>mx) v=mx; inp.value=v;
+  if(v<1)v=1; if(v>mx)v=mx; inp.value=v;
   const el=document.getElementById(`pqp-${idx}`);
   const ec=document.getElementById(`pcs-${idx}`);
   if(el) el.textContent=fmtCLP(c.price_credito*v);
   if(ec) ec.textContent=fmtCLP(c.price_cash*v);
   updateBar();
 }
-
 function recalcTotals(){
   let qp=0,cash=0,count=0;
   document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
@@ -503,21 +461,20 @@ function recalcTotals(){
   });
   return {qp,cash,count};
 }
-
 function updateBar(){
   const t=recalcTotals();
   setText('bar-count',`${t.count} carta${t.count!==1?'s':''}`);
-  setText('bar-qp',fmtCLP(t.qp)); setText('bar-cash',fmtCLP(t.cash));
-  setText('pay-qp-tot',fmtCLP(t.qp)); setText('pay-cash-tot',fmtCLP(t.cash));
+  setText('bar-qp',fmtCLP(t.qp));
+  setText('bar-cash',fmtCLP(t.cash));
+  setText('pay-qp-tot',fmtCLP(t.qp));
+  setText('pay-cash-tot',fmtCLP(t.cash));
   document.getElementById('btn-submit').disabled=(!t.count||!payMode);
 }
-
 function setFilter(f,btn){
   document.querySelectorAll('.gq-fb').forEach(b=>b.classList.remove('active'));
   if(btn) btn.classList.add('active');
   document.querySelectorAll('.card-row').forEach(row=>{
-    const st=row.dataset.status;
-    row.classList.toggle('row-hidden',f!=='all'&&st!==f);
+    row.classList.toggle('row-hidden',f!=='all'&&row.dataset.status!==f);
   });
 }
 function selectAll(v){
@@ -532,15 +489,12 @@ function selectPay(m){
   document.getElementById('pay-cash').className='pay-opt'+(m==='cash'?' sel-cash':'');
   updateBar();
 }
-
-// ── Submit ────────────────────────────────────────────────────────
 async function submitOrder(){
   const email=document.getElementById('inp-email').value.trim();
   const rut=document.getElementById('inp-rut').value.trim();
   if(!email||!email.includes('@')) return swal('Email requerido','Ingresa un email válido','warning');
   if(!rut) return swal('RUT requerido','Ingresa tu RUT','warning');
   if(!payMode) return swal('Selecciona forma de pago','','warning');
-
   const items=[];
   document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
     const idx=parseInt(cb.dataset.idx);
@@ -548,27 +502,23 @@ async function submitOrder(){
     items.push({...allCards[idx],qty,qty_selected:qty});
   });
   if(!items.length) return swal('Sin cartas seleccionadas','','warning');
-
   const totalQP=items.reduce((s,i)=>s+i.price_credito*i.qty,0);
   const totalCash=items.reduce((s,i)=>s+i.price_cash*i.qty,0);
-
   const {isConfirmed}=await Swal.fire({
     title:'¿Confirmar cotización?',
-    html:`<div style="font-size:13px;color:#94a3b8;line-height:1.9">
-      <strong style="color:#f1f5f9">${items.length} cartas</strong> · 
-      <strong style="color:#f1f5f9">${payMode==='credito'?'💎 QP':'💵 Cash'}</strong><br>
-      Total: <strong style="color:${payMode==='credito'?'#a78bfa':'#34d399'};font-size:1.1rem">
+    html:`<div style="font-size:13px;color:#475569;line-height:1.9">
+      <strong style="color:#0f172a">${items.length} cartas</strong> · 
+      <strong style="color:#0f172a">${payMode==='credito'?'💎 QP':'💵 Cash'}</strong><br>
+      Total: <strong style="color:${payMode==='credito'?'#7c3aed':'#16a34a'};font-size:1.1rem">
         ${fmtCLP(payMode==='credito'?totalQP:totalCash)}</strong><br>
-      <span style="color:#64748b;font-size:11px">Copia → ${email}</span>
+      <span style="color:#94a3b8;font-size:11px">Copia → ${email}</span>
     </div>`,
     confirmButtonText:'Confirmar',showCancelButton:true,cancelButtonText:'Revisar',
-    confirmButtonColor:'#f59e0b',background:'#111118',color:'#f1f5f9',
+    confirmButtonColor:'#0f172a',
   });
   if(!isConfirmed) return;
-
   const btn=document.getElementById('btn-submit');
-  btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin me-2"></i>Enviando…';
-
+  btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin" style="margin-right:8px"></i>Enviando…';
   try{
     const r=await fetch(`${API}/api/public/commit_buylist`,{
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -578,22 +528,21 @@ async function submitOrder(){
     const d=await r.json();
     if(!r.ok) throw new Error(d.detail||'Error');
     Swal.fire({icon:'success',title:'¡Cotización enviada! 🎉',
-      html:`<div style="font-size:13px;color:#94a3b8">Orden <strong style="color:#f1f5f9">#${d.order_id}</strong> — copia enviada a <strong style="color:#f1f5f9">${email}</strong></div>`,
-      confirmButtonText:'Entendido',confirmButtonColor:'#10b981',background:'#111118',color:'#f1f5f9',
+      html:`<div style="font-size:13px;color:#475569">Orden <strong>#${d.order_id}</strong> — copia enviada a <strong>${email}</strong></div>`,
+      confirmButtonText:'Entendido',confirmButtonColor:'#0f172a',
     }).then(()=>location.reload());
   }catch(e){
-    btn.disabled=false; btn.innerHTML='<i class="fas fa-paper-plane me-2"></i>Confirmar Cotización';
+    btn.disabled=false;
+    btn.innerHTML='<i class="fas fa-paper-plane" style="margin-right:8px"></i>Confirmar Cotización';
     swal('Error',e.message,'error');
   }
 }
-
-// ── Utils ─────────────────────────────────────────────────────────
 function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
 function fmtUSD(n){return '$'+(n||0).toFixed(2)}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function show(id,v){const el=document.getElementById(id);if(el)el.style.display=v?'':'none'}
 function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v}
-function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#f59e0b',background:'#111118',color:'#f1f5f9'})}
+function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#0f172a'})}
 </script>
 </body>
 </html>

@@ -14,8 +14,13 @@ class BalanceAdjustment(BaseModel):
     motive:    Optional[str] = "Manual Admin Adjustment"
 
 class CanjeRequest(BaseModel):
-    email: EmailStr
-    monto: int = Field(gt=0)
+    email:      EmailStr
+    monto:      int = Field(gt=0, description="QP a canjear (1 QP = 1 CLP)")
+    cart_total: int = Field(gt=0, description=(
+        "Total del carrito en CLP al momento del canje. "
+        "El cupón se emite por min(monto, cart_total) para evitar pérdida "
+        "de QP cuando el carrito vale menos que el monto solicitado."
+    ))
 
 class TokenResponse(BaseModel):
     access_token: str

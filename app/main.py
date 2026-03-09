@@ -1,12 +1,17 @@
 """
-main.py — GameQuest API v4.0
+main.py — GameQuest API v5.4
 Cambios v4: Card Kingdom Buylist via Manabox como precio de referencia, async email,
             JS stock cache, rate limiting, budget cap, name normalization,
             email en TODAS las buylists.
 """
 import re
 import io
+import json
+import hmac
 import time
+import secrets
+import hashlib
+import base64
 import asyncio
 import aiohttp
 import logging
@@ -32,12 +37,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # H-04: ON CONFLICT DO NOTHING
 
 from .database import get_db, engine, Base, SessionLocal
 from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse, BuylistCommitRequest
 from .config import settings
 from . import email_service
+from .models import Gampoint, BuylistOrder, StapleCard, CardCatalog, CashbackRecord
 
 logger = logging.getLogger(__name__)
 
@@ -85,18 +92,52 @@ async def _background_cache_refresh():
             logger.warning(f"[RATE] Error en limpieza _rate_store: {e}")
 
 
+async def _background_ck_sync():
+    """
+    Job diario: sincroniza la tabla ck_prices desde la pricelist de CardKingdom.
+
+    Comportamiento:
+    - Corre una vez al arrancar (carga inicial, especialmente útil en cold start).
+    - Luego espera 24 horas y repite indefinidamente.
+    - Si el sync falla (red, BD) → log warning, no mata la app, reintenta al día siguiente.
+    - _ck_sync_lock en _sync_ck_prices() garantiza que dos arranques simultáneos
+      (scaling o restart) no ejecuten dos upserts al mismo tiempo.
+    """
+    # Carga inicial — no bloquea el arranque (es una task independiente)
+    try:
+        logger.info("[CK_SYNC] Carga inicial al arrancar...")
+        await _sync_ck_prices()
+    except Exception as exc:
+        logger.warning(f"[CK_SYNC] Error en carga inicial: {exc}")
+
+    # Loop diario
+    while True:
+        await asyncio.sleep(86_400)   # 24 horas
+        try:
+            logger.info("[CK_SYNC] Sync diario iniciado...")
+            await _sync_ck_prices()
+        except Exception as exc:
+            logger.warning(f"[CK_SYNC] Error en sync diario: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
     """Gestiona el ciclo de vida de la app: arranca el prefetch al iniciar."""
+    # FIX CRÍTICO: validar credenciales antes de aceptar cualquier request.
+
+    # Bloquea el arranque en producción si alguna credencial usa el default inseguro.
+    settings.validate_production_secrets()
     _init_cond_mult()   # poblar dict de condición una vez (settings ya cargadas)
-    task = asyncio.create_task(_background_cache_refresh())
-    logger.info("[STARTUP] Background cache refresh iniciado.")
+    task_js = asyncio.create_task(_background_cache_refresh())
+    task_ck = asyncio.create_task(_background_ck_sync())
+    logger.info("[STARTUP] Background cache refresh y CK sync iniciados.")
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for task in (task_js, task_ck):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="GameCoins API", version="5.2", lifespan=lifespan,
@@ -142,6 +183,12 @@ _js_stock_cache: dict = {}
 _js_stock_cache_ts: float = 0.0         # time.monotonic() — reloj monotónico consistente
 JS_STOCK_TTL = 600
 
+# ── CardKingdom pricelist — fuente de verdad para detección De Nicho ──────────
+# Los precios se persisten en la tabla ck_prices (PostgreSQL).
+# Un job diario hace el upsert; el hot path lee solo las cartas del CSV.
+CK_PRICELIST_URL = "https://api.cardkingdom.com/api/pricelist"
+_ck_sync_lock    = asyncio.Lock()   # evita ejecuciones simultáneas del job
+
 # ── Índice secundario JS: product_id → canonical name ─────────────────────────
 # Permite lookup por SKU directo cuando hay catálogo en BD
 _js_by_id: dict[int, dict] = {}   # {product_id: {"stock": N, "price": P, "canonical": "lightning bolt"}}
@@ -154,6 +201,24 @@ _scryfall_map: dict[str, str] = {}  # {"uuid-...", "lightning bolt"}
 _catalog_cache: dict   = {}         # {name_normalized: CardCatalog}
 _catalog_cache_ts: float = 0.0
 CATALOG_CACHE_TTL = 300   # 5 min
+
+# ── Globals de progreso del enriquecimiento Scryfall ──────────────────────────
+# Deben estar a nivel de módulo para que start_enrich_scryfall pueda leerlos
+# antes de que _do_bulk_enrich() haya corrido por primera vez.
+_enrich_running:   bool  = False
+_enrich_total:     int   = 0
+_enrich_done:      int   = 0
+_enrich_errors:    int   = 0
+_enrich_skipped:   int   = 0
+_enrich_last_card: str   = ""
+_enrich_task:      object = None
+# FIX A4: asyncio.Lock para prevenir TOCTOU en start_enrich_scryfall.
+# Sin lock, dos requests simultáneos pueden ambos pasar el check `if _enrich_running`
+# antes de que cualquiera haya seteado _enrich_running=True, lanzando dos tareas
+# que escriben en BD concurrentemente con conflictos de commit.
+# asyncio.Lock() a nivel de módulo es seguro: uvicorn corre en un solo event loop
+# por worker (1 worker en free tier), igual que _js_fetch_lock en L470.
+_enrich_lock: asyncio.Lock = asyncio.Lock()
 
 def _get_catalog_map(db) -> dict:
     """
@@ -236,18 +301,74 @@ def _invalidate_staple_cache() -> None:
     global _staple_map_cache_ts
     _staple_map_cache_ts = 0.0
 
-# Sin límite de presupuesto diario — todas las órdenes se aceptan.
+# ── Budget diario de Cash (CLP) — reinicio automático a medianoche ────────────
+# dict {YYYY-MM-DD: CLP total gastado ese día en compras cash públicas}.
+# Solo lo usa commit_buylist (público). El admin no tiene límite.
+# In-memory: se reinicia al reiniciar el servidor (aceptable — free tier duerme).
+# Thread-safety: asyncio single-threaded (1 worker) → no hay race condition.
+import datetime as _dt
+_daily_cash_spent: dict[str, float] = {}
+
+def _check_and_register_cash_budget(amount_clp: float) -> None:
+    """
+    Verifica si hay presupuesto disponible y registra el gasto si lo hay.
+    Lanza HTTPException 503 si el presupuesto diario de cash está agotado.
+    Diseñada para llamarse ANTES de persistir la orden en BD.
+
+    - Si BUYLIST_DAILY_BUDGET_CASH == 0.0 → sin límite, retorna inmediatamente.
+    - El día se determina por datetime.date.today() del servidor (UTC en Render).
+    - El registro es optimista: se suma al bucket ANTES del db.commit().
+      Si el commit falla, el presupuesto queda sobrecontabilizado levemente
+      (conservador: prefiere rechazar una orden válida a aceptar una inválida).
+    """
+    limit = settings.BUYLIST_DAILY_BUDGET_CASH
+    if limit <= 0:
+        return   # sin límite configurado
+
+    today     = str(_dt.date.today())
+    spent     = _daily_cash_spent.get(today, 0.0)
+    new_total = spent + amount_clp
+
+    if new_total > limit:
+        remaining = max(0.0, limit - spent)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Presupuesto diario de compras en cash alcanzado "
+                f"(${limit:,.0f} CLP/día). "
+                f"Presupuesto restante hoy: ${remaining:,.0f} CLP. "
+                f"Intenta mañana o contacta a la tienda."
+            )
+        )
+    _daily_cash_spent[today] = new_total
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 security = HTTPBearer()
 
 def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if credentials.credentials != settings.STORE_TOKEN:
+    # FIX A3: secrets.compare_digest usa comparación en tiempo constante O(n),
+    # previniendo timing side-channel attacks donde un atacante puede determinar
+    # el token carácter a carácter midiendo el tiempo de respuesta.
+    # El operador != es O(k) con cortocircuito en el primer carácter diferente.
+    if not secrets.compare_digest(credentials.credentials, settings.STORE_TOKEN):
         raise HTTPException(status_code=401, detail="Token inválido")
     return True
 
 def verify_store_token(x_store_token: Optional[str] = Header(default=None)):
-    if x_store_token != settings.STORE_TOKEN:
+    # FIX A3: Mismo patrón — compare_digest requiere que ambos operandos sean str
+    # o ambos bytes.  Si x_store_token es None, la comparación contra el token real
+    # siempre falla (length differs) sin exponer información de timing.
+    if not secrets.compare_digest(x_store_token or "", settings.STORE_TOKEN):
+        raise HTTPException(status_code=401, detail="Token inválido")
+    return True
+
+def verify_public_token(x_store_token: Optional[str] = Header(default=None)):
+    """
+    C-02 FIX: Token público — usado por account.liquid (browser del cliente).
+    Valida contra PUBLIC_STORE_TOKEN, que es DISTINTO a STORE_TOKEN.
+    Nunca da acceso a endpoints /api/admin/*.
+    """
+    if not secrets.compare_digest(x_store_token or "", settings.PUBLIC_STORE_TOKEN):
         raise HTTPException(status_code=401, detail="Token inválido")
     return True
 
@@ -334,12 +455,27 @@ def _base_name(name: str) -> str:
 
 # ── Condición ─────────────────────────────────────────────────────────────────
 
-# Dict de condición como constante module-level — se construye UNA vez al cargar el módulo.
-# Antes: dict literal creado en cada llamada (500 cartas = 500 dicts creados/destruidos).
-_COND_MULT: dict[str, float] = {}   # poblado en _init_cond_mult() tras cargar settings
+# FIX M-07: _COND_MULT inicializado a nivel de módulo con os.getenv() directamente.
+# Antes: dict vacío {} poblado en lifespan()._init_cond_mult(). Si lifespan fallaba
+# antes de _init_cond_mult() (p.ej. por validate_production_secrets()), todas las
+# condiciones retornaban COND_NM hasta el próximo restart — bug silencioso.
+# Ahora: los valores se leen al importar el módulo, idénticos a los de settings.
+# _init_cond_mult() se mantiene como no-op para no romper la llamada en lifespan().
+import os as _os
+_COND_MULT: dict[str, float] = {
+    "near_mint":         float(_os.getenv("COND_NM",  "1.00")),
+    "lightly_played":    float(_os.getenv("COND_LP",  "0.85")),
+    "moderately_played": float(_os.getenv("COND_MP",  "0.70")),
+    "heavily_played":    float(_os.getenv("COND_HP",  "0.50")),
+    "damaged":           float(_os.getenv("COND_DMG", "0.25")),
+}
 
 def _init_cond_mult() -> None:
-    """Pobla _COND_MULT con los valores de settings. Llamado una vez al arrancar."""
+    """
+    Refresca _COND_MULT desde settings (por si cambiaron env vars en caliente).
+    Llamado en lifespan() para mantener compatibilidad con arranques normales.
+    El dict ya está poblado a nivel de módulo — esta función es idempotente.
+    """
     _COND_MULT.update({
         "near_mint":         settings.COND_NM,
         "lightly_played":    settings.COND_LP,
@@ -352,7 +488,7 @@ def _cond_mult(cond_str: str) -> float:
     return _COND_MULT.get((cond_str or "near_mint").lower(), settings.COND_NM)
 
 
-# ── Detección de versión especial (Estaca) ────────────────────────────────────
+# ── Detección de versión especial (De Nicho) ─────────────────────────────────
 # SOLO usa las columnas Foil y Version del CSV — NUNCA el nombre de la carta.
 # Motivo: keywords como "etched", "showcase", "full art" son también palabras
 # en nombres reales ("Etched Champion", "Showcase, Mirror of Mayhem").
@@ -381,6 +517,139 @@ def _is_estaca(foil: str, name: str, version: str = "") -> bool:
 
 # ── JS stock con cache ────────────────────────────────────────────────────────
 
+# ── CardKingdom: sync diario y lookup por nombres del CSV ─────────────────────
+
+async def _sync_ck_prices() -> dict:
+    """
+    Descarga la pricelist pública de CardKingdom y hace upsert masivo en
+    la tabla ck_prices de PostgreSQL.
+
+    REGLA: solo versiones no-foil (is_foil=False/0).
+           Por cada nombre canónico se guarda el precio MÁS BAJO encontrado
+           (cualquier edición, cualquier variante, cualquier condición NM).
+
+    UPSERT: INSERT ... ON CONFLICT (name_canonical) DO UPDATE
+            → idempotente; re-ejecutar no duplica filas.
+
+    Retorna {"upserted": N, "elapsed": s} para logging.
+    Ante cualquier error de red o de BD → log + retorna {"error": msg}.
+    El job diario captura el error sin detener la app.
+    """
+    async with _ck_sync_lock:
+        t0 = time.monotonic()
+        logger.info("[CK_SYNC] Iniciando descarga de pricelist CardKingdom...")
+
+        # ── 1. Fetch ─────────────────────────────────────────────────────────
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    CK_PRICELIST_URL,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                    headers={"Accept": "application/json"},
+                ) as resp:
+                    if resp.status != 200:
+                        msg = f"HTTP {resp.status}"
+                        logger.warning(f"[CK_SYNC] {msg}")
+                        return {"error": msg}
+                    payload = await resp.json(content_type=None)
+        except Exception as exc:
+            logger.warning(f"[CK_SYNC] Fetch error: {exc}")
+            return {"error": str(exc)}
+
+        # ── 2. Reducir a min_buy_price por nombre canónico ───────────────────
+        # {canonical → (name_raw, min_price)}
+        prices: dict[str, tuple[str, float]] = {}
+        for entry in payload.get("data", []):
+            if entry.get("is_foil"):
+                continue                          # excluir foil
+            name_raw = (entry.get("name") or "").strip()
+            if not name_raw:
+                continue
+            try:
+                buy = float(entry.get("buy_price") or entry.get("buylist_price") or 0)
+            except (ValueError, TypeError):
+                continue
+            if buy <= 0:
+                continue
+            cn = _canonical(name_raw)
+            if cn not in prices or buy < prices[cn][1]:
+                prices[cn] = (name_raw, buy)
+
+        if not prices:
+            logger.warning("[CK_SYNC] Pricelist vacía o sin entradas válidas")
+            return {"error": "empty_pricelist"}
+
+        # ── 3. Upsert masivo en PostgreSQL ───────────────────────────────────
+        # asyncio.to_thread: la sesión SQLAlchemy es síncrona; el upsert puede
+        # tardar varios segundos con >50k filas — no bloquear el event loop.
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from .models import CKPrice
+
+        def _do_upsert():
+            with SessionLocal() as db:
+                rows = [
+                    {"name_canonical": cn, "name_raw": name_raw, "min_buy_price": price}
+                    for cn, (name_raw, price) in prices.items()
+                ]
+                # Batches de 1000 para no saturar el pool en free tier
+                BATCH = 1000
+                total = 0
+                for i in range(0, len(rows), BATCH):
+                    stmt = pg_insert(CKPrice).values(rows[i:i + BATCH])
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["name_canonical"],
+                        set_={
+                            "name_raw":      stmt.excluded.name_raw,
+                            "min_buy_price": stmt.excluded.min_buy_price,
+                            "updated_at":    func.now(),
+                        },
+                    )
+                    db.execute(stmt)
+                    total += len(rows[i:i + BATCH])
+                db.commit()
+                return total
+
+        try:
+            upserted = await asyncio.to_thread(_do_upsert)
+        except Exception as exc:
+            logger.error(f"[CK_SYNC] Upsert error: {exc}")
+            return {"error": str(exc)}
+
+        elapsed = round(time.monotonic() - t0, 1)
+        logger.info(f"[CK_SYNC] ✅ {upserted:,} cartas upserted en {elapsed}s")
+        return {"upserted": upserted, "elapsed": elapsed}
+
+
+def _get_ck_prices_for_names(names: list[str]) -> dict[str, float]:
+    """
+    Consulta la tabla ck_prices SOLO para los nombres canónicos del CSV actual.
+
+    Un SELECT ... WHERE name_canonical IN (...) es O(k log n) con el índice PK,
+    donde k = cartas del CSV (≤500) y n = filas totales (~50k).
+    Mucho más eficiente que cargar toda la tabla en RAM.
+
+    Retorna {name_canonical → min_buy_price} como float.
+    Si la tabla está vacía o la BD no responde → retorna {} (fallback por tipo).
+    """
+    if not names:
+        return {}
+    canonicals = [_canonical(n) for n in names if n]
+    if not canonicals:
+        return {}
+    try:
+        from .models import CKPrice
+        with SessionLocal() as db:
+            rows = (
+                db.query(CKPrice.name_canonical, CKPrice.min_buy_price)
+                .filter(CKPrice.name_canonical.in_(canonicals))
+                .all()
+            )
+        return {r.name_canonical: float(r.min_buy_price) for r in rows}
+    except Exception as exc:
+        logger.warning(f"[CK_LOOKUP] Error al leer ck_prices: {exc} — fallback por tipo")
+        return {}
+
+
 # ── Helpers compartidos por analyze_buylist, stock_check y stock_lookup ───────
 
 def _build_staple_map(staple_rows: list) -> dict:
@@ -408,26 +677,60 @@ def _staple_lookup(staple_map: dict, name: str):
 
 
 def _compute_card_price(
-    price_usd: float,
-    foil_raw:  str,
-    version:   str,
-    cond_raw:  str,
+    price_usd:      float,
+    foil_raw:       str,
+    version:        str,
+    cond_raw:       str,
     base_min_price: dict,
-    card_name: str,
-) -> tuple[float, float, bool]:
+    card_name:      str,
+    ck_nm_prices:   dict | None = None,
+) -> tuple[float, float, bool, str]:
     """
-    Calcula precio efectivo USD después de aplicar estaca y condición.
-    Devuelve (precio_efectivo_usd, precio_ajustado_usd, is_estaca).
+    Calcula precio efectivo USD y detecta si la carta es De Nicho.
+
+    DETECCIÓN DE NICHO (orden de prioridad):
+      1. base_nm = base_min_price[canonical]  — versión NM del mismo CSV
+      2. base_nm = ck_nm_prices[canonical]    — pricelist CardKingdom (buy_price NM)
+      3. Fallback                             — _is_estaca() (tipo: foil/etched/keywords)
+
+    CRITERIO DE NICHO:
+      Con base_nm disponible: es De Nicho si price_usd > base_nm × STAKE_MULTIPLIER
+      Sin base_nm            : es De Nicho si _is_estaca() → True
+
+    Si es De Nicho:
+      eff_usd = base_nm × STAKE_MULTIPLIER
+      (si base_nm vino de fallback: base_nm = price_usd → eff = price × STAKE_MULTIPLIER)
+
+    Devuelve (precio_efectivo_usd, precio_ajustado_usd, is_nicho, base_origin)
+    donde base_origin es: 'csv' | 'cardkingdom' | 'fallback_tipo'
     """
-    is_estaca_card = _is_estaca(foil_raw, card_name, version)
-    if is_estaca_card:
-        bn        = _canonical(card_name)
-        ref_price = base_min_price.get(bn, price_usd)
-        eff_usd   = ref_price * settings.STAKE_MULTIPLIER
+    bn       = _canonical(card_name)
+    ck_map   = ck_nm_prices or {}
+    mult     = settings.STAKE_MULTIPLIER
+
+    # ── Origen del precio de referencia NM ───────────────────────────────────
+    if bn in base_min_price:
+        base_nm     = base_min_price[bn]
+        base_origin = "csv"
+    elif bn in ck_map:
+        base_nm     = ck_map[bn]
+        base_origin = "cardkingdom"
     else:
-        eff_usd = price_usd
+        # Sin referencia NM disponible — usar detección por tipo como fallback
+        base_nm     = None
+        base_origin = "fallback_tipo"
+
+    # ── Criterio De Nicho ─────────────────────────────────────────────────────
+    if base_nm is not None:
+        is_nicho = price_usd > base_nm * mult
+    else:
+        is_nicho = _is_estaca(foil_raw, card_name, version)
+        base_nm  = price_usd   # sin referencia → el precio propio es la base
+
+    # ── Precio efectivo ───────────────────────────────────────────────────────
+    eff_usd  = base_nm * mult if is_nicho else price_usd
     adjusted = round(eff_usd * _cond_mult(cond_raw), 4)
-    return eff_usd, adjusted, is_estaca_card
+    return eff_usd, adjusted, is_nicho, base_origin
 
 
 def _build_base_min_price(df) -> dict:
@@ -624,12 +927,49 @@ async def _fetch_js_stock_cached(force: bool = False) -> dict:
 # ── Leer CSV Manabox ──────────────────────────────────────────────────────────
 
 def _read_csv(content: bytes) -> pd.DataFrame:
+    """
+    Lee un CSV de buylist con detección automática de encoding.
+
+    FIX B-01: Manejo de excepciones granular por tipo de error.
+    Antes: (UnicodeDecodeError, Exception) enmascaraba todos los errores,
+    incluyendo ParserError reales de pandas (columnas malformadas, BOM
+    inesperado, delimitadores incorrectos) que no mejoran cambiando el encoding.
+
+    Estrategia:
+      - UnicodeDecodeError: error de encoding → probar siguiente encoding
+      - pd.errors.ParserError: CSV malformado → probar siguiente encoding (a veces
+        el parser falla con un encoding incorrecto antes del UnicodeDecodeError)
+      - Cualquier otro error: loggear y re-raise para no enmascararlo
+    """
+    last_error: Exception | None = None
     for enc in ("utf-8", "utf-8-sig", "latin-1"):
         try:
             return pd.read_csv(io.StringIO(content.decode(enc)))
-        except (UnicodeDecodeError, Exception):
+        except UnicodeDecodeError:
+            # Encoding incorrecto → probar el siguiente
+            last_error = UnicodeDecodeError.__new__(UnicodeDecodeError)
             continue
-    raise HTTPException(status_code=400, detail="No se pudo leer el CSV")
+        except pd.errors.ParserError as e:
+            # CSV malformado con este encoding → intentar con el siguiente
+            logger.debug(f"[CSV] ParserError con encoding {enc}: {e}")
+            last_error = e
+            continue
+        except pd.errors.EmptyDataError:
+            raise HTTPException(status_code=400, detail="El CSV está vacío.")
+        except Exception as e:
+            # Error inesperado no relacionado con encoding — loggear y fallar
+            logger.error(f"[CSV] Error inesperado leyendo CSV ({enc}): {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error leyendo el CSV: {type(e).__name__}: {e}"
+            )
+    # Todos los encodings fallaron
+    detail = (
+        f"No se pudo leer el CSV (encodings intentados: utf-8, utf-8-sig, latin-1). "
+        f"Verificá que el archivo sea un CSV válido exportado desde Manabox."
+    )
+    logger.warning(f"[CSV] Todos los encodings fallaron. Último error: {last_error}")
+    raise HTTPException(status_code=400, detail=detail)
 
 
 # =====================================================================
@@ -673,29 +1013,44 @@ def serve_stock_check():
 # 💰 BALANCE / CANJE
 # =====================================================================
 
-@app.get("/api/balance/{email}")
-@app.get("/api/saldo/{email}")
-@app.get("/api/public/balance/{email}")
+@app.get("/api/balance/{email}",        dependencies=[Depends(verify_public_token)])
+@app.get("/api/saldo/{email}",          dependencies=[Depends(verify_public_token)])
+@app.get("/api/public/balance/{email}", dependencies=[Depends(verify_public_token)])
 def get_balance(email: str, db: Session = Depends(get_db)):
+    """
+    H-01 FIX: protegido con verify_public_token — requiere x-store-token válido.
+    Evita que cualquier persona enumere saldos de otros usuarios (IDOR).
+
+    M-03 FIX: incluye historico_acumulado para que el cliente vea su cashback ganado.
+
+    L-01 FIX: diferencia entre "usuario no encontrado" (retorna 0, correcto)
+    y "error de BD" (propaga HTTPException 503 en vez de enmascararlo como $0).
+    """
     from .models import Gampoint
     try:
         user = db.query(Gampoint).filter(
             Gampoint.email == email.lower().strip()).first()
+        # Usuario no registrado → saldo 0 (correcto: el tema muestra $0)
+        if not user:
+            return {"saldo": 0.0, "historico_canjeado": 0.0, "historico_acumulado": 0.0}
         return {
-            "saldo":              float(user.saldo)              if user and user.saldo              else 0.0,
-            "historico_canjeado": float(user.historico_canjeado) if user and user.historico_canjeado else 0.0,
+            "saldo":               float(user.saldo               or 0),
+            "historico_canjeado":  float(user.historico_canjeado  or 0),
+            "historico_acumulado": float(user.historico_acumulado or 0),
         }
-    except Exception:
-        return {"saldo": 0.0, "historico_canjeado": 0.0}
+    except Exception as exc:
+        # Error de BD/infraestructura: loggear y retornar 503, no $0 silencioso
+        logger.error(f"[BALANCE] Error consultando saldo para {email}: {exc}")
+        raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
 
 
-@app.post("/api/canje", dependencies=[Depends(verify_store_token)])
+@app.post("/api/canje", dependencies=[Depends(verify_public_token)])  # C-02: usa PUBLIC_STORE_TOKEN
 async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     if settings.MAINTENANCE_MODE_CANJE:
         raise HTTPException(503, "El sistema de canje está en mantenimiento.")
     if req.monto < settings.MIN_CANJE:
         raise HTTPException(400, f"Monto mínimo de canje: {settings.MIN_CANJE} QP.")
-    return await VaultController.process_canje(db, req.email, req.monto)
+    return await VaultController.process_canje(db, req.email, req.monto, req.cart_total)
 
 
 # =====================================================================
@@ -704,9 +1059,15 @@ async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
 
 @app.get("/api/public/buylist_status")
 def buylist_status():
+    today  = str(_dt.date.today())
+    limit  = settings.BUYLIST_DAILY_BUDGET_CASH
+    spent  = _daily_cash_spent.get(today, 0.0)
     return {
-        "open":         settings.BUYLIST_OPEN,
-        "cash_enabled": settings.CASH_ENABLED,
+        "open":                    settings.BUYLIST_OPEN,
+        "cash_enabled":            settings.CASH_ENABLED,
+        "budget_cash_limit_clp":   limit,
+        "budget_cash_spent_clp":   round(spent, 0),
+        "budget_cash_remaining_clp": round(max(0.0, limit - spent), 0) if limit > 0 else None,
     }
 
 
@@ -773,6 +1134,12 @@ async def analyze_buylist(
         if bn and (bn not in base_min_price or pr < base_min_price[bn]):
             base_min_price[bn] = pr
 
+    # ── Precios CK para los nombres únicos del CSV ─────────────────────────
+    # Un solo SELECT IN sobre la tabla ck_prices — solo las cartas del CSV.
+    # _get_ck_prices_for_names es síncrono → asyncio.to_thread para no bloquear.
+    unique_names  = list({str(n) for n in df_nm if n})
+    ck_nm_prices  = await asyncio.to_thread(_get_ck_prices_for_names, unique_names)
+
     # ── Pase 2: análisis principal ─────────────────────────────────────────
     results: list = []
     fcred = settings.BUYLIST_FACTOR_CREDITO
@@ -792,8 +1159,8 @@ async def analyze_buylist(
         cond_r   = str(cond_raw)
         version  = str(ve)
 
-        eff_usd, adjusted_price, is_estaca_card = _compute_card_price(
-            raw_usd, foil_raw, version, cond_r, base_min_price, nm
+        eff_usd, adjusted_price, is_estaca_card, base_origin = _compute_card_price(
+            raw_usd, foil_raw, version, cond_r, base_min_price, nm, ck_nm_prices
         )
 
         # Lookup con prioridad: Scryfall UUID > _canonical(name)
@@ -847,6 +1214,7 @@ async def analyze_buylist(
             "version":        version,
             "is_estaca":      is_estaca_card,
             "stake_mult":     settings.STAKE_MULTIPLIER if is_estaca_card else 1.0,
+            "nicho_base":     base_origin,
             "price_credito":  p_cred,
             "price_cash":     int(adjusted_price * fcash),
             "tier":           tier_pub,
@@ -887,7 +1255,11 @@ async def commit_buylist(
         raise HTTPException(400,
             "Por el momento solo estamos recibiendo cartas por QuestPoints.")
 
-
+    # FIX CRÍTICO: verificar y registrar presupuesto diario de cash.
+    # Solo aplica si BUYLIST_DAILY_BUDGET_CASH > 0 (0 = sin límite).
+    # Para órdenes en crédito o mixto, se cuenta solo el componente cash.
+    if req.payment_preference in ("cash", "mixto"):
+        _check_and_register_cash_budget(float(req.total_cash))
 
     from .models import BuylistOrder
     items_dict = [it.model_dump() for it in req.items]
@@ -1000,8 +1372,26 @@ async def admin_commit_buylist(
 # =====================================================================
 
 @app.post("/api/auth/login", response_model=TokenResponse)
-def login(req: LoginRequest):
-    if req.username == settings.ADMIN_USER and req.password == settings.ADMIN_PASS:
+def login(req: LoginRequest, request: Request):
+    # FIX A2: Rate limiting — máx 5 intentos por IP cada 5 minutos.
+    # Sin esto, un atacante puede fuerza-bruta ADMIN_USER/ADMIN_PASS y obtener
+    # el STORE_TOKEN que da acceso a todos los endpoints /api/admin/*.
+    # Usamos la misma infraestructura _rate_limit existente para consistencia.
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request and request.client else "unknown")
+    )
+    if not _rate_limit(f"login:{ip}", max_calls=5, window_sec=300):
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiados intentos de login. Espera 5 minutos e inténtalo de nuevo."
+        )
+    # FIX A3 también aplicado aquí: compare_digest para credenciales admin.
+    # Comparar username y password en tiempo constante evita enumeración de usuarios
+    # (misma latencia para usuario inválido y usuario válido con contraseña incorrecta).
+    user_ok = secrets.compare_digest(req.username, settings.ADMIN_USER)
+    pass_ok = secrets.compare_digest(req.password, settings.ADMIN_PASS)
+    if user_ok and pass_ok:
         return {"access_token": settings.STORE_TOKEN, "token_type": "bearer"}
     raise HTTPException(401, "Credenciales inválidas")
 
@@ -1052,12 +1442,17 @@ async def trigger_sync(db: Session = Depends(get_db)):
 @app.post("/api/admin/adjust",     dependencies=[Depends(verify_admin)])
 def adjust_balance(req: AdminAdjustReq, db: Session = Depends(get_db)):
     from .models import Gampoint
-    user = db.query(Gampoint).filter(Gampoint.email == req.email.lower()).first()
+    # H-02 FIX: WITH FOR UPDATE — bloqueo de fila para prevenir race condition
+    # si dos admins ajustan el mismo usuario simultáneamente. Sin el lock, un
+    # "subtract" concurrente puede dejar el saldo en un valor incorrecto.
+    user = db.query(Gampoint).filter(
+        Gampoint.email == req.email.lower()
+    ).with_for_update().first()
     if not user:
         raise HTTPException(404, "Usuario no encontrado")
     delta = Decimal(req.amount)
     if req.operation == "add":
-        user.saldo              += delta
+        user.saldo               += delta
         user.historico_acumulado += delta
     elif req.operation == "subtract":
         if user.saldo < delta:
@@ -1217,7 +1612,7 @@ async def catalog_sync(
 
 
 @app.get("/api/admin/catalog", dependencies=[Depends(verify_admin)])
-def catalog_list(
+async def catalog_list(
     db: Session = Depends(get_db),
     q:     str           = "",
     tier:  Optional[str] = None,
@@ -1227,28 +1622,38 @@ def catalog_list(
     """
     Lista el catálogo con paginación y filtros.
     Enriquece cada carta con su tier (de staple_cards) y stock en vivo del cache JS.
+
+    FIX A5: El filtro `tier` se aplica ANTES de paginar mediante un JOIN SQL.
+    FIX QA: async def + await _fetch_js_stock_cached() — garantiza que el cache
+    esté poblado incluso en cold start (antes el stock podía ser vacío tras restart).
     """
-    from .models import CardCatalog
+    from .models import CardCatalog, StapleCard
 
     query = db.query(CardCatalog)
     if q:
         query = query.filter(CardCatalog.name_normalized.contains(_canonical(q)))
+
+    # FIX A5: Filtrar por tier haciendo JOIN con staple_cards en SQL.
+    # Esto garantiza que total, pages y los resultados sean consistentes.
+    if tier:
+        query = (
+            query
+            .join(StapleCard, StapleCard.name_normalized == CardCatalog.name_normalized)
+            .filter(StapleCard.tier == tier)
+        )
 
     total = query.count()
     rows  = query.order_by(CardCatalog.name_display).offset((page - 1) * limit).limit(limit).all()
 
     # Enriquecer con tier actual y stock vivo
     staple_map = _get_staple_map(db)
-    js_stock   = _js_stock_cache   # RAM — sin await, ya cargado
+    js_stock   = await _fetch_js_stock_cached()   # FIX QA: garantiza cache poblado
 
     result_rows = []
     for r in rows:
         srec      = staple_map.get(r.name_normalized)
         live_data = _resolve_stock(r.name_normalized, js_stock)
         live_stk  = live_data.get("stock") if live_data else r.total_stock
-
-        if tier and (srec.tier if srec else None) != tier:
-            continue
 
         result_rows.append({
             "id":              r.id,
@@ -1371,12 +1776,9 @@ async def _do_bulk_enrich() -> dict:
         _enrich_total = len(canonical_set)
         logger.info(f"[BULK] {_enrich_total} cartas en catálogo a enriquecer")
 
-        # ── Paso 3: stream download + parse con ijson ─────────────────────────
-        # Acumulamos scryfall_ids en RAM agrupados por canonical
-        # {canonical: [{scryfall_id, set_code, set_name, collector_number, lang, finishes}]}
-        sf_map_new: dict[str, list] = {c: [] for c in canonical_set}
-        cards_seen = 0
-        matched    = 0
+        # ── Paso 3: stream download (async) + parse ijson (thread pool) ───────
+        # sf_map_new, cards_seen y matched son inicializados y devueltos por
+        # _parse_scryfall_buffer() que corre en asyncio.to_thread() (FIX C3).
 
         async with aiohttp.ClientSession(headers=HEADERS,
                                           timeout=aiohttp.ClientTimeout(
@@ -1387,82 +1789,89 @@ async def _do_bulk_enrich() -> dict:
                 if resp.status != 200:
                     raise RuntimeError(f"Download HTTP {resp.status}")
 
-                logger.info("[BULK] Descarga iniciada — parseando en streaming…")
+                logger.info("[BULK] Descarga iniciada — acumulando en buffer…")
 
-                # ijson necesita un objeto file-like síncrono.
-                # Acumulamos chunks y procesamos con un pipe async → sync usando asyncio.
-                # Estrategia: leer en chunks y pasar a ijson a través de un BytesIO rolling.
-                # Para evitar OOM usamos un buffer circular de ~4MB.
                 import io
 
                 buffer = io.BytesIO()
                 total_bytes = 0
                 CHUNK = 512 * 1024   # 512KB por chunk
 
-                # Leer TODO el stream en buffer (necesario para ijson síncrono)
-                # PERO liberamos los objetos procesados inmediatamente
-                # Alternativa real: usar ijson.parse() con coroutine wrapper
-                # En free tier 512MB: 100MB gzip → ~100MB descomprimido en buffer → OK
                 async for chunk in resp.content.iter_chunked(CHUNK):
                     buffer.write(chunk)
                     total_bytes += len(chunk)
-                    # Actualizar progreso de descarga
                     _enrich_last_card = f"descargando… {total_bytes // 1_048_576} MB"
-                    # Yield control para no bloquear el event loop
                     if total_bytes % (4 * 1024 * 1024) == 0:
                         await asyncio.sleep(0)
 
                 logger.info(f"[BULK] Descarga completa: {total_bytes // 1_048_576} MB")
-                buffer.seek(0)
+                # La conexión HTTP se cierra aquí al salir del context manager.
+                # FIX C3+C4: el parseo ijson ocurre FUERA de este bloque para:
+                #   (a) cerrar la conexión TCP a Scryfall antes de parsear.
+                #   (b) mover el parseo síncrono al thread pool (asyncio.to_thread)
+                #       para no bloquear el event loop 30-60 segundos.
 
-                # ── Paso 4: parsear card por card con ijson ───────────────────
-                _enrich_last_card = "parseando JSON…"
-                await asyncio.sleep(0)   # yield antes del parseo síncrono
+        # ── Paso 4: parsear card por card con ijson en thread pool ────────────
+        # FIX C3: ijson.items() es completamente síncrono. Con ~90k cartas / 100MB
+        # bloquea el event loop entre 30-60s, congelando TODOS los requests activos.
+        # asyncio.to_thread() mueve el parseo al ThreadPoolExecutor del event loop,
+        # liberando el hilo principal para atender requests mientras parsea.
+        #
+        # FIX C4: buffer se cierra y libera explícitamente en el finally del helper
+        # para asegurar que los 100MB se devuelvan al GC independientemente del
+        # resultado del parseo (éxito, excepción o cancelación asyncio).
+        _enrich_last_card = "parseando JSON (thread pool)…"
+        await asyncio.sleep(0)   # yield antes del parseo para que FastAPI pueda atender requests
 
-                # ijson.items es síncrono pero muy eficiente en memoria
-                # procesa sin cargar el JSON completo como dict
-                for card in ijson.items(buffer, "item"):
-                    cards_seen += 1
-
+        def _parse_scryfall_buffer(buf: io.BytesIO, known_canonicals: set) -> tuple[dict, int, int]:
+            """
+            Parsea el bulk data de Scryfall en un hilo separado (thread pool).
+            Devuelve (sf_map_new, cards_seen, matched).
+            Se ejecuta fuera del event loop — NO puede llamar a funciones async
+            ni acceder a globals asyncio sin sincronización.
+            """
+            import ijson
+            sf_map: dict[str, list] = {c: [] for c in known_canonicals}
+            seen = matched = 0
+            buf.seek(0)
+            try:
+                for card in ijson.items(buf, "item"):
+                    seen += 1
                     name = card.get("name", "")
                     if not name:
                         continue
-
-                    # Saltar tokens, emblemas, y cartas de otros idiomas
-                    lang = card.get("lang", "en")
-
-                    # Saltar layouts que no son cartas reales
                     layout = card.get("layout", "")
                     if layout in ("token", "emblem", "art_series", "double_faced_token"):
                         continue
-
                     canonical = _canonical(name)
-                    if canonical not in canonical_set:
-                        _enrich_skipped += 1
+                    if canonical not in known_canonicals:
                         continue
-
                     finishes = card.get("finishes") or []
-                    # Si finishes vacío, inferir desde campos legacy foil/nonfoil
                     if not finishes:
                         if card.get("foil"):    finishes.append("foil")
                         if card.get("nonfoil"): finishes.append("nonfoil")
                     if not finishes:
-                        finishes = ["nonfoil"]   # default seguro
-
-                    sf_entry = {
+                        finishes = ["nonfoil"]
+                    sf_map[canonical].append({
                         "scryfall_id":      card["id"],
                         "set_code":         card.get("set", "").upper(),
                         "set_name":         card.get("set_name", ""),
                         "collector_number": card.get("collector_number", ""),
-                        "lang":             lang,
+                        "lang":             card.get("lang", "en"),
                         "finishes":         finishes,
-                    }
-                    sf_map_new[canonical].append(sf_entry)
+                    })
                     matched += 1
+            finally:
+                # FIX C4: liberar el BytesIO (~100MB) explícitamente.
+                # Sin esto el GC puede tardar en reclamarlo en el free tier 512MB.
+                buf.close()
+            return sf_map, seen, matched
 
-                    if cards_seen % 5000 == 0:
-                        logger.info(f"[BULK] Parseadas {cards_seen} cartas, {matched} matches…")
-                        await asyncio.sleep(0)   # yield para no bloquear event loop
+        sf_map_new, cards_seen, matched = await asyncio.to_thread(
+            _parse_scryfall_buffer, buffer, canonical_set
+        )
+        # buffer fue cerrado dentro de _parse_scryfall_buffer → del ayuda al GC
+        del buffer
 
         logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
 
@@ -1527,6 +1936,12 @@ async def _do_bulk_enrich() -> dict:
     finally:
         _enrich_running   = False
         _enrich_last_card = ""
+        # Revertir cualquier transacción abierta antes de cerrar la sesión.
+        # Necesario cuando task.cancel() llega durante un db.commit() en vuelo.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         db.close()
 
 
@@ -1551,15 +1966,25 @@ async def start_enrich_scryfall():
     """
     global _enrich_running, _enrich_task
 
-    if _enrich_running:
-        return {
-            "status":    "already_running",
-            "done":      _enrich_done,
-            "total":     _enrich_total,
-            "last_card": _enrich_last_card,
-        }
+    # FIX A4: asyncio.Lock elimina el TOCTOU entre el check y el create_task.
+    # Sin lock, dos requests simultáneos pueden ambos pasar `if _enrich_running`
+    # antes de que cualquiera haya actualizado el flag, lanzando dos tareas que
+    # escriben concurrentemente en card_catalog con conflictos de commit en BD.
+    # acquire() es O(1) cuando el lock está libre; el segundo request espera
+    # dentro del `async with` y ve _enrich_running=True al intentar tomar el lock.
+    async with _enrich_lock:
+        if _enrich_running:
+            return {
+                "status":    "already_running",
+                "done":      _enrich_done,
+                "total":     _enrich_total,
+                "last_card": _enrich_last_card,
+            }
+        # Setear _enrich_running DENTRO del lock antes de soltar — garantiza
+        # que cualquier request que arrive ahora vea el flag en True.
+        _enrich_running = True
+        _enrich_task = asyncio.create_task(_do_bulk_enrich())
 
-    _enrich_task = asyncio.create_task(_do_bulk_enrich())
     return {
         "status":  "started",
         "message": "Bulk enrichment iniciado. ~2 minutos para completar. "
@@ -1775,6 +2200,11 @@ async def stock_check(
     js_stock       = await _fetch_js_stock_cached()
     _get_catalog_map(db)   # pre-cargar catálogo en _catalog_cache
 
+    # Precios CK para los nombres únicos del CSV (SELECT IN sobre ck_prices)
+    _col_cb    = lambda c, d="": df[c].fillna(d).astype(str) if c in df.columns else pd.Series([d]*len(df))
+    unique_names_cb = list({str(n).strip() for n in _col_cb("Name") if str(n).strip()})
+    ck_nm_prices    = await asyncio.to_thread(_get_ck_prices_for_names, unique_names_cb)
+
     # Constantes fuera del loop — evitar re-acceso a settings por cada fila
     F_CASH    = settings.BUYLIST_FACTOR_CASH
     F_CRED    = settings.BUYLIST_FACTOR_CREDITO
@@ -1800,8 +2230,8 @@ async def stock_check(
         if currency == "EUR":
             raw_usd *= 1.10
 
-        eff_usd, price_usd, is_estaca_card = _compute_card_price(
-            raw_usd, foil_raw, version, cond_raw, base_min_price, name
+        eff_usd, price_usd, is_estaca_card, base_origin = _compute_card_price(
+            raw_usd, foil_raw, version, cond_raw, base_min_price, name, ck_nm_prices
         )
 
         # Tier lookup O(1) — canonical ya en cache lru tras _compute_card_price
@@ -1839,10 +2269,18 @@ async def stock_check(
                 status = "warning"
 
         if is_estaca_card:
-            base_used = base_min_price.get(key, raw_usd)
-            origin    = "CSV base" if key in base_min_price else "precio CK propio"
+            # base_origin: 'csv' | 'cardkingdom' | 'fallback_tipo'
+            if base_origin == "csv":
+                base_used   = base_min_price.get(key, raw_usd)
+                origin_desc = f"base NM del CSV ${base_used:.2f} USD"
+            elif base_origin == "cardkingdom":
+                base_used   = ck_nm_prices.get(key, raw_usd)
+                origin_desc = f"base CK Buylist ${base_used:.2f} USD"
+            else:
+                base_used   = raw_usd
+                origin_desc = "sin NM disponible — detección por tipo"
             alerts.append({"type": "info",
-                           "msg": f"Estaca ×{STAKE_M} (base ${base_used:.2f} USD — {origin})"})
+                           "msg": f"De Nicho ×{STAKE_M} ({origin_desc})"})
 
         if not is_muy_alta:
             overstock_limit = min_stock * 3
@@ -1886,6 +2324,7 @@ async def stock_check(
             "version":           version,
             "is_estaca":         is_estaca_card,
             "stake_mult":        settings.STAKE_MULTIPLIER if is_estaca_card else 1.0,
+            "nicho_base":        base_origin,
             "price_cash":        int(price_clp_cash),
             "price_credito":     int(price_clp_credito),
             "min_price_venta":   int(min_price_venta),
@@ -1980,8 +2419,21 @@ def get_buylist_orders(db: Session = Depends(get_db), status: Optional[str] = No
 
 
 @app.patch("/api/admin/buylist_orders/{order_id}", dependencies=[Depends(verify_admin)])
-def update_order_status(order_id: int, new_status: str = "reviewed",
-                         db: Session = Depends(get_db)):
+def update_order_status(
+    order_id:   int,
+    # FIX A7: new_status era `str` sin validación → cualquier valor se persistía en BD.
+    # Un operador podía escribir 'hacked', 'null', o valores que rompieran filtros.
+    # Literal limita a los 4 estados válidos del ciclo de vida de una orden.
+    # FastAPI genera un error 422 automático con los valores permitidos si se envía otro.
+    new_status: str = "reviewed",
+    db:         Session = Depends(get_db),
+):
+    _VALID_STATUSES = {"pending", "reviewed", "closed", "cancelled"}
+    if new_status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Estado inválido '{new_status}'. Valores permitidos: {sorted(_VALID_STATUSES)}"
+        )
     from .models import BuylistOrder
     order = db.query(BuylistOrder).filter(BuylistOrder.id == order_id).first()
     if not order:
@@ -1995,12 +2447,209 @@ def update_order_status(order_id: int, new_status: str = "reviewed",
 # 🔥 BACKGROUND TASKS — cupones y webhooks
 # =====================================================================
 
+# ── Verificación HMAC-SHA256 para webhooks de Jumpseller ──────────────────────
+# Jumpseller firma cada webhook con HMAC-SHA256 usando el hooks_token de la tienda
+# (Admin → Config → Notificaciones) y envía la firma en el header:
+#   Jumpseller-Hmac-Sha256: <base64(HMAC-SHA256(hooks_token, body))>
+#
+# Referencia oficial: https://jumpseller.com/support/webhooks/
+# Sin esta verificación cualquiera que conozca la URL puede enviar payloads
+# falsos: quemar cupones QP legítimos, sincronizar datos basura de clientes, etc.
+
+def _verify_jumpseller_hmac(body: bytes, signature_header: str) -> bool:
+    """
+    Verifica la firma HMAC-SHA256 del webhook de Jumpseller.
+
+    Args:
+        body:             Cuerpo crudo del request (bytes sin decodificar).
+        signature_header: Valor del header 'Jumpseller-Hmac-Sha256' (base64).
+
+    Returns:
+        True si la firma es válida o si JUMPSELLER_HOOKS_TOKEN no está configurado
+        (modo desarrollo — log de advertencia).
+        False si la firma no coincide (el request debe ser rechazado con 401).
+
+    Implementación:
+        digest = Base64( HMAC-SHA256(hooks_token, body) )
+        compare_digest(digest, signature_header)  ← tiempo constante, previene timing attacks
+    """
+    hooks_token = settings.JUMPSELLER_HOOKS_TOKEN
+    if not hooks_token:
+        # Modo desarrollo: sin token configurado se acepta pero se advierte.
+        # En producción JUMPSELLER_HOOKS_TOKEN debe estar en las env vars de Render.
+        logger.warning(
+            "[WEBHOOK] JUMPSELLER_HOOKS_TOKEN no configurado — "
+            "verificación HMAC omitida. Configúralo en Render para producción."
+        )
+        return True
+
+    if not signature_header:
+        logger.warning("[WEBHOOK] Header 'Jumpseller-Hmac-Sha256' ausente en el request.")
+        return False
+
+    expected = base64.b64encode(
+        hmac.new(hooks_token.encode("utf-8"), body, hashlib.sha256).digest()
+    ).decode("utf-8")
+
+    # secrets.compare_digest: comparación en tiempo constante.
+    # hmac.compare_digest haría lo mismo, pero secrets es el módulo idiomático
+    # de Python para operaciones sensibles a timing.
+    return secrets.compare_digest(expected, signature_header)
+
+
 async def _bg_burn_coupons(payload_str: str):
     try:
         for code in set(re.findall(r"QP-[A-F0-9]{6}\b", payload_str)):
             await VaultController.burn_coupon(code)
     except Exception as e:
         logger.error(f"[BURN] {e}")
+
+# ── Cashback 2% — acredita QP al cliente cuando la orden queda pagada ─────────
+# TASA: 2% del precio FINAL de la orden (order.total, después de todos los
+# descuentos incluyendo el cupón QP aplicado). Se redondea al entero inferior.
+#
+# IDEMPOTENCIA: CashbackRecord usa order_id como PK. Si el webhook llega dos
+# veces por la misma orden, el segundo INSERT falla por violación de PK y se
+# descarta silenciosamente — el usuario no recibe crédito doble.
+#
+# FAIL-SAFE: si el usuario no existe en Gampoint, se loggea warning y se omite.
+# Esto puede pasar si el cliente nunca entró a la bóveda y no fue sincronizado.
+_CASHBACK_RATE = Decimal("0.02")   # 2%
+
+# ── H-03: Núcleo síncrono — corre en thread pool vía run_in_executor ──────────
+def _sync_cashback(payload_str: str) -> None:
+    """
+    Operaciones sincrónicas de BD para el cashback.
+    Nunca llamar directamente desde el event loop — usar _bg_cashback (async).
+
+    H-04 FIX: usa INSERT … ON CONFLICT DO NOTHING para idempotencia atómica.
+    El check "¿ya procesé esta orden?" y la acreditación ocurren en la MISMA
+    transacción: si el INSERT de CashbackRecord falla por PK duplicada → rowcount 0
+    → no se acredita saldo. No hay ventana de race condition entre check y debit.
+
+    Flujo:
+      1. Parsear JSON y validar campos obligatorios.
+      2. Verificar status == "paid" (case-insensitive).
+      3. Calcular cashback_qp = floor(total * 2%) — mínimo 1 QP.
+      4. INSERT CashbackRecord ON CONFLICT (order_id) DO NOTHING.
+         - rowcount 0 → webhook duplicado → retornar sin acreditar.
+         - rowcount 1 → primera vez → continuar.
+      5. SELECT Gampoint WITH FOR UPDATE (lock de fila).
+         - Usuario no encontrado → ROLLBACK (revierte el INSERT) → retornar.
+      6. Acreditar saldo + historico_acumulado.
+      7. COMMIT (CashbackRecord + Gampoint en una sola transacción).
+    """
+    try:
+        payload = json.loads(payload_str)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"[CASHBACK] Payload no es JSON válido: {e}")
+        return
+
+    order    = payload.get("order", payload)
+    status   = str(order.get("status") or "").lower().strip()
+
+    if status != "paid":
+        logger.debug(f"[CASHBACK] status='{status}' — no es 'paid', ignorando")
+        return
+
+    order_id = order.get("id")
+    if not order_id:
+        logger.error("[CASHBACK] Payload sin order.id")
+        return
+
+    customer = order.get("customer") or {}
+    email    = str(customer.get("email") or "").lower().strip()
+    if not email:
+        logger.warning(f"[CASHBACK] Orden {order_id} sin customer.email — omitido")
+        return
+
+    order_total = float(order.get("total") or 0)
+    if order_total <= 0:
+        logger.warning(f"[CASHBACK] Orden {order_id} total={order_total} ≤ 0 — omitido")
+        return
+
+    cashback_qp = int(Decimal(str(order_total)) * _CASHBACK_RATE)
+    if cashback_qp < 1:
+        logger.info(
+            f"[CASHBACK] Orden {order_id}: {order_total:.0f} CLP → "
+            f"{cashback_qp} QP (< 1 mínimo) — omitido"
+        )
+        return
+
+    cashback_dec = Decimal(cashback_qp)
+    db = SessionLocal()
+    try:
+        # ── H-04: INSERT atómico — idempotencia garantizada por constraint de BD ──
+        # on_conflict_do_nothing sobre PK order_id: si ya existe → rowcount=0 → skip.
+        # El UPDATE de saldo ocurre en la MISMA transacción, eliminando la race
+        # condition del patrón SELECT-then-INSERT anterior.
+        stmt = pg_insert(CashbackRecord).values(
+            order_id        = int(order_id),
+            email           = email,
+            amount_qp       = cashback_dec,
+            order_total_clp = Decimal(str(order_total)),
+        ).on_conflict_do_nothing(index_elements=["order_id"])
+
+        result = db.execute(stmt)
+
+        if result.rowcount == 0:
+            # La fila ya existía → webhook duplicado → rollback y salir
+            db.rollback()
+            logger.info(
+                f"[CASHBACK] Orden {order_id} ya procesada — webhook duplicado ignorado"
+            )
+            return
+
+        # ── Acreditar al usuario en la misma transacción ──────────────────────
+        # with_for_update() evita que otro proceso modifique el saldo entre el
+        # SELECT y el UPDATE (consistencia ante ajustes admin concurrentes).
+        user = db.query(Gampoint).filter(
+            Gampoint.email == email
+        ).with_for_update().first()
+
+        if not user:
+            # Usuario no registrado: revertir el INSERT de CashbackRecord también
+            db.rollback()
+            logger.warning(
+                f"[CASHBACK] Usuario '{email}' no en Gampoint. "
+                f"Orden {order_id}: {cashback_qp} QP no acreditados. "
+                f"Debe iniciar sesión en la bóveda para registrarse."
+            )
+            return
+
+        user.saldo               += cashback_dec
+        user.historico_acumulado += cashback_dec
+        db.commit()
+
+        logger.info(
+            f"[CASHBACK] ✅ Orden {order_id}: '{email}' +{cashback_qp} QP "
+            f"(2% de ${order_total:,.0f} CLP) → saldo: {float(user.saldo):,.0f} QP"
+        )
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[CASHBACK] ❌ Error orden {order_id}: {e}")
+    finally:
+        db.close()
+
+
+# ── H-03: Wrapper async — libera el event loop delegando al thread pool ───────
+async def _bg_cashback(payload_str: str) -> None:
+    """
+    H-03 FIX: async def en vez de def — FastAPI ejecuta background tasks async
+    directamente en el event loop. Usar run_in_executor delega las operaciones
+    síncronas de BD al thread pool, evitando bloquear el event loop durante
+    un burst de webhooks.
+
+    Sin este fix, múltiples webhooks simultáneos ocupan todos los threads de
+    Starlette y bloquean otros endpoints (login, balance, etc.).
+
+    FIX: get_running_loop() en lugar de get_event_loop() (deprecado en Python 3.10,
+    RuntimeError en Python 3.12+). get_running_loop() es correcto aquí porque esta
+    coroutine siempre se llama desde dentro del event loop de uvicorn.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync_cashback, payload_str)
 
 def _bg_sync_customer(customer_data: dict):
     db = SessionLocal()
@@ -2013,15 +2662,36 @@ def _bg_sync_customer(customer_data: dict):
 
 @app.post("/api/webhooks/jumpseller/order")
 async def jumpseller_order_webhook(request: Request, background_tasks: BackgroundTasks):
+    # FIX A1: Verificar firma HMAC-SHA256 antes de procesar cualquier acción.
+    body = await request.body()
+    hmac_header = request.headers.get("Jumpseller-Hmac-Sha256", "")
+    if not _verify_jumpseller_hmac(body, hmac_header):
+        logger.warning(
+            f"[WEBHOOK] Firma HMAC inválida en /order — "
+            f"IP: {request.headers.get('X-Forwarded-For', request.client.host if request.client else 'unknown')}"
+        )
+        raise HTTPException(status_code=401, detail="Webhook signature inválida")
     try:
-        payload_str = (await request.body()).decode("utf-8")
+        payload_str = body.decode("utf-8")
+        # Task 1: quemar cupones QP que aparezcan en la orden
         background_tasks.add_task(_bg_burn_coupons, payload_str)
+        # Task 2: acreditar cashback 2% si la orden está pagada
+        background_tasks.add_task(_bg_cashback, payload_str)
         return {"status": "received"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
 @app.post("/api/webhooks/jumpseller/customer")
 async def jumpseller_customer_webhook(request: Request, background_tasks: BackgroundTasks):
+    # FIX A1: Misma verificación para el webhook de clientes.
+    body = await request.body()
+    hmac_header = request.headers.get("Jumpseller-Hmac-Sha256", "")
+    if not _verify_jumpseller_hmac(body, hmac_header):
+        logger.warning(
+            f"[WEBHOOK] Firma HMAC inválida en /customer — "
+            f"IP: {request.headers.get('X-Forwarded-For', request.client.host if request.client else 'unknown')}"
+        )
+        raise HTTPException(status_code=401, detail="Webhook signature inválida")
     try:
         payload       = await request.json()
         customer_data = payload.get("customer", {})
@@ -2175,11 +2845,17 @@ def migrate_canonical(db: Session = Depends(get_db)):
 @app.get("/health")
 def health():
     ci = _canonical.cache_info()
+    today = str(_dt.date.today())
+    limit = settings.BUYLIST_DAILY_BUDGET_CASH
+    spent = _daily_cash_spent.get(today, 0.0)
     return {
         "status":               "ok",
-        "version":              "5.2",
+        "version":              "5.4",
         "buylist_open":         settings.BUYLIST_OPEN,
         "cash_enabled":         settings.CASH_ENABLED,
+        "budget_cash_limit":    limit,
+        "budget_cash_spent":    round(spent, 0),
+        "budget_cash_remaining": round(max(0.0, limit - spent), 0) if limit > 0 else None,
         "js_cache_age_sec":     int(time.monotonic() - _js_stock_cache_ts),
         "js_cache_cards":       len(_js_stock_cache),
         "js_cache_valid":       bool(_js_stock_cache and time.monotonic() - _js_stock_cache_ts < JS_STOCK_TTL),
@@ -2222,3 +2898,35 @@ def cache_status():
         "total_stock":     sum(v["stock"] for v in _js_stock_cache.values()),
         "sample_5":        list(_js_stock_cache.keys())[:5],
     }
+
+
+@app.post("/api/admin/sync_ck_prices", dependencies=[Depends(verify_admin)])
+async def admin_sync_ck_prices():
+    """
+    Fuerza la sincronización inmediata de la tabla ck_prices desde CardKingdom.
+    Útil para poblar la tabla en un despliegue nuevo o refrescar precios manualmente.
+    El job diario corre automáticamente; este endpoint es solo para emergencias.
+    """
+    result = await _sync_ck_prices()
+    if "error" in result:
+        raise HTTPException(502, f"Sync CK falló: {result['error']}")
+    return {"ok": True, **result}
+
+
+@app.get("/api/admin/ck_prices_status", dependencies=[Depends(verify_admin)])
+def admin_ck_prices_status(db=Depends(get_db)):
+    """Estado de la tabla ck_prices: total de cartas y fecha de última actualización."""
+    from .models import CKPrice
+    from sqlalchemy import func as sqlfunc
+    try:
+        total   = db.query(CKPrice).count()
+        last_up = db.query(sqlfunc.max(CKPrice.updated_at)).scalar()
+        sample  = [r.name_raw for r in db.query(CKPrice).limit(5).all()]
+        return {
+            "total_cards":   total,
+            "last_updated":  str(last_up) if last_up else None,
+            "table_ready":   total > 0,
+            "sample_5":      sample,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Error al leer ck_prices: {exc}")

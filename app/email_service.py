@@ -20,23 +20,55 @@ SMTP_PORT = 587
 # ── Core: envío asíncrono (SMTP en thread pool, no bloquea event loop) ────────
 
 def _send_sync(to: str, subject: str, html_body: str) -> bool:
-    """Blocking SMTP — se llama desde run_in_executor."""
+    """
+    Blocking SMTP — se llama desde run_in_executor.
+
+    FIX M-04: timeout aumentado a 30s (era 15s) y reintentos automáticos.
+    Gmail TLS puede tardar hasta ~20s en picos de carga del servidor.
+
+    Política de reintentos (máx 3 intentos totales):
+      - SMTPServerDisconnected: el servidor cerró la conexión antes de tiempo → reintentar
+      - OSError / TimeoutError:  fallo de red o timeout → reintentar
+      - Otros errores (auth, dest inválido): no reintentar (no mejoran con el tiempo)
+    Backoff: 5s entre intentos (no exponencial — Gmail no requiere esperas largas).
+    """
+    import time
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"GameQuest <{settings.SMTP_EMAIL}>"
     msg["To"]      = to
     msg.attach(MIMEText(html_body, "html"))
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as srv:
-            srv.ehlo()
-            srv.starttls()
-            srv.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
-            srv.sendmail(settings.SMTP_EMAIL, to, msg.as_string())
-        logger.info(f"[EMAIL] ✅ → {to} | {subject}")
-        return True
-    except Exception as e:
-        logger.error(f"[EMAIL] ❌ → {to} | {e}")
-        return False
+
+    _RETRYABLE = (smtplib.SMTPServerDisconnected, OSError, TimeoutError)
+    last_error: Exception | None = None
+
+    for attempt in range(1, 4):   # intentos 1, 2, 3
+        try:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as srv:
+                srv.ehlo()
+                srv.starttls()
+                srv.login(settings.SMTP_EMAIL, settings.SMTP_PASSWORD)
+                srv.sendmail(settings.SMTP_EMAIL, to, msg.as_string())
+            logger.info(f"[EMAIL] ✅ → {to} | {subject}")
+            return True
+        except _RETRYABLE as e:
+            last_error = e
+            if attempt < 3:
+                logger.warning(
+                    f"[EMAIL] ⚠️ Intento {attempt}/3 fallido ({type(e).__name__}) "
+                    f"→ {to} | reintentando en 5s…"
+                )
+                time.sleep(5)
+            else:
+                logger.error(
+                    f"[EMAIL] ❌ 3/3 intentos agotados → {to} | {subject} | {e}"
+                )
+        except Exception as e:
+            # Errores no recuperables (auth fallida, destino inválido, etc.)
+            logger.error(f"[EMAIL] ❌ Error no recuperable → {to} | {e}")
+            return False
+
+    return False
 
 
 async def _send(to: str, subject: str, html_body: str) -> bool:
@@ -141,7 +173,7 @@ def _items_table(items: list, show_alerts: bool = False) -> str:
         if version:
             tag_parts.append(f'<span style="background:#f0fdf4;color:#166534;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">{version}</span>')
         elif is_est and not foil:
-            tag_parts.append('<span style="background:#ede9fe;color:#5b21b6;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">✦ Premium</span>')
+            tag_parts.append('<span style="background:#fdf4ff;color:#7c3aed;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">★ De Nicho</span>')
         if cond:
             tag_parts.append(f'<span style="background:#fef9c3;color:#713f12;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;">{cond}</span>')
         tags_html = (" " + " ".join(tag_parts)) if tag_parts else ""
@@ -150,7 +182,7 @@ def _items_table(items: list, show_alerts: bool = False) -> str:
         price_raw = it.get("price_usd_raw") or it.get("price_usd") or 0
         price_adj = it.get("price_usd") or 0
         if is_est and price_raw != price_adj:
-            price_html = f'${price_raw:.2f} <span style="color:#7c3aed;font-size:10px;">→ ${price_adj:.2f} ×est.</span>'
+            price_html = f'${price_raw:.2f} <span style="color:#7c3aed;font-size:10px;">→ ${price_adj:.2f} ×nicho</span>'
         else:
             price_html = f'${price_adj:.2f}'
 
@@ -281,9 +313,9 @@ async def send_internal_analysis_report(
             return ""
         rows = "".join(
             f"<tr><td>{c['name']}</td>"
-            f"<td style='text-align:center'>{c.get('qty_csv',1)}</td>"
+            f"<td style='text-align:center'>{c.get('qty') or c.get('qty_csv') or 1}</td>"
             f"<td style='text-align:right;color:#64748b;'>${c.get('price_usd',0):.2f}</td>"
-            f"<td style='text-align:right;color:{color};font-weight:700;'>${(c.get('price_cash',0)*c.get('qty_csv',1)):,}</td>"
+            f"<td style='text-align:right;color:{color};font-weight:700;'>${(c.get('price_cash',0)*(c.get('qty') or c.get('qty_csv') or 1)):,}</td>"
             f"<td style='font-size:11px;color:{color};'>"
             + " | ".join(a["msg"] for a in c.get("alerts", [])) +
             f"</td></tr>"
