@@ -117,27 +117,14 @@ class CKPrice(Base):
     name_raw        = Column(String, nullable=False)                  # nombre tal como viene de CK
     min_buy_price   = Column(Numeric(10, 4), nullable=False)          # precio mínimo USD (buy_price NM)
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class CashbackRecord(Base):
     """
     Registro de idempotencia para el cashback del 2%.
-
-    PROPÓSITO:
-    ──────────
-    Jumpseller puede re-enviar el mismo webhook varias veces (retries por timeout,
-    reconexión, etc.). Sin esta tabla, una orden podría acreditar cashback 2, 3 o
-    más veces. Cada fila vincula un order_id de Jumpseller a un único evento de
-    cashback ejecutado — si ya existe la fila se descarta el duplicado.
-
-    CAMPO order_id:
-    ────────────────
-    Es el `order.id` del payload de Jumpseller (BigInteger). Se usa como PK
-    para garantizar unicidad por constraint de BD, no solo por lógica de app.
+    Cada fila vincula un order_id de Jumpseller a un único evento de cashback.
     Si el INSERT falla por violación de PK, la excepción es capturada y el
-    cashback no se acredita de nuevo — comportamiento correcto.
-
-    CAMPO order_total_clp:
-    ───────────────────────
-    Precio final pagado (después de todos los descuentos, incluido el cupón QP).
-    Se guarda para auditoría y para poder reconciliar el cashback otorgado.
+    cashback no se acredita de nuevo.
     """
     __tablename__ = "cashback_records"
 
@@ -146,7 +133,6 @@ class CKPrice(Base):
     amount_qp        = Column(Numeric(12, 2), nullable=False)  # QP acreditados
     order_total_clp  = Column(Numeric(12, 2), nullable=False)  # total final de la orden
     created_at       = Column(DateTime, server_default=func.now())
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MIGRACIÓN SQL REQUERIDA — BuylistOrder.updated_at (FIX M-06)
