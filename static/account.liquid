@@ -169,7 +169,7 @@
 <script>
 const GQ_API   = "https://gamecoins.onrender.com";
 const GQ_EMAIL = "{{ customer.email | downcase | strip }}";
-const GQ_TOKEN = "f98yWtYyIpvJDjLhnssu8ntuKfFSnA7NSft0NoaFZIE";
+const GQ_TOKEN = "gq_public_key_2025_secure";
 const MIN_REDEEM = 100;
 let currentBalance = 0;
 
@@ -179,7 +179,11 @@ const fmt = (n) => new Intl.NumberFormat('es-CL', {
 
 async function gqLoadBalance() {
     try {
-        const res = await fetch(`${GQ_API}/api/public/balance/${encodeURIComponent(GQ_EMAIL)}`);
+        const res = await fetch(`${GQ_API}/api/public/balance/${encodeURIComponent(GQ_EMAIL)}`, {
+            headers: {
+                'x-store-token': GQ_TOKEN
+            }
+        });
         if (!res.ok) throw new Error('Error al cargar saldo');
         const data = await res.json();
 

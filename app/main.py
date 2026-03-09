@@ -144,18 +144,17 @@ async def lifespan(app_: FastAPI):
 app = FastAPI(title="GameCoins API", version="5.2", lifespan=lifespan,
               default_response_class=ORJSONResponse)
 
-app.add_middleware(GZipMiddleware, minimum_size=500)   # comprime JSON ≥500 bytes (~60-80% ahorro)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://gamequest.cl",
         "https://www.gamequest.cl",
-        "https://gamecoins.onrender.com",   # dominio Render del propio backend
-        "http://localhost:10000",            # desarrollo local
+        "https://gamecoins.onrender.com",   
+        "http://localhost:10000",            
         "http://localhost:8000",
     ],
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Store-Token"],
+    allow_methods=["*"],    
+    allow_headers=["*"],    
 )
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
