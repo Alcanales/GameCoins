@@ -18,6 +18,7 @@ import logging
 import functools
 import unicodedata
 import pandas as pd
+import gc  # Agregado para recolección de basura forzada
 
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
@@ -177,6 +178,20 @@ def _rate_limit(key: str, max_calls: int, window_sec: int) -> bool:
         return False
     bucket.append(now)
     return True
+
+def _get_client_ip(request: Request) -> str:
+    """
+    Extrae la IP real mitigando IP Spoofing. 
+    Prioriza headers inyectados por proxies de infraestructura (Cloudflare/Render) 
+    antes de confiar en X-Forwarded-For manual.
+    """
+    headers = request.headers
+    return (
+        headers.get("CF-Connecting-IP") or 
+        headers.get("True-Client-IP") or 
+        (headers.get("X-Forwarded-For") or "").split(",")[0].strip() or 
+        (request.client.host if request and request.client else "unknown")
+    )
 
 # ── Cache de stock JS (TTL 10 minutos) ────────────────────────────────────────
 _js_stock_cache: dict = {}
@@ -1091,13 +1106,8 @@ async def analyze_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada. Vuelve pronto.")
 
-    # IP real del cliente: Render/Cloudflare envía la IP original en X-Forwarded-For.
-    # Sin esto, todos los usuarios comparten la IP del proxy y el rate limit
-    # bloquearía a todo el mundo cuando uno solo alcance el límite.
-    ip = (
-        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        or (request.client.host if request and request.client else "unknown")
-    )
+    # IP real del cliente con soporte Anti-Spoofing
+    ip = _get_client_ip(request)
     if not _rate_limit(f"analyze:{ip}", max_calls=20, window_sec=3600):
         raise HTTPException(429, "Demasiados análisis. Espera un momento e inténtalo de nuevo.")
 
@@ -1242,11 +1252,8 @@ async def commit_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada.")
 
-    # Rate limiting por IP real (ver nota en analyze_buylist sobre X-Forwarded-For)
-    ip = (
-        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        or (request.client.host if request.client else "unknown")
-    )
+    # Rate limit anti-spoofing
+    ip = _get_client_ip(request)
     if not _rate_limit(f"buylist:{ip}", max_calls=3, window_sec=3600):
         raise HTTPException(429, "Demasiadas solicitudes. Intenta en 1 hora.")
 
@@ -1276,8 +1283,6 @@ async def commit_buylist(
     db.add(order)
     db.commit()
     # db.refresh innecesario: PostgreSQL devuelve el ID via RETURNING en el INSERT
-
-
 
     # ── Emails en background — wrapper sync que corre la coroutine ──────────────
     # BackgroundTask async — FastAPI lo ejecuta correctamente dentro del event loop
@@ -1373,22 +1378,14 @@ async def admin_commit_buylist(
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(req: LoginRequest, request: Request):
-    # FIX A2: Rate limiting — máx 5 intentos por IP cada 5 minutos.
-    # Sin esto, un atacante puede fuerza-bruta ADMIN_USER/ADMIN_PASS y obtener
-    # el STORE_TOKEN que da acceso a todos los endpoints /api/admin/*.
-    # Usamos la misma infraestructura _rate_limit existente para consistencia.
-    ip = (
-        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        or (request.client.host if request and request.client else "unknown")
-    )
+    # FIX A2: Rate limiting anti-spoofing
+    ip = _get_client_ip(request)
     if not _rate_limit(f"login:{ip}", max_calls=5, window_sec=300):
         raise HTTPException(
             status_code=429,
             detail="Demasiados intentos de login. Espera 5 minutos e inténtalo de nuevo."
         )
     # FIX A3 también aplicado aquí: compare_digest para credenciales admin.
-    # Comparar username y password en tiempo constante evita enumeración de usuarios
-    # (misma latencia para usuario inválido y usuario válido con contraseña incorrecta).
     user_ok = secrets.compare_digest(req.username, settings.ADMIN_USER)
     pass_ok = secrets.compare_digest(req.password, settings.ADMIN_PASS)
     if user_ok and pass_ok:
@@ -1872,6 +1869,10 @@ async def _do_bulk_enrich() -> dict:
         )
         # buffer fue cerrado dentro de _parse_scryfall_buffer → del ayuda al GC
         del buffer
+        
+        # FIX OOM: Forzar recolección de basura del buffer de 100MB inmediatamente
+        # vital para no superar el límite de 512MB de RAM en Render.
+        gc.collect()
 
         logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
 

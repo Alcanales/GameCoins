@@ -402,7 +402,7 @@ function renderAll(){
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px">
         <span style="font-weight:700;font-size:13px;color:#0f172a">${esc(c.name)}</span>
         ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-        ${c.is_estaca?`<span class="gq-badge gb-estaca">✦ ×${c.stake_mult}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho ×${c.stake_mult}</span>`:''}
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${statusBadge}</div>
@@ -414,7 +414,7 @@ function renderAll(){
     // Col 4: Ref CK
     const c4=`<div class="col-desktop" style="text-align:right">
       <div style="font-size:12px;font-weight:700;color:#475569">${fmtUSD(c.price_usd_raw)}</div>
-      ${c.is_estaca?`<div style="font-size:9px;color:#94a3b8">→ ${fmtUSD(c.price_usd)}</div>`:''}
+      ${c.is_estaca?`<div style="font-size:9px;color:#94a3b8">→ ${fmtUSD(c.price_usd)} · <span style="color:#7c3aed">${{csv:'CSV',cardkingdom:'CK',fallback_tipo:'tipo'}[c.nicho_base]||''}</span></div>`:''}
     </div>`;
 
     // Col 5: QP
