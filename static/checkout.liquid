@@ -42,12 +42,16 @@
         <script>
           const GC_API = "https://gamecoins.onrender.com";
           const GC_EMAIL = "{{ customer.email }}";
-          const GC_TOKEN = "f98yWtYyIpvJDjLhnssu8ntuKfFSnA7NSft0NoaFZIE";
+          const GC_TOKEN = "gq_public_key_2025_secure";
           let maxSaldoCart = 0;
 
           // Cargar Saldo
-          fetch(`${GC_API}/api/public/balance/${GC_EMAIL}`)
-            .then(r => r.json())
+          fetch(`${GC_API}/api/public/balance/${GC_EMAIL}`, {
+            headers: {
+              'x-store-token': GC_TOKEN
+            }
+          })
+            .then(r => r.json())        
             .then(d => {
               if (d.saldo >= 100) {
                 maxSaldoCart = d.saldo;
