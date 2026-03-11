@@ -1,1277 +1,394 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock Check — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    body { font-family:'Inter',system-ui,sans-serif; background:#f8fafc; color:#1e293b; }
-    .card-shadow { box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04); }
-    /* Input */
-    .inp { background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:10px; padding:9px 14px; font-size:13px; transition:border .15s; }
-    .inp:focus { outline:none; border-color:#eab308; box-shadow:0 0 0 3px rgba(234,179,8,.1); }
-    .inp::placeholder { color:#94a3b8; }
-    /* Pills */
-    .pill   { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:9px; font-weight:700; white-space:nowrap; }
-    .p-ma   { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; }
-    .p-al   { background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; }
-    .p-no   { background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; }
-    /* Tabs */
-    .tab-btn { padding:8px 18px; border-radius:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:all .15s; border:1px solid transparent; color:#64748b; }
-    .tab-btn.active { background:#0f172a; color:#fff; }
-    /* Tier filter buttons */
-    .tier-btn { width:100%; text-align:left; padding:9px 13px; border-radius:9px; background:#fff; border:1px solid #e2e8f0; color:#475569; font-weight:700; font-size:13px; cursor:pointer; transition:.15s; }
-    .tier-btn:hover { background:#f8fafc; border-color:#cbd5e1; }
-    .tier-btn.active { border-color:#eab308; background:#fffbeb; color:#b45309; }
-    /* Catalog filter btns */
-    .cf-btn { background:#fff; border:1px solid #e2e8f0; color:#64748b; border-radius:8px; padding:5px 12px; font-size:11px; font-weight:700; text-transform:uppercase; cursor:pointer; transition:.15s; }
-    .cf-btn:hover { background:#f8fafc; border-color:#cbd5e1; }
-    .cf-btn.active { background:#0f172a !important; border-color:#0f172a !important; color:#fff !important; }
-    /* Catalog table */
-    #cat-table tr { border-bottom:1px solid #f1f5f9; transition:.1s; }
-    #cat-table tr:hover { background:#fafafa; }
-    #cat-table td { vertical-align:middle; padding:10px 12px; }
-    /* Tier badges */
-    .tier-badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:9px; font-weight:700; cursor:pointer; transition:.15s; border:1px solid; }
-    .tier-badge:hover { opacity:.75; }
-    .tier-none  { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
-    .tier-norm  { background:#eff6ff; color:#2563eb; border-color:#bfdbfe; }
-    .tier-alta  { background:#fffbeb; color:#d97706; border-color:#fde68a; }
-    .tier-muy   { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
-    /* Expand rows */
-    .expand-row { display:none; background:#fafafa; }
-    .expand-row.open { display:table-row; }
-    /* Variante */
-    .var-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center;
-               padding:6px 10px; border-radius:8px; background:#fff; border:1px solid #e2e8f0; margin-top:4px; }
-    .var-row .vname { font-size:11px; color:#475569; line-height:1.3; }
-    .var-row .vstk  { font-size:12px; font-weight:700; text-align:right; }
-    .var-row .vprc  { font-size:11px; color:#94a3b8; text-align:right; }
-    /* Progress */
-    .spin { animation:_spin .8s linear infinite; display:inline-block; }
-    @keyframes _spin { to { transform:rotate(360deg); } }
-    /* Enrich panel subtle */
-    #enrich-panel { background:#fff; border:1px solid #e2e8f0; border-radius:14px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Bóveda GameQuest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .input-clean { background-color: #ffffff; border: 1px solid #cbd5e1; color: #0f172a; transition: all 0.2s; }
+        .input-clean:focus { border-color: #eab308; outline: none; box-shadow: 0 0 0 3px rgba(234,179,8,.15); }
+        .truncate-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0,0,0,.05), 0 2px 4px -1px rgba(0,0,0,.03); }
+        .spin-slow { animation: spin 2s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .tab-btn { padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;cursor:pointer;transition:all .15s;border:1px solid transparent; }
+        .tab-on  { background:#0f172a;color:#fff; }
+        .tab-off { background:#fff;color:#64748b;border-color:#e2e8f0; }
+        .tab-off:hover { background:#f1f5f9;color:#334155; }
+        .order-row { border-left:3px solid transparent; }
+        .order-pending  { border-left-color:#f59e0b; }
+        .order-reviewed { border-left-color:#22c55e; }
+        .order-closed   { border-left-color:#94a3b8; }
+    </style>
 </head>
-<body class="min-h-screen">
+<body class="min-h-screen flex flex-col">
 
-<div id="login-view" class="flex min-h-screen items-center justify-center p-4">
-  <div class="bg-white rounded-2xl border border-slate-100 p-8 w-full max-w-xs text-center card-shadow">
-    <div class="w-11 h-11 bg-slate-900 rounded-xl flex items-center justify-center mx-auto mb-4">
-      <i class="fas fa-magnifying-glass text-yellow-400 text-lg"></i>
+<!-- LOGIN -->
+<div id="login-view" class="flex flex-grow items-center justify-center p-4 bg-slate-50">
+    <div class="w-full max-w-sm bg-white rounded-xl card-shadow border border-slate-100 p-8">
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-50 text-yellow-600 mb-4"><i class="fas fa-lock"></i></div>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Acceso Bóveda</h1>
+        </div>
+        <form onsubmit="event.preventDefault(); login();" class="space-y-5">
+            <input type="text" id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
+            <input type="password" id="pass" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••">
+            <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg transition-all shadow-md transform active:scale-95">INGRESAR</button>
+        </form>
     </div>
-    <h1 class="text-xl font-black text-slate-800">Stock Check</h1>
-    <p class="text-xs text-slate-400 mt-1 mb-6">Consulta de stock · GameQuest</p>
-    <div class="space-y-3 text-left">
-      <input id="lu" type="text"     class="inp w-full" placeholder="Usuario">
-      <input id="lp" type="password" class="inp w-full" placeholder="Contraseña"
-             onkeydown="if(event.key==='Enter')doLogin()">
-      <button onclick="doLogin()"
-        class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3
-               rounded-xl text-xs uppercase tracking-wide transition">
-        INGRESAR
-      </button>
-    </div>
-    <p id="login-err" class="hidden text-red-500 text-xs mt-3"></p>
-  </div>
 </div>
 
-<div id="app" class="hidden min-h-screen flex flex-col">
+<!-- DASHBOARD -->
+<div id="dashboard-view" class="hidden flex-col w-full max-w-[1400px] mx-auto p-4 md:p-8">
 
-  <header class="px-5 py-3 border-b border-slate-200 bg-white sticky top-0 z-50
-                 flex items-center justify-between card-shadow">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-        <i class="fas fa-magnifying-glass text-yellow-400 text-sm"></i>
-      </div>
-      <div>
-        <span class="font-black text-slate-800 text-sm">Stock Check</span>
-        <span id="cache-badge" class="ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full
-               bg-slate-100 text-slate-500 border border-slate-200">cache —</span>
-      </div>
-    </div>
-    <div class="flex items-center gap-2">
-      <button onclick="openBulkImport()"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-               bg-violet-50 text-violet-600 border border-violet-200
-               hover:bg-violet-100 transition">
-        <i class="fas fa-file-import"></i>
-        <span class="hidden sm:inline">Importar CSV</span>
-      </button>
-      <button onclick="syncCache()" id="btn-sync"
-        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-               bg-yellow-50 text-yellow-700 border border-yellow-200
-               hover:bg-yellow-100 transition">
-        <i id="sync-icon" class="fas fa-rotate-right"></i>
-        <span class="hidden sm:inline">Sync JS</span>
-      </button>
-      <button onclick="doLogout()"
-        class="text-slate-400 text-xs font-bold hover:text-slate-700 transition px-2">
-        <i class="fas fa-sign-out-alt"></i>
-      </button>
-    </div>
-  </header>
-
-  <main class="flex-1 p-4 md:p-6 max-w-5xl mx-auto w-full space-y-4">
-
-    <div class="flex gap-1 bg-white border border-slate-200 p-1 rounded-xl card-shadow">
-      <button id="tab-buscar" onclick="showTab('buscar')"
-        class="tab-btn flex-1 py-2 px-3 text-xs">
-        <i class="fas fa-magnifying-glass mr-1.5"></i>Buscar
-      </button>
-      <button id="tab-catalogo" onclick="showTab('catalogo')"
-        class="tab-btn flex-1 py-2 px-3 text-xs">
-        <i class="fas fa-book-open mr-1.5"></i>Catálogo
-        <span id="catalog-count-badge" class="ml-1 hidden text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full"></span>
-      </button>
-    </div>
-
-    <div id="panel-buscar">
-
-      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
-        <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">
-          Buscar carta en Jumpseller
-        </p>
+    <header class="flex justify-between items-center mb-6 pb-4 border-b border-slate-200">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-slate-900 text-yellow-400 rounded flex items-center justify-center"><i class="fas fa-coins"></i></div>
+            <div><h2 class="text-lg font-bold text-slate-800">GameQuest Bóveda</h2><p class="text-xs text-slate-500">Panel de Administración</p></div>
+        </div>
         <div class="flex gap-2">
-          <div class="relative flex-1">
-            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
-            <input id="q" type="text" class="inp w-full pl-10" placeholder="Escribe el nombre…  ej: sol ring"
-                   onkeydown="if(event.key==='Enter')search()" oninput="onInput()">
-            <button id="btn-clear" onclick="clearSearch()"
-              class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition text-sm">
-              <i class="fas fa-xmark"></i>
-            </button>
-          </div>
-          <button onclick="search()" id="btn-search"
-            class="bg-slate-900 hover:bg-slate-800 text-white font-black px-5 rounded-xl
-                   text-xs uppercase tracking-wide transition whitespace-nowrap">
-            BUSCAR
-          </button>
+            <button onclick="syncUsers()" id="btn-sync" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-2"><i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span></button>
+            <button onclick="logout()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 rounded-lg text-xs font-bold transition shadow-sm">SALIR</button>
         </div>
-        <p id="q-hint" class="text-[10px] text-slate-400 mt-2">
-          La búsqueda normaliza el nombre y suma el stock de <strong class="text-slate-500">todas las versiones</strong> (foil, set, condición, etc.)
-        </p>
-      </div>
+    </header>
 
-      <div id="loading" class="hidden bg-white rounded-2xl border border-slate-100 p-6 text-center card-shadow">
-        <i class="fas fa-circle-notch spin text-yellow-500 text-xl mb-2 block"></i>
-        <p class="text-xs text-slate-400">Consultando catálogo…</p>
-      </div>
-
-      <div id="no-results" class="hidden bg-white rounded-2xl border border-slate-100 p-8 text-center card-shadow">
-        <i class="fas fa-ghost text-3xl text-slate-300 mb-3 block"></i>
-        <p class="font-bold text-slate-500" id="no-results-msg">Sin resultados</p>
-        <p class="text-xs text-slate-400 mt-1">Prueba con otro nombre o revisa la ortografía</p>
-      </div>
-
-      <div id="results-wrap" class="hidden mt-4">
-        <div class="flex items-center justify-between mb-2 px-1">
-          <p class="text-xs text-slate-500 font-bold">
-            <span id="res-count">0</span> resultados para <span id="res-q" class="text-slate-800">""</span>
-          </p>
-        </div>
-        <div id="results-list" class="space-y-2"></div>
-      </div>
-
-    </div><div id="panel-catalogo" class="hidden space-y-3">
-
-      <div id="catalog-stats" class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="text-center">
-          <div class="text-xl font-black text-slate-800" id="cs-cards">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">Cartas únicas</div>
-        </div>
-        <div class="text-center">
-          <div class="text-xl font-black text-violet-600" id="cs-skus">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">SKUs en JS</div>
-        </div>
-        <div class="text-center">
-          <div class="text-xl font-black text-green-600" id="cs-stock">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">Stock total</div>
-        </div>
-        <div class="text-center">
-          <div class="text-xl font-black text-yellow-600" id="cs-enriched">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">Con Scryfall IDs</div>
-        </div>
-        <div class="col-span-2 text-center">
-          <div class="text-xs font-black text-slate-500" id="cs-sync">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">Última sync JS</div>
-        </div>
-        <div class="col-span-2 text-center">
-          <div class="text-xs font-black text-violet-500" id="cs-sfmap">—</div>
-          <div class="text-[9px] text-slate-400 uppercase font-bold">Índice Scryfall en RAM</div>
-        </div>
-      </div>
-
-      <div id="enrich-panel" class="p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div class="w-6 h-6 rounded-lg bg-violet-50 flex items-center justify-center">
-              <i class="fas fa-wand-magic-sparkles text-violet-500 text-xs"></i>
-            </div>
-            <div>
-              <div class="text-xs font-black text-slate-700">Poblar Scryfall IDs</div>
-              <div class="text-[9px] text-slate-400">Vincula UUIDs de Scryfall al catálogo</div>
-            </div>
-          </div>
-          <div class="flex gap-2">
-            <button onclick="startEnrich(true)"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-slate-200 text-slate-500
-                     hover:text-slate-700 hover:border-slate-400 transition bg-white">
-              <i class="fas fa-refresh mr-1"></i>Re-procesar todo
-            </button>
-            <button id="btn-enrich" onclick="startEnrich()"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-                     bg-violet-50 text-violet-600 border border-violet-200
-                     hover:bg-violet-100 transition">
-              <i class="fas fa-play mr-1"></i>Iniciar
-            </button>
-          </div>
-        </div>
-
-        <div id="enrich-progress-wrap" class="hidden">
-          <div class="flex items-center gap-2 mb-3 p-2 rounded-lg bg-violet-50 border border-violet-100">
-            <i class="fas fa-circle-notch spin text-violet-500 text-xs"></i>
-            <span class="text-[11px] text-violet-600 font-bold" id="enrich-phase-label">Iniciando…</span>
-          </div>
-          <div class="mb-2">
-            <div class="flex justify-between mb-1">
-              <span class="text-[9px] text-slate-400 uppercase font-bold">Descarga bulk data</span>
-              <span class="text-[10px] font-black text-slate-500" id="enrich-mb">0 MB</span>
-            </div>
-            <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div id="enrich-dl-bar" class="h-full bg-blue-400 rounded-full transition-all duration-300" style="width:0%"></div>
-            </div>
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-[9px] text-slate-400 uppercase font-bold">Guardando en BD</span>
-              <span class="text-[10px] font-black text-violet-600" id="enrich-pct">0%</span>
-            </div>
-            <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div id="enrich-bar" class="h-full bg-gradient-to-r from-violet-400 to-violet-600
-                                          rounded-full transition-all duration-500" style="width:0%"></div>
-            </div>
-          </div>
-          <div class="flex items-center justify-between mt-2">
-            <span class="text-[9px] text-slate-400 font-mono" id="enrich-counts">—</span>
-            <button onclick="cancelEnrich()"
-              class="text-[9px] text-red-500 hover:text-red-600 transition font-bold">
-              <i class="fas fa-stop mr-1"></i>Detener
-            </button>
-          </div>
-        </div>
-
-        <div id="enrich-done-msg" class="hidden text-[10px] text-green-600 font-bold text-center py-1">
-          <i class="fas fa-circle-check mr-1"></i>
-          <span id="enrich-done-text">Enriquecimiento completado</span>
-        </div>
-
-        <p class="text-[9px] text-slate-400 mt-3">
-          Descarga bulk data de Scryfall (~100 MB, streaming). Tarda ~2 min.
-          El servidor sigue disponible. Requiere haber corrido <strong class="text-slate-500">Sync Catálogo</strong> primero.
-        </p>
-      </div>
-
-      <div class="bg-white rounded-2xl border border-slate-100 p-3 card-shadow flex flex-wrap gap-2 items-center">
-        <div class="relative flex-1 min-w-[160px]">
-          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-          <input id="cat-q" type="text" placeholder="Filtrar por nombre…" oninput="catalogFilter()"
-            class="inp w-full pl-8 py-2 text-xs">
-        </div>
-        <div class="flex gap-1 flex-wrap">
-          <button onclick="setCatalogTierFilter('all')"    id="cf-all"    class="cf-btn active">Todas</button>
-          <button onclick="setCatalogTierFilter('sin_tier')" id="cf-sin"  class="cf-btn">Sin tier</button>
-          <button onclick="setCatalogTierFilter('normal')"  id="cf-normal" class="cf-btn" style="color:#2563eb;border-color:#bfdbfe">📦 Normal</button>
-          <button onclick="setCatalogTierFilter('alta')"    id="cf-alta"   class="cf-btn" style="color:#d97706;border-color:#fde68a">⭐ Alta</button>
-          <button onclick="setCatalogTierFilter('muy_alta')" id="cf-muy"  class="cf-btn" style="color:#dc2626;border-color:#fecaca">🔥 Muy Alta</button>
-        </div>
-        <button onclick="syncCatalog()" id="btn-cat-sync"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
-                 bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition whitespace-nowrap">
-          <i class="fas fa-rotate-right"></i>Sync Catálogo
+    <!-- Tabs -->
+    <div class="flex gap-2 mb-6">
+        <button id="tab-qp"     onclick="showTab('qp')"     class="tab-btn tab-on"><i class="fas fa-coins mr-1.5"></i>QuestPoints</button>
+        <button id="tab-orders" onclick="showTab('orders')" class="tab-btn tab-off">
+            <i class="fas fa-inbox mr-1.5"></i>Cotizaciones
+            <span id="orders-badge" class="hidden ml-1.5 bg-amber-400 text-slate-900 text-[9px] font-black px-1.5 py-0.5 rounded-full">0</span>
         </button>
-      </div>
+    </div>
 
-      <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
-        <div id="cat-loading" class="hidden p-8 text-center">
-          <i class="fas fa-circle-notch spin text-yellow-500 text-xl mb-2 block"></i>
-          <p class="text-xs text-slate-400">Cargando catálogo…</p>
+    <!-- ══ TAB QuestPoints ══ -->
+    <div id="panel-qp">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Circulante Total</p><p id="stat-pts" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Clientes Totales</p><p id="stat-count" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
+            <div class="bg-white p-6 rounded-xl border border-slate-100 card-shadow"><p class="text-xs font-bold text-slate-400 uppercase">Histórico Canjeado</p><p id="stat-redeemed" class="text-3xl font-black text-slate-800 mt-1">--</p></div>
         </div>
-        <div id="cat-empty" class="hidden p-8 text-center">
-          <i class="fas fa-box-open text-3xl text-slate-300 mb-3 block"></i>
-          <p class="text-sm font-bold text-slate-400">Sin cartas en el catálogo</p>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div class="relative w-full md:w-96">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400"><i class="fas fa-search"></i></div>
+                <input type="text" id="search-input" onkeyup="if(event.key==='Enter') load()" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre o email...">
+            </div>
+            <div class="flex w-full md:w-auto gap-3 items-center">
+                <select id="filter-mode" onchange="load()" class="input-clean rounded-lg py-2.5 px-3 text-sm font-bold text-slate-600 bg-slate-50 cursor-pointer">
+                    <option value="all">👁️ Ver Todos</option>
+                    <option value="balance">💰 Solo con Saldo</option>
+                </select>
+                <button onclick="load()" class="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm">BUSCAR</button>
+            </div>
         </div>
-        <table id="cat-table" class="w-full text-left" style="border-collapse:collapse">
-          <thead>
-            <tr class="bg-slate-50 border-b border-slate-200">
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Carta</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Tier</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">Stock</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">SKUs</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Scryfall</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Ver</th>
-            </tr>
-          </thead>
-          <tbody id="cat-tbody"></tbody>
-        </table>
+        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden">
+            <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div class="col-span-3 pl-2">Cliente</div><div class="col-span-3">Nombre</div>
+                <div class="col-span-2 text-center">Histórico</div>
+                <div class="col-span-2 text-center">Saldo</div>
+                <div class="col-span-2 text-center">Acciones</div>
+            </div>
+            <div id="user-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto"></div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
+                Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados
+            </div>
+        </div>
+    </div>
 
-        <div id="cat-pagination" class="hidden bg-slate-50 border-t border-slate-200 p-3 flex items-center justify-between text-xs">
-          <button id="cat-prev" onclick="catPrevPage()"
-            class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 transition font-bold disabled:opacity-40">
-            ← Anterior
-          </button>
-          <span id="cat-page-info" class="text-slate-500 font-bold"></span>
-          <button id="cat-next" onclick="catNextPage()"
-            class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 transition font-bold disabled:opacity-40">
-            Siguiente →
-          </button>
+    <!-- ══ TAB Cotizaciones ══ -->
+    <div id="panel-orders" class="hidden">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-3 items-center justify-between">
+            <div class="flex gap-2 flex-wrap">
+                <button onclick="setOrderFilter('all')"      id="of-all"      class="tab-btn tab-on">Todas</button>
+                <button onclick="setOrderFilter('pending')"  id="of-pending"  class="tab-btn tab-off">⏳ Pendientes</button>
+                <button onclick="setOrderFilter('reviewed')" id="of-reviewed" class="tab-btn tab-off">✅ Revisadas</button>
+                <button onclick="setOrderFilter('closed')"   id="of-closed"   class="tab-btn tab-off">🔒 Cerradas</button>
+            </div>
+            <button onclick="loadOrders()" class="px-5 py-2.5 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 transition">
+                <i class="fas fa-rotate-right mr-1.5"></i>Actualizar
+            </button>
         </div>
-      </div>
-
-      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
-        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">Gestión de Tiers (Staples)</div>
-        <div id="tier-btns" class="space-y-1">
-          <button class="tier-btn active" onclick="loadStaples('all')">Todos los tiers</button>
-          <button class="tier-btn" onclick="loadStaples('muy_alta')">🔥 Muy Alta demanda</button>
-          <button class="tier-btn" onclick="loadStaples('alta')">⭐ Alta demanda</button>
-          <button class="tier-btn" onclick="loadStaples('normal')">📦 Normal</button>
+        <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden">
+            <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <div class="col-span-1 text-center">#</div>
+                <div class="col-span-3">Vendedor</div>
+                <div class="col-span-1 text-center">Pago</div>
+                <div class="col-span-2 text-right">QP</div>
+                <div class="col-span-2 text-right">Cash</div>
+                <div class="col-span-1 text-center">Estado</div>
+                <div class="col-span-1 text-center">Fecha</div>
+                <div class="col-span-1 text-center">Ver</div>
+            </div>
+            <div id="orders-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto">
+                <div class="p-8 text-center text-slate-400 italic">Cargando...</div>
+            </div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
+                <span id="orders-count" class="font-bold text-slate-800">0</span> cotizaciones
+            </div>
         </div>
-        <p id="tier-hint" class="text-[9px] text-slate-400 mt-3">Haz click en una carta del catálogo para cambiar su tier.</p>
-      </div>
+    </div>
 
-      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow space-y-3">
-        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Importación / Exportación</div>
-        <div class="flex gap-2 flex-wrap">
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">Bulk CSV Jumpseller</label>
-            <input type="file" id="bulk-csv" accept=".csv" class="inp text-xs py-1.5">
-          </div>
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">CSV con Scryfall IDs</label>
-            <input type="file" id="sf-csv" accept=".csv" class="inp text-xs py-1.5">
-          </div>
-          <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">Sync desde CSV</label>
-            <input type="file" id="sync-csv" accept=".csv" class="inp text-xs py-1.5">
-          </div>
-        </div>
-      </div>
+</div>
 
-    </div></main>
-</div><script>
+<script>
 const API = "https://gamecoins.onrender.com";
-const fmtCLP = (n) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n);
-let TOKEN = null;
-let lastResults = [];
+let authToken = null;
+let allOrders = [];
+let orderFilter = 'all';
 
-// Normalización canónica idéntica a _canonical() de Python
-function canonical(name) {
-  if (!name) return '';
-  let n = name.split('|')[0].trim();
-  n = n.split(/[\u2013\u2014\u2015]/)[0].trim();
-  n = n.replace(/[\(\[][^\)\]]*[\)\]]/g, '').trim();
-  n = n.replace(/[\u2018\u2019\u201A\u201B\u02BC\u02B9\u0060\u00B4\uFF07]/g, "'");
-  n = n.normalize('NFD').replace(/\p{Mn}/gu, '');
-  return n.toLowerCase().replace(/\s+/g, ' ').trim();
+function authH() { return { "Authorization": `Bearer ${authToken}`, "Content-Type": "application/json" }; }
+
+async function login() {
+    const u = document.getElementById('user').value;
+    const p = document.getElementById('pass').value;
+    try {
+        const res = await fetch(`${API}/api/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,password:p}) });
+        if (res.ok) {
+            authToken = (await res.json()).access_token;
+            document.getElementById('login-view').classList.add('hidden');
+            const dash = document.getElementById('dashboard-view');
+            dash.classList.remove('hidden'); dash.classList.add('flex');
+            load(); loadOrders();
+        } else { Swal.fire('Error','Credenciales inválidas','error'); }
+    } catch(e) { Swal.fire('Error','Sin conexión','error'); }
 }
+function logout() { authToken = null; location.reload(); }
 
-function ah() { return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }; }
-
-// ── Auth ───────────────────────────────────────────────────────────────────────
-async function doLogin() {
-  const u = document.getElementById('lu').value.trim();
-  const p = document.getElementById('lp').value.trim();
-  const errEl = document.getElementById('login-err');
-  errEl.classList.add('hidden');
-  try {
-    const r = await fetch(`${API}/api/auth/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p })
-    });
-    if (!r.ok) { errEl.textContent = 'Credenciales inválidas'; errEl.classList.remove('hidden'); return; }
-    TOKEN = (await r.json()).access_token;
-    document.getElementById('login-view').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    checkCacheStatus();
-    document.getElementById('q').focus();
-  } catch(e) { errEl.textContent = 'Sin conexión'; errEl.classList.remove('hidden'); }
-}
-
-function doLogout() { TOKEN = null; location.reload(); }
-
-// ── Cache status ───────────────────────────────────────────────────────────────
-async function checkCacheStatus() {
-  try {
-    const r = await fetch(`${API}/api/admin/cache_status`, { headers: ah() });
-    const d = await r.json();
-    const badge = document.getElementById('cache-badge');
-    if (d.cache_valid) {
-      const min = Math.floor(d.cache_age_sec / 60);
-      badge.textContent = `${d.cards_loaded} cartas · hace ${min}m`;
-      badge.className = badge.className.replace('text-slate-500 border-slate-700',
-                                                 'text-green-400 border-green-800');
-    } else {
-      badge.textContent = 'cache expirado';
-      badge.className = badge.className.replace('text-slate-500 border-slate-700',
-                                                 'text-amber-400 border-amber-800');
-    }
-  } catch(_) {}
-}
-
-async function syncCache() {
-  const icon = document.getElementById('sync-icon');
-  const btn  = document.getElementById('btn-sync');
-  icon.classList.add('spin'); btn.disabled = true;
-  try {
-    const r = await fetch(`${API}/api/admin/warmup_cache`, { method: 'POST', headers: ah() });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
-    showToast(`✅ ${d.cards_loaded} cartas cargadas — ${d.total_stock} u. en stock`);
-    checkCacheStatus();
-    // Re-ejecutar búsqueda con datos frescos
-    if (document.getElementById('q').value.trim().length >= 2) search();
-  } catch(e) {
-    showToast(`❌ ${e.message}`, 'error');
-  } finally {
-    icon.classList.remove('spin'); btn.disabled = false;
-  }
-}
-
-// ── Búsqueda ───────────────────────────────────────────────────────────────────
-function onInput() {
-  const q = document.getElementById('q').value;
-  document.getElementById('btn-clear').classList.toggle('hidden', !q);
-  // AutoSearch con debounce si tiene 3+ caracteres
-  clearTimeout(window._searchTimer);
-  if (q.trim().length >= 3)
-    window._searchTimer = setTimeout(search, 500);
-}
-
-function clearSearch() {
-  document.getElementById('q').value = '';
-  document.getElementById('btn-clear').classList.add('hidden');
-  document.getElementById('results-wrap').classList.add('hidden');
-  document.getElementById('no-results').classList.add('hidden');
-  document.getElementById('q').focus();
-}
-
-async function search() {
-  const q = document.getElementById('q').value.trim();
-  if (q.length < 2) return;
-
-  document.getElementById('loading').classList.remove('hidden');
-  document.getElementById('results-wrap').classList.add('hidden');
-  document.getElementById('no-results').classList.add('hidden');
-
-  try {
-    const r = await fetch(`${API}/api/admin/stock_lookup?q=${encodeURIComponent(q)}`, { headers: ah() });
-    if (!r.ok) throw new Error((await r.json()).detail || 'Error');
-    const d = await r.json();
-    lastResults = d.results || [];
-
-    document.getElementById('loading').classList.add('hidden');
-
-    if (!lastResults.length) {
-      document.getElementById('no-results-msg').textContent = `Sin resultados para "${q}"`;
-      document.getElementById('no-results').classList.remove('hidden');
-      return;
-    }
-
-    renderResults(d);
-  } catch(e) {
-    document.getElementById('loading').classList.add('hidden');
-    showToast(`❌ ${e.message}`, 'error');
-  }
-}
-
-// ── Renderizado ────────────────────────────────────────────────────────────────
-const TIER_PILL = {
-  muy_alta: '<span class="pill p-ma">⭐ Muy Alta</span>',
-  alta:     '<span class="pill p-al">🟢 Alta</span>',
-  normal:   '<span class="pill p-no">📄 Normal</span>',
-};
-const TIER_OPTIONS = [
-  { v: 'muy_alta', label: '⭐ Muy Alta',  desc: 'Comprar siempre — sin límite de stock' },
-  { v: 'alta',     label: '🟢 Alta',      desc: 'Stock mínimo 8 unidades' },
-  { v: 'normal',   label: '📄 Normal',    desc: 'Stock mínimo 4 unidades' },
-];
-
-function renderResults(d) {
-  const q = document.getElementById('q').value.trim();
-
-  document.getElementById('res-count').textContent =
-    `${d.results.length}${d.total_matches > 20 ? ` de ${d.total_matches}` : ''}`;
-  document.getElementById('res-q').textContent = `"${d.q_normalized}"`;
-
-  const list = document.getElementById('results-list');
-  list.innerHTML = '';
-
-  d.results.forEach((c, i) => {
-    const inList = c.in_list;
-    const tierPill = inList ? (TIER_PILL[c.tier] || '') : '';
-
-    const stockColor =
-      c.total_stock === 0  ? 'text-red-400' :
-      c.total_stock <= 2   ? 'text-amber-400' :
-      c.total_stock <= 4   ? 'text-yellow-300' : 'text-green-400';
-
-    // Variantes (mostrar solo si hay más de 1)
-    const varsHtml = (c.variants && c.variants.length > 1) ? `
-      <details class="mt-3">
-        <summary class="text-[10px] text-slate-600 cursor-pointer hover:text-slate-400 select-none">
-          ${c.variants.length} versiones en Jumpseller
-        </summary>
-        <div class="mt-2 space-y-1">
-          ${c.variants.map(v => `
-            <div class="var-row">
-              <span class="vname">${v.name}</span>
-              <span class="vstk ${v.stock===0?'text-slate-700':v.stock<=2?'text-amber-400':'text-slate-300'}">${v.stock} u.</span>
-              <span class="vprc">${v.price>0?'$'+fmtCLP(v.price):''}</span>
-            </div>`).join('')}
-        </div>
-      </details>` : '';
-
-    const card = document.createElement('div');
-    card.className = `glass p-4 transition-all ${inList ? 'border-l-2 ' + (
-      c.tier==='muy_alta'?'border-amber-500':c.tier==='alta'?'border-green-500':'border-slate-500'
-    ) : ''}`;
-    card.innerHTML = `
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <p class="font-black text-white text-sm">${c.display_name}</p>
-            ${tierPill}
-          </div>
-          <p class="text-[9px] text-slate-700 mt-0.5 font-mono">${c.key}</p>
-          ${c.min_stock ? `<p class="text-[10px] text-slate-600 mt-1">mín. ${c.min_stock} u. según tier</p>` : ''}
-          ${varsHtml}
-        </div>
-
-        <div class="flex items-center gap-3 flex-shrink-0">
-          <div class="text-right">
-            <p class="${stockColor} text-2xl font-black leading-none">${c.total_stock}</p>
-            <p class="text-[9px] text-slate-700 mt-0.5">en JS</p>
-            ${c.price_js > 0 ? `<p class="text-[10px] text-slate-500 mt-0.5">$${fmtCLP(c.price_js)}</p>` : ''}
-          </div>
-
-          <button onclick="openTierMenu('${c.key.replace(/'/g,"\\'")}', '${(c.display_name||'').replace(/'/g,"\\'")}', '${c.tier||''}', ${c.staple_id||'null'}, ${i})"
-            class="flex flex-col items-center justify-center w-12 h-12 rounded-xl transition text-[10px] font-bold gap-0.5
-                   ${inList
-                     ? c.tier==='muy_alta' ? 'bg-amber-600/40 text-amber-300 border border-amber-500/40 hover:bg-amber-500/50'
-                     : c.tier==='alta'     ? 'bg-green-700/35 text-green-300 border border-green-500/30 hover:bg-green-600/50'
-                     :                       'bg-slate-600/35 text-slate-300 border border-slate-500/30 hover:bg-slate-500/50'
-                     : 'bg-slate-800/70 text-slate-500 border border-slate-700/50 hover:bg-slate-700/70 hover:text-white'
-                   }">
-            <i class="fas fa-layer-group text-base"></i>
-            <span>${inList ? 'Lista' : 'Agregar'}</span>
-          </button>
-        </div>
-      </div>`;
-
-    list.appendChild(card);
-  });
-
-  document.getElementById('results-wrap').classList.remove('hidden');
-}
-
-// ── Menú de Tier ───────────────────────────────────────────────────────────────
-async function openTierMenu(key, displayName, currentTier, stapleId, idx) {
-  let selected = null;
-
-  const btns = TIER_OPTIONS.map(t => `
-    <button class="tier-btn ${currentTier===t.v?'active':''}" data-tier="${t.v}">
-      ${t.label}
-      <span style="display:block;font-size:10px;font-weight:400;color:#64748b;margin-top:2px">${t.desc}</span>
-    </button>`).join('') + (currentTier ? `
-    <button class="tier-btn" data-tier="quitar"
-      style="color:#f87171;border-color:rgba(239,68,68,.2);margin-top:4px">
-      <i class="fas fa-trash-can mr-1.5 text-xs"></i> Quitar de la lista
-    </button>` : '');
-
-  await Swal.fire({
-    title: 'Lista de Demanda',
-    html: `
-      <p style="font-size:12px;color:#64748b;margin:-4px 0 12px">
-        <strong style="color:#e2e8f0">${displayName || key}</strong>
-      </p>
-      <div style="display:flex;flex-direction:column;gap:5px">${btns}</div>`,
-    showConfirmButton: false,
-    showCancelButton: true,
-    cancelButtonText: 'Cancelar',
-    background: '#1e293b',
-    color: '#e2e8f0',
-    customClass: { popup: 'rounded-2xl' },
-    didOpen: () => {
-      document.querySelectorAll('.tier-btn').forEach(b => {
-        b.addEventListener('click', () => { selected = b.dataset.tier; Swal.close(); });
-      });
-    }
-  });
-
-  if (!selected) return;
-
-  try {
-    if (selected === 'quitar') {
-      if (!stapleId) {
-        // buscar por nombre canónico (inmune a apóstrofes tipográficos)
-        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
-        const ll = await lr.json();
-        const nameCanon = canonical(displayName || key);
-        const ex = ll.find(s => canonical(s.name) === nameCanon);
-        if (ex) {
-          await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
-        }
-      } else {
-        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
-      }
-      lastResults[idx].in_list   = false;
-      lastResults[idx].tier      = null;
-      lastResults[idx].staple_id = null;
-    } else {
-      const r = await fetch(`${API}/api/admin/staples`, {
-        method: 'POST', headers: ah(),
-        body: JSON.stringify({ name: displayName || key, tier: selected, margin_factor: 2.5 })
-      });
-      if (!r.ok) throw new Error((await r.json()).detail || 'Error guardando');
-      const saved = await r.json();
-      lastResults[idx].in_list   = true;
-      lastResults[idx].tier      = selected;
-      lastResults[idx].staple_id = saved.id;
-    }
-
-    // Re-render sin volver a buscar (ya tenemos los datos)
-    renderResults({ results: lastResults, total_matches: lastResults.length,
-                    q_normalized: document.getElementById('res-q').textContent.replace(/"/g,'') });
-    showToast(selected === 'quitar' ? '🗑 Quitado de la lista' : `✅ Guardado como ${selected}`);
-    checkCacheStatus();
-
-  } catch(e) {
-    showToast(`❌ ${e.message}`, 'error');
-  }
-}
-
-// ── Tabs ───────────────────────────────────────────────────────────────────────
 function showTab(tab) {
-  ['buscar','catalogo'].forEach(t => {
-    document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
-    document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
-  });
-  if (tab === 'catalogo' && !catalogLoaded) loadCatalog();
+    ['qp','orders'].forEach(t => {
+        document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+        document.getElementById(`tab-${t}`).className = `tab-btn ${t===tab?'tab-on':'tab-off'}`;
+    });
+    if (tab === 'orders') loadOrders();
 }
 
-// ── Estado del catálogo ────────────────────────────────────────────────────────
-let catalogLoaded = false;
-let catalogPage_  = 1;
-let catalogLimit  = 50;
-let catalogTotal  = 0;
-let catalogTierF  = 'all';
-let catalogQ      = '';
-let catalogDebounce = null;
-
-// ── Cargar stats del catálogo ──────────────────────────────────────────────────
-async function loadCatalogStats() {
-  try {
-    const r = await fetch(`${API}/api/admin/catalog/stats`, { headers: ah() });
-    if (!r.ok) return;
-    const d = await r.json();
-    document.getElementById('cs-cards').textContent     = d.total_cards?.toLocaleString()    || '0';
-    document.getElementById('cs-skus').textContent      = d.total_skus?.toLocaleString()     || '0';
-    document.getElementById('cs-stock').textContent     = d.total_stock?.toLocaleString()    || '0';
-    document.getElementById('cs-enriched').textContent  = d.enriched_cards?.toLocaleString() || '0';
-    document.getElementById('cs-sync').textContent      = d.last_sync
-      ? new Date(d.last_sync).toLocaleString('es-CL', {dateStyle:'short',timeStyle:'short'})
-      : 'Nunca';
-    document.getElementById('cs-sfmap').textContent =
-      (d.scryfall_map_size || 0).toLocaleString() + ' IDs';
-
-    const badge = document.getElementById('catalog-count-badge');
-    if (d.total_cards > 0) {
-      badge.textContent = d.total_cards.toLocaleString();
-      badge.classList.remove('hidden');
-    }
-
-    // Si hay enriquecimiento corriendo, actualizar barra
-    if (d.enrich_running) {
-      updateEnrichBar(d.enrich_done, d.enrich_total, true);
-    }
-  } catch(e) {}
-}
-
-// ── Enriquecimiento Scryfall ───────────────────────────────────────────────────
-let enrichPollInterval = null;
-
-async function startEnrich(reprocess = false) {
-  const verb = reprocess ? 'TODO el catálogo (re-procesar)' : 'todas las cartas del catálogo';
-  const { isConfirmed } = await Swal.fire({
-    title: '🔮 Poblar Scryfall IDs',
-    html: `<p style="font-size:13px;color:#94a3b8;margin-bottom:12px">
-      Descargará el <strong style="color:#e2e8f0">bulk data de Scryfall</strong> (~100MB) y vinculará
-      todos los UUIDs a <strong style="color:#e2e8f0">${verb}</strong>.<br><br>
-      <span style="color:#22c55e">⚡ Solo ~2 minutos — un único request a Scryfall, sin rate limiting.</span><br>
-      El servidor sigue disponible durante el proceso.
-    </p>
-    <p style="font-size:11px;color:#64748b">
-      Asegúrate de haber corrido <strong>Sync Catálogo</strong> primero.
-    </p>`,
-    confirmButtonText: 'Iniciar',
-    showCancelButton: true,
-    confirmButtonColor: '#7c3aed',
-  });
-  if (!isConfirmed) return;
-
-  try {
-    const r = await fetch(`${API}/api/admin/catalog/enrich_scryfall`,
-      { method: 'POST', headers: ah() });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
-
-    if (d.status === 'already_running') {
-      showToast('⚠️ Ya hay un proceso en curso', 'error');
-      startEnrichPoll();   // conectar al progreso existente
-    } else {
-      showToast('🚀 Bulk enrichment iniciado');
-      startEnrichPoll();
-    }
-  } catch(e) { showToast(`❌ ${e.message}`, 'error'); }
-}
-
-async function cancelEnrich() {
-  await fetch(`${API}/api/admin/catalog/enrich_cancel`, { method: 'POST', headers: ah() });
-  showToast('⏹ Enriquecimiento detenido');
-  stopEnrichPoll();
-}
-
-function startEnrichPoll() {
-  document.getElementById('enrich-progress-wrap').classList.remove('hidden');
-  document.getElementById('enrich-done-msg').classList.add('hidden');
-  document.getElementById('btn-enrich').disabled = true;
-  if (enrichPollInterval) clearInterval(enrichPollInterval);
-  enrichPollInterval = setInterval(pollEnrichStatus, 2000);
-}
-
-function stopEnrichPoll() {
-  if (enrichPollInterval) { clearInterval(enrichPollInterval); enrichPollInterval = null; }
-  document.getElementById('btn-enrich').disabled = false;
-}
-
-async function pollEnrichStatus() {
-  try {
-    const r = await fetch(`${API}/api/admin/catalog/enrich_status`, { headers: ah() });
-    const d = await r.json();
-
-    // Fase label
-    const phaseEl = document.getElementById('enrich-phase-label');
-    if (phaseEl) phaseEl.textContent = d.phase_label || d.phase || '…';
-
-    // MB descargados
-    const mb = d.mb_downloaded || 0;
-    const dlPct = Math.min(100, Math.round(mb / 100 * 100));
-    const mbEl = document.getElementById('enrich-mb');
-    if (mbEl) mbEl.textContent = `${mb.toFixed(1)} MB`;
-    const dlBar = document.getElementById('enrich-dl-bar');
-    if (dlBar) dlBar.style.width = `${dlPct}%`;
-
-    updateEnrichBar(d.done, d.total, d.running);
-
-    document.getElementById('enrich-counts').textContent =
-      `${d.done.toLocaleString()} / ${d.total.toLocaleString()} cartas · ` +
-      `${d.skipped} sin match · ` +
-      `${(d.scryfall_map_size||0).toLocaleString()} IDs en RAM`;
-
-    if (!d.running && enrichPollInterval) {
-      stopEnrichPoll();
-      document.getElementById('enrich-progress-wrap').classList.add('hidden');
-      const msg = document.getElementById('enrich-done-msg');
-      document.getElementById('enrich-done-text').textContent =
-        `✅ ${d.done.toLocaleString()} cartas · ${(d.scryfall_map_size||0).toLocaleString()} Scryfall IDs en índice · ${mb.toFixed(1)} MB procesados`;
-      msg.classList.remove('hidden');
-      catalogLoaded = false;
-      loadCatalog();
-    }
-  } catch(e) {}
-}
-
-function updateEnrichBar(done, total, running) {
-  const pct = total > 0 ? Math.round(100 * done / total) : 0;
-  const bar  = document.getElementById('enrich-bar');
-  const pctEl = document.getElementById('enrich-pct');
-  if (bar)   bar.style.width   = `${pct}%`;
-  if (pctEl) pctEl.textContent = `${pct}%`;
-}
-
-// ── Cargar tabla catálogo ──────────────────────────────────────────────────────
-async function loadCatalog() {
-  document.getElementById('cat-loading').classList.remove('hidden');
-  document.getElementById('cat-table').classList.add('hidden');
-  document.getElementById('cat-empty').classList.add('hidden');
-  document.getElementById('cat-pagination').classList.add('hidden');
-
-  const params = new URLSearchParams({
-    page:  catalogPage_,
-    limit: catalogLimit,
-    ...(catalogQ    ? { q:    catalogQ }    : {}),
-    ...(catalogTierF !== 'all' ? { tier: catalogTierF } : {}),
-  });
-
-  try {
-    const r = await fetch(`${API}/api/admin/catalog?${params}`, { headers: ah() });
-    if (!r.ok) throw new Error('Error cargando catálogo');
-    const data = await r.json();
-
-    document.getElementById('cat-loading').classList.add('hidden');
-    catalogTotal  = data.total;
-    catalogLoaded = true;
-
-    if (!data.results?.length) {
-      document.getElementById('cat-empty').classList.remove('hidden');
-      return;
-    }
-
-    renderCatalogTable(data.results);
-    renderCatalogPagination(data);
-    await loadCatalogStats();
-  } catch(e) {
-    document.getElementById('cat-loading').classList.add('hidden');
-    document.getElementById('cat-empty').classList.remove('hidden');
-    showToast(`❌ ${e.message}`, 'error');
-  }
-}
-
-// ── Render tabla ───────────────────────────────────────────────────────────────
-function renderCatalogTable(rows) {
-  const tbody = document.getElementById('cat-tbody');
-  tbody.innerHTML = '';
-
-  rows.forEach((c, idx) => {
-    const tierBadge = tierBadgeHtml(c.tier, c.staple_id, c.canonical, c.name);
-    const stockColor = c.total_stock === 0 ? 'text-red-400'
-                     : c.total_stock < 3   ? 'text-yellow-400' : 'text-green-400';
-    const sfCount    = (c.scryfall_ids || []).length;
-    const varCount   = (c.variants    || []).length;
-    const hasDetail  = varCount > 0 || sfCount > 0;
-
-    // Fila principal
-    const tr = document.createElement('tr');
-    tr.id = `crow-${idx}`;
-    tr.innerHTML = `
-      <td class="px-4 py-3">
-        <div class="flex items-center gap-2">
-          ${hasDetail ? `<button onclick="toggleExpand(${idx})"
-            class="text-slate-600 hover:text-white transition text-xs w-4 text-center">
-            <i id="exp-icon-${idx}" class="fas fa-chevron-right"></i></button>` : '<span class="w-4"></span>'}
-          <div>
-            <div class="font-bold text-white text-[13px]">${esc(c.name)}</div>
-            <div class="text-[10px] text-slate-600 font-mono">${esc(c.canonical)}</div>
-          </div>
-        </div>
-      </td>
-      <td class="px-3 py-3 text-center">
-        <span class="font-black text-sm ${stockColor}">${c.total_stock ?? '—'}</span>
-      </td>
-      <td class="px-3 py-3 text-center">
-        <span class="text-[11px] text-slate-400">${varCount}</span>
-      </td>
-      <td class="px-3 py-3 text-center">
-        ${sfCount > 0
-          ? `<span class="text-[10px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full">${sfCount} IDs</span>`
-          : `<span class="text-[10px] text-slate-700">—</span>`}
-      </td>
-      <td class="px-3 py-3 text-center">
-        ${tierBadge}
-      </td>
-      <td class="px-4 py-3 text-right">
-        <button onclick="addToCatalogSync('${esc(c.canonical)}', '${esc(c.name)}')"
-          class="text-[10px] text-slate-600 hover:text-yellow-400 transition font-bold px-2 py-1 rounded-lg hover:bg-yellow-500/10">
-          <i class="fas fa-plus mr-1"></i>SF IDs
-        </button>
-      </td>`;
-    tbody.appendChild(tr);
-
-    // Fila expandible
-    if (hasDetail) {
-      const tr2 = document.createElement('tr');
-      tr2.id = `cexp-${idx}`;
-      tr2.className = 'expand-row';
-      tr2.innerHTML = `
-        <td colspan="6" class="px-6 pb-4">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-            <div>
-              <p class="text-[9px] font-bold text-slate-600 uppercase mb-2">
-                <i class="fas fa-store mr-1"></i>Variantes en Jumpseller
-              </p>
-              ${(c.variants || []).map(v => `
-                <div class="var-row">
-                  <span class="vname">${esc(v.name || '—')}</span>
-                  <span class="vstk ${v.stock === 0 ? 'text-red-400' : 'text-green-400'}">${v.stock ?? 0} u.</span>
-                  <span class="text-[10px] text-slate-500">${v.price ? '$'+fmtCLP(v.price) : '—'}</span>
-                </div>`).join('') || '<p class="text-[11px] text-slate-700 mt-1">Sin variantes en JS</p>'}
-            </div>
-            <div>
-              <p class="text-[9px] font-bold text-slate-600 uppercase mb-2">
-                <i class="fas fa-fingerprint mr-1"></i>Scryfall IDs vinculados
-              </p>
-              ${(c.scryfall_ids || []).map(s => {
-                const sid = typeof s === 'string' ? s : s?.scryfall_id || '—';
-                const set = typeof s === 'object' ? (s.set_code || '') : '';
-                const fn  = typeof s === 'object' ? (s.foil || 'normal') : 'normal';
-                return `
-                <div class="var-row">
-                  <span class="vname font-mono text-[10px]">${esc(sid)}</span>
-                  ${set ? `<span class="text-[10px] font-bold text-slate-500 uppercase">${esc(set)}</span>` : ''}
-                  ${fn !== 'normal' ? `<span class="text-[9px] font-bold text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded-full">${fn}</span>` : '<span></span>'}
+// ── QuestPoints ───────────────────────────────────────────────────────────────
+async function load() {
+    if (!authToken) return;
+    const search = document.getElementById('search-input').value;
+    const mode   = document.getElementById('filter-mode').value;
+    document.getElementById('user-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Cargando datos...</div>';
+    try {
+        let url = `${API}/admin/users?limit=100`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (mode === 'balance') url += `&only_balance=true`;
+        const res = await fetch(url, { headers: authH() });
+        if (res.status === 403) { logout(); return; }
+        const data = await res.json();
+        let html = '';
+        if (!data.users.length) {
+            html = '<div class="p-8 text-center text-slate-500">No se encontraron clientes.</div>';
+        } else {
+            data.users.forEach(u => {
+                const name     = (u.name||u.surname) ? `${u.name||''} ${u.surname||''}` : '<i class="text-slate-400">Sin nombre</i>';
+                const initials = u.email.substring(0,2).toUpperCase();
+                html += `
+                <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-4 md:gap-0 border-b border-slate-100 md:border-0">
+                    <div class="md:col-span-3 flex items-center gap-3 pl-2 overflow-hidden">
+                        <div class="w-10 h-10 flex-shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">${initials}</div>
+                        <p class="font-bold text-slate-800 text-sm truncate-text" title="${u.email}">${u.email}</p>
+                    </div>
+                    <div class="md:col-span-3 text-sm text-slate-600 truncate-text">${name}</div>
+                    <div class="md:col-span-2 text-center"><span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span></div>
+                    <div class="md:col-span-2 text-center"><span class="inline-block border rounded-lg px-3 py-1 text-sm font-bold ${u.saldo>0?'bg-yellow-50 text-yellow-700 border-yellow-200':'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span></div>
+                    <div class="md:col-span-2 flex justify-center gap-2">
+                        <button onclick="adjust('${u.email}','add')"      class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition"><i class="fas fa-plus"></i></button>
+                        <button onclick="adjust('${u.email}','subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition"><i class="fas fa-minus"></i></button>
+                    </div>
                 </div>`;
-              }).join('') || '<p class="text-[11px] text-slate-700 mt-1">Sin Scryfall IDs — sube un CSV de Manabox en Sync Catálogo</p>'}
+            });
+        }
+        document.getElementById('user-table').innerHTML = html;
+        document.getElementById('stat-count').innerText    = data.totalCount.toLocaleString();
+        document.getElementById('stat-pts').innerText      = data.totalPointsInVault.toLocaleString();
+        document.getElementById('stat-redeemed').innerText = '$' + data.totalRedeemed.toLocaleString();
+        document.getElementById('results-count').innerText = data.users.length;
+    } catch(e) { console.error(e); }
+}
+
+async function syncUsers() {
+    const btn = document.getElementById('btn-sync');
+    const icon = btn.querySelector('i');
+    icon.classList.add('spin-slow'); btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-sync-alt spin-slow"></i> SINCRONIZANDO...`;
+    try {
+        const res = await fetch(`${API}/admin/sync_users`, { method:'POST', headers:authH() });
+        const data = await res.json();
+        if (data.status === 'success') {
+            Swal.fire({icon:'success', title:'Sincronización Completa', text:`Agregados: ${data.details.added}, Actualizados: ${data.details.updated}`, confirmButtonColor:'#2563eb'});
+            load();
+        }
+    } catch(e) { Swal.fire('Error','Fallo Sync','error'); }
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-sync-alt"></i> <span class="hidden md:inline">SYNC CLIENTES</span>`;
+    icon.classList.remove('spin-slow');
+}
+
+async function adjust(email, op) {
+    const isAdd = op === 'add';
+    const { value: amt } = await Swal.fire({ title: isAdd?'ABONAR':'DESCONTAR', html:`<p class="text-sm text-slate-500">${email}</p>`, input:'number', confirmButtonColor:isAdd?'#22c55e':'#ef4444', showCancelButton:true });
+    if (amt && parseInt(amt) > 0) {
+        await fetch(`${API}/admin/adjust_balance`, { method:'POST', headers:authH(), body:JSON.stringify({email, amount:parseInt(amt), operation:op}) });
+        load();
+    }
+}
+
+// ── Cotizaciones Buylist ───────────────────────────────────────────────────────
+async function loadOrders() {
+    try {
+        const res = await fetch(`${API}/api/admin/buylist_orders`, { headers: authH() });
+        if (!res.ok) return;
+        allOrders = await res.json();
+        const pend = allOrders.filter(o => o.status === 'pending').length;
+        const badge = document.getElementById('orders-badge');
+        if (pend > 0) { badge.textContent = pend; badge.classList.remove('hidden'); }
+        else badge.classList.add('hidden');
+        renderOrders();
+    } catch(e) { console.error('loadOrders', e); }
+}
+
+function setOrderFilter(f) {
+    orderFilter = f;
+    ['all','pending','reviewed','closed'].forEach(k => {
+        document.getElementById(`of-${k}`).className = `tab-btn ${k===f?'tab-on':'tab-off'}`;
+    });
+    renderOrders();
+}
+
+function renderOrders() {
+    const filtered = orderFilter === 'all' ? allOrders : allOrders.filter(o => o.status === orderFilter);
+    document.getElementById('orders-count').textContent = filtered.length;
+
+    const PAY  = { credito:'bg-yellow-50 text-yellow-800 💎 QP', cash:'bg-green-50 text-green-800 💵 Cash', mixto:'bg-purple-50 text-purple-800 🔀 Mixto' };
+    const STAT = { pending:'bg-amber-50 text-amber-800 ⏳', reviewed:'bg-green-50 text-green-800 ✅', closed:'bg-slate-100 text-slate-500 🔒' };
+    const BORDER = { pending:'order-pending', reviewed:'order-reviewed', closed:'order-closed' };
+
+    if (!filtered.length) {
+        document.getElementById('orders-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Sin cotizaciones en esta categoría.</div>';
+        return;
+    }
+
+    let html = filtered.map(o => {
+        const payParts  = (PAY[o.payment_preference]  || 'bg-slate-100 text-slate-500 ?').split(' ');
+        const statParts = (STAT[o.status]              || 'bg-slate-100 text-slate-500 ?').split(' ');
+        const payBg = payParts[0], payFg = payParts[1], payLabel = payParts.slice(2).join(' ');
+        const stBg  = statParts[0], stFg = statParts[1], stLabel = statParts.slice(2).join(' ');
+        const fecha = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+        return `
+        <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-3 md:gap-0 order-row ${BORDER[o.status]||''}">
+            <div class="md:col-span-1 text-center text-xs font-black text-slate-400">#${o.id}</div>
+            <div class="md:col-span-3 overflow-hidden">
+                <p class="font-bold text-sm text-slate-800 truncate-text" title="${o.email}">${o.email}</p>
+                <p class="text-xs text-slate-400">${o.rut||''}</p>
             </div>
-          </div>
-        </td>`;
-      tbody.appendChild(tr2);
-    }
-  });
-
-  document.getElementById('cat-table').classList.remove('hidden');
+            <div class="md:col-span-1 text-center">
+                <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${payBg} ${payFg}">${payLabel}</span>
+            </div>
+            <div class="md:col-span-2 text-right font-black text-amber-700 text-sm">$${(o.total_credito||0).toLocaleString()}</div>
+            <div class="md:col-span-2 text-right font-black text-green-700 text-sm">$${(o.total_cash||0).toLocaleString()}</div>
+            <div class="md:col-span-1 text-center">
+                <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${stBg} ${stFg}">${stLabel}</span>
+            </div>
+            <div class="md:col-span-1 text-center text-xs text-slate-400">${fecha}</div>
+            <div class="md:col-span-1 text-center">
+                <button onclick="viewOrder(${o.id})" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center mx-auto transition text-xs">
+                    <i class="fas fa-eye"></i>
+                </button>
+            </div>
+        </div>`;
+    }).join('');
+    document.getElementById('orders-table').innerHTML = html;
 }
 
-function toggleExpand(idx) {
-  const row  = document.getElementById(`cexp-${idx}`);
-  const icon = document.getElementById(`exp-icon-${idx}`);
-  if (!row) return;
-  const open = row.classList.toggle('open');
-  icon.className = `fas fa-chevron-${open ? 'down' : 'right'}`;
-}
+async function viewOrder(id) {
+    const o = allOrders.find(x => x.id === id);
+    if (!o) return;
+    const items = Array.isArray(o.items) ? o.items : [];
+    const FOIL = { foil:'✨ Foil', etched:'⬡ Etched', normal:'' };
+    const COND = { near_mint:'', lightly_played:'LP', moderately_played:'MP', heavily_played:'HP', damaged:'DMG' };
+    const PAY_LABEL = { credito:'💎 QuestPoints / Crédito', cash:'💵 Transferencia / Cash', mixto:'🔀 Combinación' };
 
-function tierBadgeHtml(tier, stapleId, canonical, name) {
-  const t = tier || null;
-  const cls = !t ? 'tier-none' : t === 'muy_alta' ? 'tier-muy' : t === 'alta' ? 'tier-alta' : 'tier-norm';
-  const lbl = !t ? '— sin tier' : t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : '📦 Normal';
-  return `<span class="tier-badge ${cls}" onclick="openTierMenuCatalog('${esc(canonical)}','${esc(name)}',${stapleId||'null'})">${lbl}</span>`;
-}
+    const rows = items.map(it => {
+        const foilT = FOIL[it.foil||'normal']||'';
+        const condT = COND[it.condition||'near_mint']||'';
+        const tags  = [foilT, it.version||'', (it.is_estaca&&!foilT)?'★ De Nicho':'', condT].filter(Boolean).join(' · ');
+        return `<tr style="border-bottom:1px solid #f1f5f9">
+            <td style="padding:8px 10px;font-size:12px"><strong>${it.name||''}</strong>
+            ${tags?`<br><span style="font-size:10px;color:#7c3aed">${tags}</span>`:''}
+            </td>
+            <td style="padding:8px;text-align:center;font-size:12px">${it.qty||1}</td>
+            <td style="padding:8px;text-align:right;font-size:11px;color:#64748b">$${(it.price_usd||0).toFixed(2)}</td>
+            <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;color:#b45309">$${(it.price_credito||0).toLocaleString()}</td>
+            <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;color:#15803d">$${(it.price_cash||0).toLocaleString()}</td>
+        </tr>`;
+    }).join('');
+    const tQP   = items.reduce((s,i) => s + (i.price_credito||0)*(i.qty||1), 0);
+    const tCash = items.reduce((s,i) => s + (i.price_cash||0)*(i.qty||1), 0);
+    const nextStatus = o.status==='pending'?'reviewed':o.status==='reviewed'?'closed':null;
+    const nextLabel  = { reviewed:'✅ Marcar Revisada', closed:'🔒 Cerrar Orden' };
 
-// ── Cambiar tier desde el catálogo ────────────────────────────────────────────
-async function openTierMenuCatalog(canonical, displayName, stapleId) {
-  let selected = null;
-  await Swal.fire({
-    title: `Tier: ${displayName}`,
-    html: `<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-      ${['muy_alta','alta','normal','quitar'].map(t => `
-        <button data-tier="${t}" onclick="document.querySelectorAll('[data-tier]').forEach(b=>b.classList.remove('active'));this.classList.add('active')"
-          class="tier-btn ${t === 'quitar' ? 'border-red-900 text-red-400' : ''}">
-          ${t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : t === 'normal' ? '📦 Normal' : '🗑 Quitar de la lista'}
-        </button>`).join('')}
-    </div>`,
-    showConfirmButton: true, confirmButtonText: 'Guardar',
-    showCancelButton: true,  confirmButtonColor: '#eab308',
-    didOpen: () => {
-      document.querySelectorAll('[data-tier]').forEach(b => {
-        b.addEventListener('click', () => { selected = b.dataset.tier; Swal.close(); });
-      });
-    }
-  });
-  if (!selected) return;
-  try {
-    if (selected === 'quitar') {
-      if (stapleId) {
-        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
-      } else {
-        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
-        const ll = await lr.json();
-        const ex = ll.find(s => canonical(s.name) === canonical);
-        if (ex) await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
-      }
-    } else {
-      await fetch(`${API}/api/admin/staples`, {
-        method: 'POST', headers: ah(),
-        body: JSON.stringify({ name: displayName, tier: selected, margin_factor: 2.5 })
-      });
-    }
-    showToast(selected === 'quitar' ? '🗑 Quitado de la lista' : `✅ ${displayName} → ${selected}`);
-    catalogLoaded = false;
-    loadCatalog();
-  } catch(e) { showToast(`❌ ${e.message}`, 'error'); }
-}
-
-// ── Sync catálogo desde JS + CSV opcional ─────────────────────────────────────
-async function syncCatalog() {
-  const { isConfirmed, value: uploadCsv } = await Swal.fire({
-    title: '🔄 Sync Catálogo',
-    html: `<p style="font-size:13px;color:#94a3b8;margin-bottom:14px">
-      Esto sincroniza el catálogo desde Jumpseller.<br>
-      Opcionalmente sube un CSV de Manabox para vincular Scryfall IDs.
-    </p>
-    <label style="font-size:11px;color:#64748b;font-weight:700;display:block;margin-bottom:8px">
-      CSV Manabox (opcional — aporta Scryfall IDs)
-    </label>
-    <input type="file" id="sync-csv" accept=".csv,.txt"
-      style="width:100%;padding:8px;background:#1e293b;border:1px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:11px">`,
-    confirmButtonText: 'Sincronizar',
-    showCancelButton: true,
-    confirmButtonColor: '#3b82f6',
-    preConfirm: () => document.getElementById('sync-csv').files[0] || null,
-  });
-  if (!isConfirmed) return;
-
-  Swal.fire({ title: 'Sincronizando…',
-    html: '<p style="color:#94a3b8;font-size:13px">Leyendo catálogo de Jumpseller…</p>',
-    allowOutsideClick: false, showConfirmButton: false,
-    didOpen: () => Swal.showLoading() });
-
-  try {
-    const form = new FormData();
-    if (uploadCsv) form.append('file', uploadCsv);
-
-    // Si no hay CSV, enviar como GET-like con form vacío
-    const r = await fetch(`${API}/api/admin/catalog/sync`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: form,
+    const { isDenied, isConfirmed } = await Swal.fire({
+        title: `Orden #${o.id}`, width:'680px',
+        html: `<div style="text-align:left;font-size:12px;color:#1e293b">
+            <table style="width:100%;margin-bottom:12px">
+                <tr><td style="color:#64748b;padding:3px 0">Vendedor</td><td><strong>${o.email}</strong></td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">RUT</td><td>${o.rut||'—'}</td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">Preferencia</td><td>${PAY_LABEL[o.payment_preference]||o.payment_preference}</td></tr>
+                <tr><td style="color:#64748b;padding:3px 0">Estado</td><td><strong>${o.status}</strong></td></tr>
+            </table>
+            <div style="max-height:260px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+            <table style="width:100%;border-collapse:collapse">
+                <thead style="background:#f8fafc;position:sticky;top:0">
+                    <tr style="font-size:10px;color:#64748b;text-transform:uppercase">
+                        <th style="padding:7px 10px;text-align:left">Carta</th>
+                        <th style="padding:7px 8px;text-align:center">Cant.</th>
+                        <th style="padding:7px 8px;text-align:right">USD</th>
+                        <th style="padding:7px 8px;text-align:right;color:#b45309">💎 QP</th>
+                        <th style="padding:7px 8px;text-align:right;color:#15803d">💵 Cash</th>
+                    </tr>
+                </thead>
+                <tbody>${rows||'<tr><td colspan="5" style="text-align:center;padding:16px;color:#94a3b8">Sin ítems</td></tr>'}</tbody>
+                <tfoot style="background:#f8fafc;font-weight:700">
+                    <tr>
+                        <td colspan="3" style="padding:8px 10px;font-size:11px">TOTAL</td>
+                        <td style="padding:8px;text-align:right;color:#b45309">$${tQP.toLocaleString()}</td>
+                        <td style="padding:8px;text-align:right;color:#15803d">$${tCash.toLocaleString()}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            </div>
+        </div>`,
+        showCancelButton: true,
+        showDenyButton:   !!nextStatus,
+        confirmButtonText: 'Cerrar',
+        denyButtonText:   nextStatus ? nextLabel[nextStatus] : '',
+        denyButtonColor:  '#0f172a',
+        cancelButtonText: '✉ Contactar',
+        cancelButtonColor:'#6366f1',
     });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error en sync');
 
-    Swal.fire({
-      icon: 'success', title: '✅ Catálogo sincronizado',
-      html: `<div style="font-size:13px;color:#94a3b8;line-height:1.8">
-        <strong style="color:#e2e8f0">Jumpseller → BD:</strong>
-        ${d.phase1_inserted} nuevas · ${d.phase1_updated} actualizadas<br>
-        ${d.phase2_sf_added !== undefined ? `<strong style="color:#e2e8f0">Scryfall IDs añadidos:</strong> ${d.phase2_sf_added} nuevos · ${d.phase2_sf_skip} ya existían<br>` : ''}
-        <strong style="color:#e2e8f0">Total índice Scryfall:</strong> ${d.scryfall_map_size?.toLocaleString() || '—'} IDs en RAM
-      </div>`,
-      confirmButtonColor: '#3b82f6',
-    });
-    catalogLoaded = false;
-    loadCatalog();
-  } catch(e) { Swal.fire('Error', e.message, 'error'); }
-}
-
-// ── Añadir Scryfall IDs desde CSV a una carta específica ──────────────────────
-async function addToCatalogSync(canonical_key, displayName) {
-  const { value: file } = await Swal.fire({
-    title: `🔗 Vincular SF IDs: ${displayName}`,
-    html: `<p style="font-size:12px;color:#94a3b8;margin-bottom:12px">
-      Sube un CSV de Manabox que contenga esta carta.<br>
-      Se extraerán solo los Scryfall IDs de <strong style="color:#e2e8f0">${esc(displayName)}</strong>.
-    </p>
-    <input type="file" id="sf-csv" accept=".csv"
-      style="width:100%;padding:8px;background:#1e293b;border:1px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:11px">`,
-    confirmButtonText: 'Vincular',
-    showCancelButton: true,
-    confirmButtonColor: '#7c3aed',
-    preConfirm: () => {
-      const f = document.getElementById('sf-csv').files[0];
-      if (!f) { Swal.showValidationMessage('Selecciona un CSV'); return false; }
-      return f;
+    if (isDenied && nextStatus) await updateOrderStatus(id, nextStatus);
+    if (!isConfirmed && !isDenied) {
+        window.location.href = `mailto:${o.email}?subject=Cotización Buylist %23${o.id} — GameQuest`;
     }
-  });
-  if (!file) return;
-  // Reutilizar el endpoint catalog/sync que también acepta CSV
-  const form = new FormData();
-  form.append('file', file);
-  Swal.fire({ title: 'Vinculando…', allowOutsideClick: false, showConfirmButton: false,
-    didOpen: () => Swal.showLoading() });
-  try {
-    const r = await fetch(`${API}/api/admin/catalog/sync`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
-    showToast(`✅ ${d.phase2_sf_added} Scryfall IDs vinculados`);
-    catalogLoaded = false;
-    loadCatalog();
-  } catch(e) { Swal.fire('Error', e.message, 'error'); }
 }
 
-// ── Filtros y paginación del catálogo ─────────────────────────────────────────
-function setCatalogTierFilter(tier) {
-  catalogTierF = tier;
-  catalogPage_ = 1;
-  document.querySelectorAll('.cf-btn').forEach(b => b.classList.remove('active'));
-  const map = { all:'cf-all', sin_tier:'cf-sin', normal:'cf-normal', alta:'cf-alta', muy_alta:'cf-muy' };
-  document.getElementById(map[tier] || 'cf-all')?.classList.add('active');
-  loadCatalog();
-}
-
-function catalogFilter() {
-  clearTimeout(catalogDebounce);
-  catalogDebounce = setTimeout(() => {
-    catalogQ = document.getElementById('cat-q').value.trim();
-    catalogPage_ = 1;
-    loadCatalog();
-  }, 350);
-}
-
-function catalogPage(dir) {
-  const maxPage = Math.ceil(catalogTotal / catalogLimit);
-  catalogPage_ = Math.max(1, Math.min(maxPage, catalogPage_ + dir));
-  loadCatalog();
-}
-
-function renderCatalogPagination(data) {
-  const pag = document.getElementById('cat-pagination');
-  const from = (data.page - 1) * data.limit + 1;
-  const to   = Math.min(data.page * data.limit, data.total);
-  document.getElementById('cat-page-info').textContent =
-    `${from}–${to} de ${data.total.toLocaleString()} cartas`;
-  document.getElementById('cat-prev').disabled = data.page <= 1;
-  document.getElementById('cat-next').disabled = data.page >= data.pages;
-  pag.classList.remove('hidden');
-}
-
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// Inicializar tabs al cargar
-document.addEventListener('DOMContentLoaded', () => {
-  showTab('buscar');
-});
-
-// ── Importación masiva de staples ─────────────────────────────────────────────
-async function openBulkImport() {
-  // Paso 1: elegir tier por defecto para todo el CSV
-  const { value: tier } = await Swal.fire({
-    title: '📥 Importar CSV Masivo',
-    html: `
-      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">
-        Sube un CSV de Manabox.<br>
-        <strong style="color:#e2e8f0">Todas las cartas únicas</strong> se agregarán a la lista de demanda con el tier que elijas.
-        <br><span style="color:#f59e0b;font-size:11px">Si una carta ya existe, solo se actualiza su tier.</span>
-      </p>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <label style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Tier para TODAS las cartas</label>
-        <div style="display:flex;gap:8px;justify-content:center" id="tier-btns">
-          <button data-tier="normal"   onclick="selectBulkTier(this)" 
-            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer">
-            📦 Normal
-          </button>
-          <button data-tier="alta"     onclick="selectBulkTier(this)" 
-            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #f59e0b;background:#fef3c7;color:#92400e;cursor:pointer">
-            ⭐ Alta
-          </button>
-          <button data-tier="muy_alta" onclick="selectBulkTier(this)"
-            style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #ef4444;background:#fee2e2;color:#991b1b;cursor:pointer">
-            🔥 Muy Alta
-          </button>
-        </div>
-        <p id="tier-hint" style="font-size:11px;color:#64748b;margin-top:4px">Selecciona un tier para continuar</p>
-      </div>`,
-    confirmButtonText: 'Siguiente →',
-    showCancelButton: true,
-    confirmButtonColor: '#7c3aed',
-    didOpen: () => {
-      window._bulkTierSelected = null;
-      // Seleccionar 'alta' por defecto
-      const btn = document.querySelector('[data-tier="alta"]');
-      if (btn) selectBulkTier(btn);
-    },
-    preConfirm: () => {
-      if (!window._bulkTierSelected) {
-        Swal.showValidationMessage('Elige un tier antes de continuar');
-        return false;
-      }
-      return window._bulkTierSelected;
-    }
-  });
-
-  if (!tier) return;
-
-  // Paso 2: subir el CSV
-  const { value: file } = await Swal.fire({
-    title: `📂 Subir CSV (tier: ${tier})`,
-    html: `
-      <p style="font-size:12px;color:#94a3b8;margin-bottom:14px">
-        Sube tu CSV exportado de Manabox.<br>
-        Se leerá la columna <code>Name</code> y se importarán todas las cartas únicas.
-      </p>
-      <input type="file" id="bulk-csv" accept=".csv,.txt"
-        style="width:100%;padding:10px;background:#1e293b;border:2px dashed #334155;border-radius:8px;color:#e2e8f0;font-size:12px;cursor:pointer">
-      <p style="font-size:10px;color:#475569;margin-top:8px">Máximo 5 MB — cualquier CSV de Manabox funciona</p>`,
-    confirmButtonText: 'Importar',
-    showCancelButton: true,
-    confirmButtonColor: '#7c3aed',
-    preConfirm: () => {
-      const f = document.getElementById('bulk-csv').files[0];
-      if (!f) { Swal.showValidationMessage('Selecciona un archivo CSV'); return false; }
-      return f;
-    }
-  });
-
-  if (!file) return;
-
-  // Paso 3: enviar al endpoint bulk
-  Swal.fire({
-    title: 'Importando...',
-    html: `<p style="color:#94a3b8;font-size:13px">Procesando <strong>${file.name}</strong><br>Esto puede tardar unos segundos...</p>`,
-    allowOutsideClick: false,
-    showConfirmButton: false,
-    didOpen: () => Swal.showLoading()
-  });
-
-  try {
-    const form = new FormData();
-    form.append('file', file);
-
-    const res  = await fetch(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: form,
-    });
-    const data = await res.json();
-
-    if (!res.ok) throw new Error(data.detail || 'Error en el servidor');
-
-    Swal.fire({
-      icon: 'success',
-      title: '✅ Importación completada',
-      html: `
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px">
-          <div style="background:#dcfce7;border-radius:8px;padding:12px;text-align:center">
-            <div style="font-size:24px;font-weight:900;color:#166534">${data.inserted}</div>
-            <div style="font-size:10px;font-weight:700;color:#166534;text-transform:uppercase">Nuevas</div>
-          </div>
-          <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center">
-            <div style="font-size:24px;font-weight:900;color:#92400e">${data.updated}</div>
-            <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase">Actualizadas</div>
-          </div>
-          <div style="background:#f1f5f9;border-radius:8px;padding:12px;text-align:center">
-            <div style="font-size:24px;font-weight:900;color:#475569">${data.skipped}</div>
-            <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase">Sin cambios</div>
-          </div>
-        </div>
-        <p style="margin-top:14px;font-size:12px;color:#64748b">
-          ${data.total} cartas únicas procesadas con tier <strong>${data.tier}</strong>
-        </p>`,
-      confirmButtonColor: '#7c3aed',
-    });
-    checkCacheStatus();   // refrescar el badge del caché
-
-  } catch(e) {
-    Swal.fire('Error', e.message, 'error');
-  }
-}
-
-function selectBulkTier(btn) {
-  document.querySelectorAll('[data-tier]').forEach(b => {
-    b.style.opacity = '0.45';
-    b.style.transform = 'scale(0.95)';
-  });
-  btn.style.opacity = '1';
-  btn.style.transform = 'scale(1.05)';
-  window._bulkTierSelected = btn.dataset.tier;
-  const hint = document.getElementById('tier-hint');
-  if (hint) hint.textContent = `✅ Tier seleccionado: ${btn.dataset.tier}`;
-}
-
-// ── Toast ──────────────────────────────────────────────────────────────────────
-function showToast(msg, type = 'success') {
-  Swal.mixin({
-    toast: true, position: 'top-end', showConfirmButton: false,
-    timer: 2500, timerProgressBar: true,
-    background: '#1e293b', color: '#e2e8f0',
-    iconColor: type === 'error' ? '#f87171' : '#4ade80'
-  }).fire({ icon: type === 'error' ? 'error' : 'success', title: msg });
+async function updateOrderStatus(id, newStatus) {
+    try {
+        const res = await fetch(`${API}/api/admin/buylist_orders/${id}?new_status=${newStatus}`, { method:'PATCH', headers:authH() });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Error');
+        const o = allOrders.find(x => x.id === id);
+        if (o) o.status = newStatus;
+        renderOrders();
+        const pend = allOrders.filter(x => x.status === 'pending').length;
+        const badge = document.getElementById('orders-badge');
+        if (pend > 0) { badge.textContent = pend; badge.classList.remove('hidden'); }
+        else badge.classList.add('hidden');
+        Swal.fire({icon:'success', title:'Estado actualizado', timer:1400, showConfirmButton:false});
+    } catch(e) { Swal.fire('Error', e.message, 'error'); }
 }
 </script>
 </body>

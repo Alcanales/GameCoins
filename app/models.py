@@ -113,10 +113,13 @@ class CKPrice(Base):
     """
     __tablename__ = "ck_prices"
 
-    name_canonical  = Column(String, primary_key=True, index=True)   # _canonical(name_raw)
-    name_raw        = Column(String, nullable=False)                  # nombre tal como viene de CK
-    min_buy_price   = Column(Numeric(10, 4), nullable=False)          # precio mínimo USD (buy_price NM)
-    updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    name_canonical    = Column(String, primary_key=True, index=True)   # _canonical(name_raw)
+    name_raw          = Column(String, nullable=False)                  # nombre original de CK
+    min_buy_price     = Column(Numeric(10, 4), nullable=False)          # precio mínimo USD NM
+    nicho_threshold   = Column(Numeric(10, 4), nullable=False)          # min_buy_price × STAKE_MULTIPLIER
+    # nicho_threshold es el umbral precalculado: si price_csv > nicho_threshold → De Nicho.
+    # Se recalcula en cada sync diario usando el valor de STAKE_MULTIPLIER en ese momento.
+    updated_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class CashbackRecord(Base):
@@ -155,9 +158,14 @@ class CashbackRecord(Base):
 # Si la BD ya existe sin la tabla, ejecutar:
 #
 #   CREATE TABLE IF NOT EXISTS ck_prices (
-#       name_canonical  TEXT    PRIMARY KEY,
-#       name_raw        TEXT    NOT NULL,
-#       min_buy_price   NUMERIC(10,4) NOT NULL,
-#       updated_at      TIMESTAMP DEFAULT NOW()
+#       name_canonical   TEXT          PRIMARY KEY,
+#       name_raw         TEXT          NOT NULL,
+#       min_buy_price    NUMERIC(10,4) NOT NULL,
+#       nicho_threshold  NUMERIC(10,4) NOT NULL,   -- min_buy_price × STAKE_MULTIPLIER
+#       updated_at       TIMESTAMP     DEFAULT NOW()
 #   );
+#
+# Si la tabla ya existe pero le falta nicho_threshold:
+#   ALTER TABLE ck_prices ADD COLUMN IF NOT EXISTS nicho_threshold NUMERIC(10,4);
+#   UPDATE ck_prices SET nicho_threshold = min_buy_price * 1.5 WHERE nicho_threshold IS NULL;
 # ─────────────────────────────────────────────────────────────────────────────

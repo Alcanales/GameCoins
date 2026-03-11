@@ -10,10 +10,10 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,       # detecta conexiones muertas antes de usarlas
-    pool_size=5,              # incrementado para soportar múltiples requests concurrentes + jobs
-    max_overflow=10,          # margen amplio para picos de tráfico (Total máx: 15)
-    pool_recycle=300,         # reciclar cada 5 min (evita timeout por inactividad)
-    pool_timeout=30,          # aumentado a 30s para evitar Drop silencioso bajo carga
+    pool_size=3,               # free tier: máx 25 conexiones totales — mantener bajo
+    max_overflow=2,            # overflow extra conservador
+    pool_recycle=300,          # reciclar cada 5 min (evita timeout por inactividad)
+    pool_timeout=20,           # no quedar esperando indefinidamente un slot
     connect_args={
         "options":         "-csearch_path=public",
         "connect_timeout": 10,  # timeout de conexión a DB

@@ -28,7 +28,9 @@ services:
         sync: false
       - key: STORE_TOKEN
         sync: false
-
+      # C-02: Token público para account.liquid (browser del cliente).
+      # DEBE ser un valor diferente al STORE_TOKEN.
+      # Generar: python -c "import secrets; print(secrets.token_urlsafe(32))"
       - key: PUBLIC_STORE_TOKEN
         sync: false
       - key: JS_LOGIN_CODE

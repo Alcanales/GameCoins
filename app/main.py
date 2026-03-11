@@ -18,7 +18,6 @@ import logging
 import functools
 import unicodedata
 import pandas as pd
-import gc  # Agregado para recolección de basura forzada
 
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
@@ -144,17 +143,18 @@ async def lifespan(app_: FastAPI):
 app = FastAPI(title="GameCoins API", version="5.2", lifespan=lifespan,
               default_response_class=ORJSONResponse)
 
+app.add_middleware(GZipMiddleware, minimum_size=500)   # comprime JSON ≥500 bytes (~60-80% ahorro)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://gamequest.cl",
         "https://www.gamequest.cl",
-        "https://gamecoins.onrender.com",   
-        "http://localhost:10000",            
+        "https://gamecoins.onrender.com",   # dominio Render del propio backend
+        "http://localhost:10000",            # desarrollo local
         "http://localhost:8000",
     ],
-    allow_methods=["*"],    
-    allow_headers=["*"],    
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Store-Token"],
 )
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -177,20 +177,6 @@ def _rate_limit(key: str, max_calls: int, window_sec: int) -> bool:
         return False
     bucket.append(now)
     return True
-
-def _get_client_ip(request: Request) -> str:
-    """
-    Extrae la IP real mitigando IP Spoofing. 
-    Prioriza headers inyectados por proxies de infraestructura (Cloudflare/Render) 
-    antes de confiar en X-Forwarded-For manual.
-    """
-    headers = request.headers
-    return (
-        headers.get("CF-Connecting-IP") or 
-        headers.get("True-Client-IP") or 
-        (headers.get("X-Forwarded-For") or "").split(",")[0].strip() or 
-        (request.client.host if request and request.client else "unknown")
-    )
 
 # ── Cache de stock JS (TTL 10 minutos) ────────────────────────────────────────
 _js_stock_cache: dict = {}
@@ -601,8 +587,14 @@ async def _sync_ck_prices() -> dict:
 
         def _do_upsert():
             with SessionLocal() as db:
+                stake = settings.STAKE_MULTIPLIER   # leer valor actual del env
                 rows = [
-                    {"name_canonical": cn, "name_raw": name_raw, "min_buy_price": price}
+                    {
+                        "name_canonical":  cn,
+                        "name_raw":        name_raw,
+                        "min_buy_price":   price,
+                        "nicho_threshold": round(price * stake, 4),
+                    }
                     for cn, (name_raw, price) in prices.items()
                 ]
                 # Batches de 1000 para no saturar el pool en free tier
@@ -613,9 +605,10 @@ async def _sync_ck_prices() -> dict:
                     stmt = stmt.on_conflict_do_update(
                         index_elements=["name_canonical"],
                         set_={
-                            "name_raw":      stmt.excluded.name_raw,
-                            "min_buy_price": stmt.excluded.min_buy_price,
-                            "updated_at":    func.now(),
+                            "name_raw":       stmt.excluded.name_raw,
+                            "min_buy_price":  stmt.excluded.min_buy_price,
+                            "nicho_threshold":stmt.excluded.nicho_threshold,
+                            "updated_at":     func.now(),
                         },
                     )
                     db.execute(stmt)
@@ -634,15 +627,11 @@ async def _sync_ck_prices() -> dict:
         return {"upserted": upserted, "elapsed": elapsed}
 
 
-def _get_ck_prices_for_names(names: list[str]) -> dict[str, float]:
+def _get_ck_prices_for_names(names: list[str]) -> dict[str, dict]:
     """
     Consulta la tabla ck_prices SOLO para los nombres canónicos del CSV actual.
 
-    Un SELECT ... WHERE name_canonical IN (...) es O(k log n) con el índice PK,
-    donde k = cartas del CSV (≤500) y n = filas totales (~50k).
-    Mucho más eficiente que cargar toda la tabla en RAM.
-
-    Retorna {name_canonical → min_buy_price} como float.
+    Retorna {name_canonical → {"min_buy_price": float, "nicho_threshold": float}}.
     Si la tabla está vacía o la BD no responde → retorna {} (fallback por tipo).
     """
     if not names:
@@ -654,11 +643,17 @@ def _get_ck_prices_for_names(names: list[str]) -> dict[str, float]:
         from .models import CKPrice
         with SessionLocal() as db:
             rows = (
-                db.query(CKPrice.name_canonical, CKPrice.min_buy_price)
+                db.query(CKPrice.name_canonical, CKPrice.min_buy_price, CKPrice.nicho_threshold)
                 .filter(CKPrice.name_canonical.in_(canonicals))
                 .all()
             )
-        return {r.name_canonical: float(r.min_buy_price) for r in rows}
+        return {
+            r.name_canonical: {
+                "min_buy_price":   float(r.min_buy_price),
+                "nicho_threshold": float(r.nicho_threshold),
+            }
+            for r in rows
+        }
     except Exception as exc:
         logger.warning(f"[CK_LOOKUP] Error al leer ck_prices: {exc} — fallback por tipo")
         return {}
@@ -724,25 +719,29 @@ def _compute_card_price(
 
     # ── Origen del precio de referencia NM ───────────────────────────────────
     if bn in base_min_price:
-        base_nm     = base_min_price[bn]
-        base_origin = "csv"
+        base_nm         = base_min_price[bn]
+        nicho_threshold = base_nm * mult   # calculado desde CSV
+        base_origin     = "csv"
     elif bn in ck_map:
-        base_nm     = ck_map[bn]
-        base_origin = "cardkingdom"
+        # ck_map ahora es {canonical → {"min_buy_price": f, "nicho_threshold": f}}
+        ck_entry        = ck_map[bn]
+        base_nm         = ck_entry["min_buy_price"]
+        nicho_threshold = ck_entry["nicho_threshold"]   # precalculado en BD
+        base_origin     = "cardkingdom"
     else:
-        # Sin referencia NM disponible — usar detección por tipo como fallback
-        base_nm     = None
-        base_origin = "fallback_tipo"
+        base_nm         = None
+        nicho_threshold = None
+        base_origin     = "fallback_tipo"
 
     # ── Criterio De Nicho ─────────────────────────────────────────────────────
-    if base_nm is not None:
-        is_nicho = price_usd > base_nm * mult
+    if nicho_threshold is not None:
+        is_nicho = price_usd > nicho_threshold
     else:
         is_nicho = _is_estaca(foil_raw, card_name, version)
         base_nm  = price_usd   # sin referencia → el precio propio es la base
 
     # ── Precio efectivo ───────────────────────────────────────────────────────
-    eff_usd  = base_nm * mult if is_nicho else price_usd
+    eff_usd  = (nicho_threshold or price_usd) if is_nicho else price_usd
     adjusted = round(eff_usd * _cond_mult(cond_raw), 4)
     return eff_usd, adjusted, is_nicho, base_origin
 
@@ -1105,8 +1104,13 @@ async def analyze_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada. Vuelve pronto.")
 
-    # IP real del cliente con soporte Anti-Spoofing
-    ip = _get_client_ip(request)
+    # IP real del cliente: Render/Cloudflare envía la IP original en X-Forwarded-For.
+    # Sin esto, todos los usuarios comparten la IP del proxy y el rate limit
+    # bloquearía a todo el mundo cuando uno solo alcance el límite.
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request and request.client else "unknown")
+    )
     if not _rate_limit(f"analyze:{ip}", max_calls=20, window_sec=3600):
         raise HTTPException(429, "Demasiados análisis. Espera un momento e inténtalo de nuevo.")
 
@@ -1179,7 +1183,11 @@ async def analyze_buylist(
                      if sf_str and sf_str not in ("nan", "none", "")
                      else None) or _canonical(nm)  # fallback por nombre
         srec      = staple_map_pub.get(key_pub)
-        tier_pub  = srec.tier if srec else "sin_lista"
+        # Tier default "normal" — sin_lista eliminado.
+        # Toda carta no listada en staple_cards se trata como tier normal
+        # (stock mínimo MIN_STOCK_NORMAL, compra hasta completar ese stock).
+        # Solo se aplica tier especial si está explícitamente en staple_cards.
+        tier_pub  = srec.tier if srec else "normal"
         js_pub    = _resolve_stock(key_pub, js_stock_pub)
         stock_pub = js_pub.get("stock") if js_pub else None
         min_s_pub = (srec.min_stock_override if srec and srec.min_stock_override
@@ -1193,20 +1201,17 @@ async def analyze_buylist(
             cupo          = qty          # sin límite — compramos todo
             qty_comprar   = qty
             buying_status = "muy_alta"
-        elif tier_pub in ("alta", "normal"):
+        else:
+            # normal | alta — comprar hasta completar stock objetivo
             stock_now   = stock_pub if stock_pub is not None else 0
             cupo        = max(0, max_s_pub - stock_now)
             qty_comprar = min(qty, cupo)
             if cupo <= 0:
                 buying_status = "stock_completo"
             elif qty_comprar < qty:
-                buying_status = "compra_parcial"   # solo compramos una parte
+                buying_status = "compra_parcial"
             else:
                 buying_status = "compramos"
-        else:
-            cupo          = 0
-            qty_comprar   = 0
-            buying_status = "sin_lista"
 
         p_cred = int(adjusted_price * fcred)
         results.append({
@@ -1251,8 +1256,11 @@ async def commit_buylist(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada.")
 
-    # Rate limit anti-spoofing
-    ip = _get_client_ip(request)
+    # Rate limiting por IP real (ver nota en analyze_buylist sobre X-Forwarded-For)
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
     if not _rate_limit(f"buylist:{ip}", max_calls=3, window_sec=3600):
         raise HTTPException(429, "Demasiadas solicitudes. Intenta en 1 hora.")
 
@@ -1282,6 +1290,8 @@ async def commit_buylist(
     db.add(order)
     db.commit()
     # db.refresh innecesario: PostgreSQL devuelve el ID via RETURNING en el INSERT
+
+
 
     # ── Emails en background — wrapper sync que corre la coroutine ──────────────
     # BackgroundTask async — FastAPI lo ejecuta correctamente dentro del event loop
@@ -1377,14 +1387,22 @@ async def admin_commit_buylist(
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(req: LoginRequest, request: Request):
-    # FIX A2: Rate limiting anti-spoofing
-    ip = _get_client_ip(request)
+    # FIX A2: Rate limiting — máx 5 intentos por IP cada 5 minutos.
+    # Sin esto, un atacante puede fuerza-bruta ADMIN_USER/ADMIN_PASS y obtener
+    # el STORE_TOKEN que da acceso a todos los endpoints /api/admin/*.
+    # Usamos la misma infraestructura _rate_limit existente para consistencia.
+    ip = (
+        (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or (request.client.host if request and request.client else "unknown")
+    )
     if not _rate_limit(f"login:{ip}", max_calls=5, window_sec=300):
         raise HTTPException(
             status_code=429,
             detail="Demasiados intentos de login. Espera 5 minutos e inténtalo de nuevo."
         )
     # FIX A3 también aplicado aquí: compare_digest para credenciales admin.
+    # Comparar username y password en tiempo constante evita enumeración de usuarios
+    # (misma latencia para usuario inválido y usuario válido con contraseña incorrecta).
     user_ok = secrets.compare_digest(req.username, settings.ADMIN_USER)
     pass_ok = secrets.compare_digest(req.password, settings.ADMIN_PASS)
     if user_ok and pass_ok:
@@ -1868,10 +1886,6 @@ async def _do_bulk_enrich() -> dict:
         )
         # buffer fue cerrado dentro de _parse_scryfall_buffer → del ayuda al GC
         del buffer
-        
-        # FIX OOM: Forzar recolección de basura del buffer de 100MB inmediatamente
-        # vital para no superar el límite de 512MB de RAM en Render.
-        gc.collect()
 
         logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
 
@@ -2274,7 +2288,8 @@ async def stock_check(
                 base_used   = base_min_price.get(key, raw_usd)
                 origin_desc = f"base NM del CSV ${base_used:.2f} USD"
             elif base_origin == "cardkingdom":
-                base_used   = ck_nm_prices.get(key, raw_usd)
+                ck_entry    = ck_nm_prices.get(key, {})
+                base_used   = ck_entry.get("min_buy_price", raw_usd)
                 origin_desc = f"base CK Buylist ${base_used:.2f} USD"
             else:
                 base_used   = raw_usd
