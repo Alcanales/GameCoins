@@ -1,0 +1,94 @@
+services:
+  - type: web
+    name: gamecoins
+    env: python
+    region: oregon
+    plan: free           # Plan gratuito — 512MB RAM, 1 CPU, se duerme sin tráfico
+    buildCommand: >
+      pip install --upgrade pip setuptools wheel &&
+      pip install -r requirements.txt
+    # 1 worker (free tier 512MB — más workers causan OOM)
+    # timeout 180s para dar margen al fetch paralelo en boot frío inicial
+    startCommand: >
+      gunicorn app.main:app
+      -w 1
+      -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:$PORT
+      --timeout 180
+      --graceful-timeout 30
+      --keep-alive 5
+    healthCheckPath: /health
+    envVars:
+      # ── Secretos (configurar manualmente en Render Dashboard) ──
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+      - key: STORE_TOKEN
+        sync: false
+      # C-02: Token público para account.liquid (browser del cliente).
+      # DEBE ser un valor diferente al STORE_TOKEN.
+      # Generar: python -c "import secrets; print(secrets.token_urlsafe(32))"
+      - key: PUBLIC_STORE_TOKEN
+        sync: false
+      - key: JS_LOGIN_CODE
+        sync: false
+      - key: JS_AUTH_TOKEN
+        sync: false
+      # FIX A1: Hooks Token para verificar firma HMAC-SHA256 de webhooks Jumpseller.
+      # Obtener desde: Admin Jumpseller → Config → Notificaciones / Webhooks → "Hooks Token"
+      - key: JUMPSELLER_HOOKS_TOKEN
+        sync: false
+      - key: SMTP_EMAIL
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: TARGET_EMAIL
+        sync: false
+      # ── Moneda ──
+      - key: USD_TO_CLP
+        value: "1000"
+      - key: MIN_CANJE
+        value: "100"
+      - key: MIN_PURCHASE_USD
+        value: "3"
+      # ── Factores Buylist (USD CK Buylist → CLP GameQuest) ──
+      - key: BUYLIST_FACTOR_CREDITO
+        value: "500"
+      - key: BUYLIST_FACTOR_CASH
+        value: "450"
+      # ── Condición ──
+      - key: COND_NM
+        value: "1.0"
+      - key: COND_LP
+        value: "0.85"
+      - key: COND_MP
+        value: "0.70"
+      - key: COND_HP
+        value: "0.50"
+      - key: COND_DMG
+        value: "0.25"
+      # ── Multiplicador versiones especiales (foil, borderless, etc.) ──
+      - key: STAKE_MULTIPLIER
+        value: "1.5"
+      # ── Control operacional ──
+      - key: BUYLIST_OPEN
+        value: "true"
+      # ── Presupuesto diario de compras CASH en CLP ──
+      # 0 = sin límite (default). Ej: 500000 = $500.000 CLP/día máximo.
+      # Solo aplica al endpoint público /api/public/commit_buylist.
+      - key: BUYLIST_DAILY_BUDGET_CASH
+        value: "0"
+      - key: CASH_ENABLED
+        value: "true"
+      - key: MAINTENANCE_MODE_CANJE
+        value: "false"
+      # ── Stock mínimos por tier ──
+      - key: MIN_STOCK_NORMAL
+        value: "4"
+      - key: MIN_STOCK_ALTA
+        value: "8"
+      - key: PYTHON_VERSION
+        value: "3.11.9"

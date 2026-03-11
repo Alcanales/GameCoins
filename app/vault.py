@@ -237,20 +237,27 @@ class VaultController:
 
     @staticmethod
     def sync_user(db: Session, customer_data: dict):
+        """
+        MOD-02 FIX: usa _extract_display_name() para priorizar shipping_address
+        igual que sync_users_to_db(). Antes usaba solo el perfil de cuenta (name/surname)
+        ignorando la dirección de envío que es más confiable en Jumpseller.
+        """
+        from .services import _extract_display_name   # importar aquí para evitar circular
         email = customer_data.get('email', '').lower().strip()
+        name, surname = _extract_display_name(customer_data)
         user = db.query(Gampoint).filter(Gampoint.email == email).first()
         if not user:
             user = Gampoint(
                 email=email,
                 jumpseller_id=customer_data.get('id'),
-                name=customer_data.get('name'),
-                surname=customer_data.get('surname')
+                name=name,
+                surname=surname,
             )
             db.add(user)
         else:
             user.jumpseller_id = customer_data.get('id')
-            user.name = customer_data.get('name')
-            user.surname = customer_data.get('surname')
+            user.name    = name
+            user.surname = surname
         db.commit()
         return user
 
@@ -408,16 +415,19 @@ class VaultController:
 
         if not coupon_code:
             # ── Paso 7b: Compensating transaction — revertir el débito ───────
-            from .database import SessionLocal
-            comp_db = SessionLocal()
+            # VLT-01 FIX: usar la MISMA sesión `db` para evitar deadlock.
+            # Antes: se abría una NUEVA sesión que intentaba FOR UPDATE sobre
+            # el mismo user ya bloqueado por `db` → deadlock garantizado.
+            # Ahora: rollback de la tx actual + re-abrir para devolver el saldo.
             try:
-                comp_user = comp_db.query(Gampoint).filter(
+                db.rollback()  # libera el FOR UPDATE anterior
+                user_comp = db.query(Gampoint).filter(
                     Gampoint.email == email.lower()
                 ).with_for_update().first()
-                if comp_user:
-                    comp_user.saldo              += amount_dec
-                    comp_user.historico_canjeado -= amount_dec
-                    comp_db.commit()
+                if user_comp:
+                    user_comp.saldo              += amount_dec
+                    user_comp.historico_canjeado -= amount_dec
+                    db.commit()
                     logger.warning(
                         f"[CANJE] Cupón JS falló para {email} — "
                         f"saldo revertido ({effective_amount} QP)"
@@ -428,13 +438,11 @@ class VaultController:
                         f"en compensación. Débito de {effective_amount} QP sin cupón generado."
                     )
             except Exception as comp_e:
-                comp_db.rollback()
+                db.rollback()
                 logger.error(
                     f"[CANJE] CRÍTICO: cupón JS falló Y compensación falló para {email}: "
                     f"{comp_e}. Débito de {effective_amount} QP sin cupón generado."
                 )
-            finally:
-                comp_db.close()
 
             raise HTTPException(
                 status_code=502,

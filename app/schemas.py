@@ -30,7 +30,7 @@ class TokenResponse(BaseModel):
 
 class BuylistItem(BaseModel):
     name:          str
-    qty:           int             = 1
+    qty:           int             = Field(default=1, ge=1, le=500)  # SCH-01 FIX: validar rango
     price_usd:     float
     price_credito: int
     price_cash:    int
@@ -53,8 +53,8 @@ class BuylistCommitRequest(BaseModel):
     email:              EmailStr
     payment_preference: Literal["credito", "cash", "mixto"]   # #14: solo valores válidos
     items:              List[BuylistItem]
-    total_credito:      float
-    total_cash:         float
+    total_credito:      float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
+    total_cash:         float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
 
     @field_validator("rut")
     @classmethod

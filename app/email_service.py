@@ -93,9 +93,10 @@ async def _send_both(
         _send(settings.TARGET_EMAIL, subject_store,  html_store),
         return_exceptions=True,
     )
+    # EMAIL-02 FIX: Exception es truthy en Python — verificar tipo explícitamente
     return {
-        "vendor": bool(results[0]),
-        "store":  bool(results[1]),
+        "vendor": isinstance(results[0], bool) and results[0],
+        "store":  isinstance(results[1], bool) and results[1],
     }
 
 

@@ -44,7 +44,7 @@ from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse, BuylistCommitRequest
 from .config import settings
 from . import email_service
-from .models import Gampoint, BuylistOrder, StapleCard, CardCatalog, CashbackRecord
+from .models import Gampoint, BuylistOrder, StapleCard, CardCatalog, CashbackRecord, CKPrice  # MAIN-08 FIX
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,8 @@ async def _background_cache_refresh():
             await _fetch_js_stock_cached(force=True)
         except Exception as e:
             logger.warning(f"[PREFETCH] Error en background refresh: {e}")
-        # ── Limpiar _rate_store: eliminar buckets vacíos o con entradas expiradas
-        # Evita memory leak con IPs rotativas en producción (bots, móviles, etc.)
+        # MAIN-05 FIX: _rate_store limpiado cada iteración (era cada 480s solo)
+        # Evita memory leak con IPs rotativas bajo ataque DDoS en free tier 512MB
         try:
             cutoff = time.monotonic() - 3600   # ventana máxima usada (1 hora)
             stale  = [k for k, dq in list(_rate_store.items())
@@ -127,6 +127,10 @@ async def lifespan(app_: FastAPI):
 
     # Bloquea el arranque en producción si alguna credencial usa el default inseguro.
     settings.validate_production_secrets()
+    # TRV-01 FIX: configurar nivel de logging explícito para evitar verbosidad debug en prod
+    import logging as _logging
+    _logging.getLogger("app").setLevel(_logging.INFO)
+    _logging.getLogger("app.main").setLevel(_logging.INFO)
     _init_cond_mult()   # poblar dict de condición una vez (settings ya cargadas)
     task_js = asyncio.create_task(_background_cache_refresh())
     task_ck = asyncio.create_task(_background_ck_sync())
@@ -140,7 +144,7 @@ async def lifespan(app_: FastAPI):
             pass
 
 
-app = FastAPI(title="GameCoins API", version="5.2", lifespan=lifespan,
+app = FastAPI(title="GameCoins API", version="5.5", lifespan=lifespan,  # MAIN-01 FIX
               default_response_class=ORJSONResponse)
 
 app.add_middleware(GZipMiddleware, minimum_size=500)   # comprime JSON ≥500 bytes (~60-80% ahorro)
@@ -228,7 +232,6 @@ def _get_catalog_map(db) -> dict:
     global _catalog_cache, _catalog_cache_ts, _scryfall_map
     if _catalog_cache and time.monotonic() - _catalog_cache_ts < CATALOG_CACHE_TTL:
         return _catalog_cache
-    from .models import CardCatalog
     rows = db.query(CardCatalog).all()
     cache: dict = {}
     sf_map: dict[str, str] = {}
@@ -290,7 +293,6 @@ def _get_staple_map(db) -> dict:
     global _staple_map_cache, _staple_map_cache_ts
     if _staple_map_cache and time.monotonic() - _staple_map_cache_ts < STAPLE_CACHE_TTL:
         return _staple_map_cache
-    from .models import StapleCard
     rows = db.query(StapleCard).all()
     _staple_map_cache    = _build_staple_map(rows)
     _staple_map_cache_ts = time.monotonic()
@@ -461,13 +463,14 @@ def _base_name(name: str) -> str:
 # condiciones retornaban COND_NM hasta el próximo restart — bug silencioso.
 # Ahora: los valores se leen al importar el módulo, idénticos a los de settings.
 # _init_cond_mult() se mantiene como no-op para no romper la llamada en lifespan().
-import os as _os
+# MAIN-02 FIX: usar settings directamente para consistencia y evitar desfase en hot-reload
+# Antes: float(_os.getenv(...)) duplicaba la fuente de verdad con os.getenv()
 _COND_MULT: dict[str, float] = {
-    "near_mint":         float(_os.getenv("COND_NM",  "1.00")),
-    "lightly_played":    float(_os.getenv("COND_LP",  "0.85")),
-    "moderately_played": float(_os.getenv("COND_MP",  "0.70")),
-    "heavily_played":    float(_os.getenv("COND_HP",  "0.50")),
-    "damaged":           float(_os.getenv("COND_DMG", "0.25")),
+    "near_mint":         settings.COND_NM,
+    "lightly_played":    settings.COND_LP,
+    "moderately_played": settings.COND_MP,
+    "heavily_played":    settings.COND_HP,
+    "damaged":           settings.COND_DMG,
 }
 
 def _init_cond_mult() -> None:
@@ -583,8 +586,7 @@ async def _sync_ck_prices() -> dict:
         # asyncio.to_thread: la sesión SQLAlchemy es síncrona; el upsert puede
         # tardar varios segundos con >50k filas — no bloquear el event loop.
         from sqlalchemy.dialects.postgresql import insert as pg_insert
-        from .models import CKPrice
-
+    
         def _do_upsert():
             with SessionLocal() as db:
                 stake = settings.STAKE_MULTIPLIER   # leer valor actual del env
@@ -640,7 +642,6 @@ def _get_ck_prices_for_names(names: list[str]) -> dict[str, dict]:
     if not canonicals:
         return {}
     try:
-        from .models import CKPrice
         with SessionLocal() as db:
             rows = (
                 db.query(CKPrice.name_canonical, CKPrice.min_buy_price, CKPrice.nicho_threshold)
@@ -726,7 +727,9 @@ def _compute_card_price(
         # ck_map ahora es {canonical → {"min_buy_price": f, "nicho_threshold": f}}
         ck_entry        = ck_map[bn]
         base_nm         = ck_entry["min_buy_price"]
-        nicho_threshold = ck_entry["nicho_threshold"]   # precalculado en BD
+        # TRV-02 FIX: nicho_threshold puede ser None si migración no corrió aún
+        _nt             = ck_entry.get("nicho_threshold")
+        nicho_threshold = _nt if _nt is not None else round(base_nm * settings.STAKE_MULTIPLIER, 4)
         base_origin     = "cardkingdom"
     else:
         base_nm         = None
@@ -1039,7 +1042,6 @@ def get_balance(email: str, db: Session = Depends(get_db)):
     L-01 FIX: diferencia entre "usuario no encontrado" (retorna 0, correcto)
     y "error de BD" (propaga HTTPException 503 en vez de enmascararlo como $0).
     """
-    from .models import Gampoint
     try:
         user = db.query(Gampoint).filter(
             Gampoint.email == email.lower().strip()).first()
@@ -1114,6 +1116,11 @@ async def analyze_buylist(
     if not _rate_limit(f"analyze:{ip}", max_calls=20, window_sec=3600):
         raise HTTPException(429, "Demasiados análisis. Espera un momento e inténtalo de nuevo.")
 
+    # MAIN-04 FIX: rechazar archivos que no sean CSV para prevenir inyección de datos
+    _ALLOWED_CT = {"text/csv", "text/plain", "application/csv", "application/octet-stream", ""}
+    ct = (file.content_type or "").split(";")[0].strip().lower()
+    if ct and ct not in _ALLOWED_CT:
+        raise HTTPException(422, f"Tipo de archivo no permitido: '{file.content_type}'. Debe ser CSV.")
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(413, "Archivo demasiado grande (máx 5 MB)")
@@ -1275,7 +1282,6 @@ async def commit_buylist(
     if req.payment_preference in ("cash", "mixto"):
         _check_and_register_cash_budget(float(req.total_cash))
 
-    from .models import BuylistOrder
     items_dict = [it.model_dump() for it in req.items]
 
     order = BuylistOrder(
@@ -1289,9 +1295,7 @@ async def commit_buylist(
     )
     db.add(order)
     db.commit()
-    # db.refresh innecesario: PostgreSQL devuelve el ID via RETURNING en el INSERT
-
-
+    db.refresh(order)   # MAIN-03 FIX: garantizar order.id disponible (defensive)
 
     # ── Emails en background — wrapper sync que corre la coroutine ──────────────
     # BackgroundTask async — FastAPI lo ejecuta correctamente dentro del event loop
@@ -1334,7 +1338,6 @@ async def admin_commit_buylist(
         raise HTTPException(400,
             "Por el momento solo estamos recibiendo cartas por QuestPoints.")
 
-    from .models import BuylistOrder
     items_dict = [it.model_dump() for it in req.items]
 
     order = BuylistOrder(
@@ -1348,6 +1351,7 @@ async def admin_commit_buylist(
     )
     db.add(order)
     db.commit()
+    db.refresh(order)   # MAIN-07 FIX: garantizar order.id disponible (defensive)
 
     # Enviar emails solo si hay un email real (no el placeholder interno)
     if req.email and "@gq.internal" not in req.email:
@@ -1417,13 +1421,13 @@ def get_users(
     search: Optional[str] = None,
     only_balance: bool = False,
 ):
-    from .models import Gampoint
     query = db.query(Gampoint)
     if search:
         term = f"%{search.lower()}%"
+        # Busca en email, name Y surname para cubrir búsqueda por nombre completo
         query = query.filter(
-            Gampoint.email.ilike(term) |
-            Gampoint.name.ilike(term)  |
+            Gampoint.email.ilike(term)   |
+            Gampoint.name.ilike(term)    |
             Gampoint.surname.ilike(term)
         )
     if only_balance:
@@ -1432,12 +1436,28 @@ def get_users(
     total_circulante = db.query(func.sum(Gampoint.saldo)).scalar()              or 0
     total_canjeado   = db.query(func.sum(Gampoint.historico_canjeado)).scalar() or 0
     total_users      = db.query(func.count(Gampoint.email)).scalar()            or 0
+
+    def _display_name(u: Gampoint) -> str:
+        """
+        Nombre para mostrar en la Bóveda.
+        Prioriza el nombre completo si ambas partes existen.
+        Si solo hay una parte, la retorna sola.
+        Si no hay ninguna, retorna cadena vacía (la UI muestra 'Sin nombre').
+        """
+        parts = [p for p in [u.name, u.surname] if p and p.strip()]
+        return " ".join(parts)
+
     return {
-        "users": [{"email": u.email, "name": u.name, "surname": u.surname,
-                   "saldo": float(u.saldo or 0),
-                   "historico_canjeado":  float(u.historico_canjeado  or 0),
-                   "historico_acumulado": float(u.historico_acumulado or 0),
-                   "jumpseller_id": u.jumpseller_id} for u in users],
+        "users": [{
+            "email":               u.email,
+            "name":                u.name,
+            "surname":             u.surname,
+            "display_name":        _display_name(u),   # campo compuesto para la UI
+            "saldo":               float(u.saldo or 0),
+            "historico_canjeado":  float(u.historico_canjeado  or 0),
+            "historico_acumulado": float(u.historico_acumulado or 0),
+            "jumpseller_id":       u.jumpseller_id,
+        } for u in users],
         "totalCount":         total_users,
         "totalPointsInVault": float(total_circulante),
         "totalRedeemed":      float(total_canjeado),
@@ -1455,7 +1475,6 @@ async def trigger_sync(db: Session = Depends(get_db)):
 @app.post("/admin/adjust_balance", dependencies=[Depends(verify_admin)])
 @app.post("/api/admin/adjust",     dependencies=[Depends(verify_admin)])
 def adjust_balance(req: AdminAdjustReq, db: Session = Depends(get_db)):
-    from .models import Gampoint
     # H-02 FIX: WITH FOR UPDATE — bloqueo de fila para prevenir race condition
     # si dos admins ajustan el mismo usuario simultáneamente. Sin el lock, un
     # "subtract" concurrente puede dejar el saldo en un valor incorrecto.
@@ -1480,7 +1499,6 @@ def adjust_balance(req: AdminAdjustReq, db: Session = Depends(get_db)):
 
 @app.get("/api/admin/metrics", dependencies=[Depends(verify_admin)])
 def get_metrics(db: Session = Depends(get_db)):
-    from .models import Gampoint
     return {
         "total_circulante": float(db.query(func.sum(Gampoint.saldo)).scalar()              or 0),
         "total_canjeado":   float(db.query(func.sum(Gampoint.historico_canjeado)).scalar() or 0),
@@ -1512,7 +1530,6 @@ async def catalog_sync(
 
     Una sola transacción.  Devuelve conteos de ambas fases.
     """
-    from .models import CardCatalog
 
     js_stock = await _fetch_js_stock_cached()
     if not js_stock:
@@ -1641,7 +1658,6 @@ async def catalog_list(
     FIX QA: async def + await _fetch_js_stock_cached() — garantiza que el cache
     esté poblado incluso en cold start (antes el stock podía ser vacío tras restart).
     """
-    from .models import CardCatalog, StapleCard
 
     query = db.query(CardCatalog)
     if q:
@@ -1697,7 +1713,6 @@ async def catalog_list(
 @app.get("/api/admin/catalog/stats", dependencies=[Depends(verify_admin)])
 def catalog_stats(db: Session = Depends(get_db)):
     """Resumen del estado del catálogo para el dashboard."""
-    from .models import CardCatalog
     total_cards  = db.query(CardCatalog).count()
     total_skus   = db.query(func.sum(func.json_array_length(CardCatalog.js_product_ids))).scalar() or 0
     total_stock  = db.query(func.sum(CardCatalog.total_stock)).scalar() or 0
@@ -1707,7 +1722,6 @@ def catalog_stats(db: Session = Depends(get_db)):
         CardCatalog.scryfall_ids.isnot(None),
         func.json_array_length(CardCatalog.scryfall_ids) > 0
     ).count()
-    from .models import StapleCard
     staple_count = db.query(StapleCard).count()
     return {
         "total_cards":      total_cards,
@@ -1762,8 +1776,7 @@ async def _do_bulk_enrich() -> dict:
     db = SessionLocal()
     try:
         import ijson                        # streaming JSON parser
-        from .models import CardCatalog
-
+    
         # ── Paso 1: obtener download_uri del tipo "default_cards" ─────────────
         async with aiohttp.ClientSession(headers=HEADERS,
                                           timeout=aiohttp.ClientTimeout(total=30)) as session:
@@ -2042,7 +2055,6 @@ async def cancel_enrich():
 
 @app.get("/api/admin/staples", dependencies=[Depends(verify_admin)])
 def list_staples(db: Session = Depends(get_db)):
-    from .models import StapleCard
     return [{"id": c.id, "name": c.name_display, "tier": c.tier,
              "min_stock_override": c.min_stock_override, "margin_factor": c.margin_factor,
              "created_at": c.created_at.isoformat() if c.created_at else None}
@@ -2056,7 +2068,6 @@ def upsert_staple(req: StapleUpsertReq, db: Session = Depends(get_db)):
     Clave canónica: _canonical(name) — inmune a apóstrofes tipográficos.
     Maneja migración de registros viejos con name_normalized en U+2019.
     """
-    from .models import StapleCard
     clean_name = req.name.strip()
     key        = _canonical(clean_name)
 
@@ -2096,7 +2107,6 @@ def upsert_staple(req: StapleUpsertReq, db: Session = Depends(get_db)):
 
 @app.delete("/api/admin/staples/{staple_id}", dependencies=[Depends(verify_admin)])
 def delete_staple(staple_id: int, db: Session = Depends(get_db)):
-    from .models import StapleCard
     card = db.query(StapleCard).filter(StapleCard.id == staple_id).first()
     if not card:
         raise HTTPException(404, "Carta no encontrada")
@@ -2122,7 +2132,6 @@ async def bulk_import_staples(
     - Usa una sola transacción de BD → atómica (todo o nada).
     - Devuelve conteos: inserted, updated, skipped (nombres vacíos/duplicados).
     """
-    from .models import StapleCard
 
     if tier not in ("normal", "alta", "muy_alta"):
         raise HTTPException(422, f"tier inválido '{tier}'. Debe ser: normal | alta | muy_alta")
@@ -2196,7 +2205,6 @@ async def stock_check(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    from .models import StapleCard
 
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -2208,7 +2216,6 @@ async def stock_check(
     if missing:
         raise HTTPException(422, f"Columnas faltantes: {missing}")
 
-    from .models import StapleCard
     base_min_price = _build_base_min_price(df)
     staple_map     = _get_staple_map(db)
     js_stock       = await _fetch_js_stock_cached()
@@ -2419,7 +2426,6 @@ async def js_update_price(req: JSPriceUpdateReq):
 
 @app.get("/api/admin/buylist_orders", dependencies=[Depends(verify_admin)])
 def get_buylist_orders(db: Session = Depends(get_db), status: Optional[str] = None):
-    from .models import BuylistOrder
     q = db.query(BuylistOrder)
     if status:
         q = q.filter(BuylistOrder.status == status)
@@ -2449,7 +2455,6 @@ def update_order_status(
             status_code=422,
             detail=f"Estado inválido '{new_status}'. Valores permitidos: {sorted(_VALID_STATUSES)}"
         )
-    from .models import BuylistOrder
     order = db.query(BuylistOrder).filter(BuylistOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Orden no encontrada")
@@ -2708,7 +2713,8 @@ async def jumpseller_customer_webhook(request: Request, background_tasks: Backgr
         )
         raise HTTPException(status_code=401, detail="Webhook signature inválida")
     try:
-        payload       = await request.json()
+        # MAIN-06 FIX: parsear desde el body ya leído (stream ya consumido por HMAC)
+        payload       = json.loads(body)
         customer_data = payload.get("customer", {})
         if customer_data and customer_data.get("email"):
             background_tasks.add_task(_bg_sync_customer, customer_data)
@@ -2741,7 +2747,6 @@ async def stock_lookup(q: str = "", db: Session = Depends(get_db)):
         raise HTTPException(422, "Escribe al menos 2 caracteres")
 
     js_stock = await _fetch_js_stock_cached()
-    from .models import StapleCard
 
     q_norm   = _normalize_name(q_clean)   # ej: "sol ring", "dimir hous"
     q_tokens = q_norm.split()             # ["sol","ring"] / ["dimir","hous"]
@@ -2842,7 +2847,6 @@ def migrate_canonical(db: Session = Depends(get_db)):
     los staples. Necesario tras el fix de apóstrofes tipográficos (U+2019→U+0027).
     Seguro correrlo múltiples veces — no modifica datos si ya están normalizados.
     """
-    from .models import StapleCard
     rows     = db.query(StapleCard).all()
     updated  = 0
     skipped  = 0
@@ -2865,7 +2869,7 @@ def health():
     spent = _daily_cash_spent.get(today, 0.0)
     return {
         "status":               "ok",
-        "version":              "5.4",
+        "version":              "5.5",  # MAIN-01 FIX
         "buylist_open":         settings.BUYLIST_OPEN,
         "cash_enabled":         settings.CASH_ENABLED,
         "budget_cash_limit":    limit,
@@ -2931,7 +2935,6 @@ async def admin_sync_ck_prices():
 @app.get("/api/admin/ck_prices_status", dependencies=[Depends(verify_admin)])
 def admin_ck_prices_status(db=Depends(get_db)):
     """Estado de la tabla ck_prices: total de cartas y fecha de última actualización."""
-    from .models import CKPrice
     from sqlalchemy import func as sqlfunc
     try:
         total   = db.query(CKPrice).count()

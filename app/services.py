@@ -38,6 +38,34 @@ async def _fetch_customers_page(session: aiohttp.ClientSession, page: int) -> li
         return []
 
 
+def _extract_display_name(cust: dict) -> tuple[str | None, str | None]:
+    """
+    Extrae nombre para mostrar de un customer de Jumpseller.
+
+    PRIORIDAD:
+      1. customer.shipping_address.{first_name, last_name}  — nombre real de envío
+      2. customer.billing_address.{first_name, last_name}   — nombre de facturación
+      3. customer.{name, surname}                            — perfil del account
+      4. None, None                                          — sin nombre disponible
+
+    La dirección de envío es más confiable que el perfil de cuenta porque
+    muchos usuarios de Jumpseller no completan su perfil pero sí ingresan
+    su nombre real al hacer un pedido.
+    """
+    # Intentar shipping address primero
+    for addr_key in ("shipping_address", "billing_address"):
+        addr = cust.get(addr_key) or {}
+        fn = (addr.get("first_name") or "").strip()
+        ln = (addr.get("last_name")  or "").strip()
+        if fn or ln:
+            return fn or None, ln or None
+
+    # Fallback al perfil de cuenta
+    name    = (cust.get("name")    or "").strip() or None
+    surname = (cust.get("surname") or "").strip() or None
+    return name, surname
+
+
 async def sync_users_to_db(db: Session) -> dict:
     """
     Sincroniza customers de Jumpseller a la tabla gampoints.
@@ -79,18 +107,19 @@ async def sync_users_to_db(db: Session) -> dict:
                         continue
 
                     try:
+                        name, surname = _extract_display_name(cust)
                         user = db.query(Gampoint).filter(Gampoint.email == email).first()
                         if not user:
                             db.add(Gampoint(
                                 email         = email,
-                                name          = cust.get("name"),
-                                surname       = cust.get("surname"),
+                                name          = name,
+                                surname       = surname,
                                 jumpseller_id = cust.get("id"),
                             ))
                             added += 1
                         else:
-                            user.name          = cust.get("name")
-                            user.surname       = cust.get("surname")
+                            user.name          = name
+                            user.surname       = surname
                             user.jumpseller_id = cust.get("id")
                             updated += 1
                     except Exception as e:

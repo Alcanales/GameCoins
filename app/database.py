@@ -3,9 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-DATABASE_URL = settings.DATABASE_URL
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+DATABASE_URL = settings.DATABASE_URL  # CFG-02 FIX: ya procesado en config.py
 
 engine = create_engine(
     DATABASE_URL,
@@ -27,5 +25,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()   # DB-01 FIX: revertir transacción abierta antes de cerrar
+        raise
     finally:
         db.close()
