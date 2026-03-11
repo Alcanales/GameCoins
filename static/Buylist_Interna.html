@@ -1,279 +1,5 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Buylist Interna — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    body { font-family:'Inter',system-ui,sans-serif; background:#f8fafc; color:#1e293b; }
-    .card-shadow { box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04); }
-    .input-clean { background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:8px; padding:9px 12px; font-size:13px; width:100%; transition:border .2s; }
-    .input-clean:focus { border-color:#eab308; outline:none; box-shadow:0 0 0 3px rgba(234,179,8,.12); }
-    .input-clean::placeholder { color:#94a3b8; }
-    /* Checkbox */
-    .gq-check { width:16px; height:16px; border:2px solid #cbd5e1; border-radius:4px; background:#fff; cursor:pointer; appearance:none; -webkit-appearance:none; flex-shrink:0; transition:.15s; position:relative; }
-    .gq-check:checked { background:#0f172a; border-color:#0f172a; }
-    .gq-check:checked::after { content:''; position:absolute; top:1px; left:4px; width:4px; height:7px; border:2px solid #fff; border-top:none; border-left:none; transform:rotate(45deg); }
-    .gq-check:disabled { opacity:.3; cursor:not-allowed; }
-    /* Badges */
-    .gq-badge   { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; white-space:nowrap; border:1px solid; }
-    .gb-buying  { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
-    .gb-partial { background:#fffbeb; color:#d97706; border-color:#fde68a; }
-    .gb-full    { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
-    .gb-sinjs   { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
-    .gb-sinlista{ background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
-    .gb-foil    { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; }
-    .gb-estaca  { background:#fffbeb; color:#b45309; border-color:#fde68a; }
-    /* Tier badges */
-    .tier-muy   { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
-    .tier-alta  { background:#fffbeb; color:#d97706; border:1px solid #fde68a; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
-    .tier-normal{ background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
-    .tier-none  { background:#f8fafc; color:#94a3b8; border:1px solid #e2e8f0; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
-    .tier-muy:hover,.tier-alta:hover,.tier-normal:hover,.tier-none:hover { opacity:.75; }
-    /* Filter buttons — same as Bóveda tab-btn */
-    .tab-btn { padding:6px 14px; border-radius:8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:all .15s; border:1px solid transparent; }
-    .tab-on  { background:#0f172a; color:#fff; }
-    .tab-off { background:#fff; color:#64748b; border-color:#e2e8f0; }
-    .tab-off:hover { background:#f1f5f9; color:#334155; }
-    /* Table */
-    .tbl-head,.tbl-row { display:grid; align-items:center; gap:8px; padding:9px 14px; }
-    .tbl-head { grid-template-columns:28px 1fr 90px 90px 90px 100px 58px 52px 80px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
-    .tbl-row  { grid-template-columns:28px 1fr 90px 90px 90px 100px 58px 52px 80px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
-    .tbl-row:last-child { border-bottom:none; }
-    .tbl-row:hover { background:#fafafa; }
-    .row-full     { opacity:.42; }
-    .row-unlisted { opacity:.32; }
-    .row-sinjs    { border-left:3px solid #ef4444; }
-    .row-hidden   { display:none !important; }
-    /* Qty */
-    .qty-wrap { display:flex; align-items:center; gap:3px; }
-    .qty-btn  { width:24px; height:24px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#475569; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:.12s; }
-    .qty-btn:hover:not(:disabled) { border-color:#94a3b8; background:#f8fafc; }
-    .qty-btn:disabled { opacity:.3; cursor:not-allowed; }
-    .qty-inp  { width:34px; text-align:center; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#0f172a; font-size:12px; font-weight:700; padding:2px 0; }
-    .qty-inp:focus { outline:none; border-color:#eab308; }
-    .qty-inp:disabled { opacity:.3; }
-    /* Cupo bar */
-    .cupo-bar  { height:3px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:3px; }
-    .cupo-fill { height:100%; background:#22c55e; border-radius:999px; }
-    /* Stat cards */
-    .stat-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px; text-align:center; }
-    /* Payment */
-    .pay-opt { border:2px solid #e2e8f0; border-radius:12px; padding:12px 14px; cursor:pointer; transition:.2s; background:#fff; }
-    .pay-opt:hover { border-color:#cbd5e1; background:#f8fafc; }
-    .pay-opt.sel-qp   { border-color:#7c3aed; background:#faf5ff; }
-    .pay-opt.sel-cash { border-color:#16a34a; background:#f0fdf4; }
-    /* Buttons */
-    .btn-pri  { background:#0f172a; color:#fff; font-weight:700; font-size:13px; border:none; border-radius:10px; padding:9px 18px; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:6px; }
-    .btn-pri:hover:not(:disabled) { background:#1e293b; }
-    .btn-pri:disabled { opacity:.4; cursor:not-allowed; }
-    .btn-out  { background:#fff; color:#475569; border:1px solid #e2e8f0; font-weight:600; font-size:11px; border-radius:8px; padding:5px 11px; cursor:pointer; transition:.12s; display:inline-flex; align-items:center; gap:4px; }
-    .btn-out:hover { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
-    .btn-danger { background:#fff; color:#dc2626; border:1px solid #fecaca; font-weight:600; font-size:11px; border-radius:8px; padding:5px 11px; cursor:pointer; transition:.12s; }
-    .btn-danger:hover { background:#fef2f2; }
-    /* Alerts */
-    .alert-warn { background:#fffbeb; border:1px solid #fde68a; border-radius:9px; padding:8px 14px; font-size:12px; color:#92400e; }
-    .alert-err  { background:#fef2f2; border:1px solid #fecaca; border-radius:9px; padding:8px 14px; font-size:12px; color:#991b1b; }
-    /* Totals bar */
-    #totals-bar { position:sticky; bottom:0; background:rgba(255,255,255,.97); border-top:1px solid #e2e8f0; backdrop-filter:blur(8px); z-index:90; }
-    .lbl { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#94a3b8; }
-    .spin { animation:_spin .8s linear infinite; display:inline-block; }
-    @keyframes _spin { to { transform:rotate(360deg); } }
-  </style>
-</head>
-<body class="min-h-screen">
-
-<!-- Header -->
-<header class="sticky top-0 z-50 bg-white border-b border-slate-200" style="box-shadow:0 1px 3px rgba(0,0,0,.05)">
-  <div style="max-width:1200px;margin:0 auto;padding:11px 16px" class="flex items-center justify-between">
-    <div class="flex items-center gap-2.5">
-      <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-        <span style="color:#eab308;font-size:13px;font-weight:900">G</span>
-      </div>
-      <div>
-        <span style="font-size:14px;font-weight:900;color:#0f172a;letter-spacing:-.02em">game<span style="color:#eab308">quest</span></span>
-        <span style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.12em;margin-left:6px;text-transform:uppercase">Interna</span>
-      </div>
-    </div>
-    <div id="header-actions" style="display:none;gap:8px" class="flex items-center">
-      <span style="font-size:11px;color:#94a3b8" id="hdr-file">—</span>
-      <button class="btn-out" onclick="exportSelected()"><i class="fas fa-download"></i>Exportar CSV</button>
-      <button class="btn-out" onclick="doLogout()"><i class="fas fa-right-from-bracket"></i>Salir</button>
-    </div>
-  </div>
-</header>
-
-<!-- Login -->
-<div id="login-screen" class="flex items-center justify-center" style="min-height:80vh">
-  <div class="bg-white rounded-2xl border border-slate-100 p-8 text-center card-shadow" style="max-width:340px;width:calc(100% - 32px)">
-    <div class="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center mx-auto mb-5">
-      <i class="fas fa-lock text-yellow-400 text-lg"></i>
-    </div>
-    <h1 style="font-weight:900;font-size:1.2rem;color:#0f172a;margin-bottom:4px">Acceso Interno</h1>
-    <p style="font-size:12px;color:#94a3b8;margin-bottom:20px">Buylist · GameQuest</p>
-    <input type="password" id="pwd-inp" class="input-clean mb-3" placeholder="Contraseña de acceso"
-      onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn-pri w-full justify-center" style="width:100%;justify-content:center" onclick="doLogin()">
-      <i class="fas fa-lock-open"></i>Ingresar
-    </button>
-    <p id="login-err" class="hidden" style="font-size:11px;color:#dc2626;margin-top:8px"></p>
-  </div>
-</div>
-
-<!-- App -->
-<div id="app" style="display:none">
-<div style="max-width:1200px;margin:0 auto;padding:20px 16px 140px">
-
-  <!-- Upload + Stats -->
-  <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px" class="upload-stats-grid">
-    <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
-      <div class="lbl" style="margin-bottom:10px"><i class="fas fa-file-csv mr-2 text-slate-400"></i>CSV Manabox</div>
-      <input type="file" id="csv-inp" accept=".csv,.txt" class="input-clean mb-2" onchange="onFile(this.files[0])">
-      <button class="btn-pri" id="btn-analyze" onclick="analyze()" disabled style="width:100%;justify-content:center">
-        <i class="fas fa-magnifying-glass"></i>Analizar
-      </button>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px" id="stats-row">
-      <div class="stat-card card-shadow"><div style="font-weight:900;font-size:1.4rem;color:#0f172a" id="st-total">—</div><div class="lbl">Total</div></div>
-      <div class="stat-card card-shadow"><div style="font-weight:900;font-size:1.4rem;color:#16a34a" id="st-buying">—</div><div class="lbl">Compramos</div></div>
-      <div class="stat-card card-shadow"><div style="font-weight:900;font-size:1.4rem;color:#94a3b8" id="st-full">—</div><div class="lbl">Completo</div></div>
-      <div class="stat-card card-shadow"><div style="font-weight:900;font-size:1.2rem;color:#7c3aed" id="st-qp">—</div><div class="lbl">💎 QP sel.</div></div>
-      <div class="stat-card card-shadow"><div style="font-weight:900;font-size:1.2rem;color:#16a34a" id="st-cash">—</div><div class="lbl">💵 Cash sel.</div></div>
-    </div>
-  </div>
-
-  <!-- Loading -->
-  <div id="loading-state" class="bg-white rounded-2xl border border-slate-100 p-10 text-center mb-3 card-shadow" style="display:none">
-    <i class="fas fa-circle-notch spin mb-3 block" style="font-size:1.6rem;color:#eab308"></i>
-    <p style="font-weight:700;color:#0f172a">Analizando…</p>
-  </div>
-
-  <!-- Results -->
-  <div id="results-section" style="display:none">
-
-    <!-- Alert sin JS -->
-    <div id="sinjs-alert" class="alert-err mb-3" style="display:none">
-      <i class="fas fa-triangle-exclamation mr-2"></i><span id="sinjs-txt"></span>
-    </div>
-
-    <!-- Filtros -->
-    <div class="bg-white rounded-2xl border border-slate-100 p-3 mb-3 card-shadow">
-      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
-        <span class="lbl" style="margin-right:4px">Estado:</span>
-        <button class="tab-btn tab-on"  onclick="setStatusFilter('all',this)">Todas</button>
-        <button class="tab-btn tab-off" onclick="setStatusFilter('buying',this)">✅ Compramos</button>
-        <button class="tab-btn tab-off" onclick="setStatusFilter('partial',this)">⚡ Parcial</button>
-        <button class="tab-btn tab-off" onclick="setStatusFilter('full',this)">🚫 Completo</button>
-        <button class="tab-btn tab-off" onclick="setStatusFilter('sinjs',this)" style="color:#dc2626;border-color:#fecaca">⚠️ Sin JS</button>
-        <button class="tab-btn tab-off" onclick="setStatusFilter('unlisted',this)">— Sin lista</button>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-        <span class="lbl" style="margin-right:4px">Tier:</span>
-        <button class="tab-btn tab-off" onclick="setTierFilter('all',this)">Todos</button>
-        <button class="tab-btn tab-off" onclick="setTierFilter('muy_alta',this)" style="color:#dc2626;border-color:#fecaca">🔥 Muy Alta</button>
-        <button class="tab-btn tab-off" onclick="setTierFilter('alta',this)" style="color:#d97706;border-color:#fde68a">⭐ Alta</button>
-        <button class="tab-btn tab-off" onclick="setTierFilter('normal',this)" style="color:#2563eb;border-color:#bfdbfe">📦 Normal</button>
-        <button class="tab-btn tab-off" onclick="setTierFilter('sin_lista',this)">— Sin tier</button>
-        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
-          <input type="text" id="search-inp" placeholder="🔍 Buscar carta…" class="input-clean"
-            style="width:160px;font-size:11px;padding:5px 10px" oninput="applyFilters()">
-          <button class="btn-out" onclick="selectAll(true)"><i class="fas fa-check-double"></i>Todas</button>
-          <button class="btn-out" onclick="selectAll(false)"><i class="fas fa-xmark"></i>Ninguna</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Table -->
-    <div class="bg-white rounded-2xl border border-slate-100 mb-3 card-shadow overflow-hidden">
-      <!-- Header -->
-      <div class="tbl-head">
-        <div><input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)"></div>
-        <div class="lbl">Carta</div>
-        <div class="lbl text-center">Tier</div>
-        <div class="lbl text-right" style="color:#64748b">Ref. CK</div>
-        <div class="lbl text-right" style="color:#7c3aed">💎 QP</div>
-        <div class="lbl text-right" style="color:#16a34a" id="cash-hdr">💵 Cash</div>
-        <div class="lbl text-center">Stock</div>
-        <div class="lbl text-center">Cupo</div>
-        <div class="lbl text-center">Cant.</div>
-      </div>
-      <div id="cards-list"></div>
-    </div>
-
-    <!-- Confirmar -->
-    <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-3 card-shadow" id="confirm-panel">
-      <div class="lbl" style="margin-bottom:14px"><i class="fas fa-paper-plane mr-2 text-slate-400"></i>Confirmar y enviar copia al vendedor</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
-        <input type="email" id="v-email"  placeholder="Email del vendedor *" class="input-clean">
-        <input type="text"  id="v-rut"    placeholder="RUT del vendedor"      class="input-clean">
-        <input type="text"  id="v-nombre" placeholder="Nombre del vendedor"   class="input-clean">
-      </div>
-      <div class="lbl" style="margin-bottom:8px">Forma de pago acordada</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-        <div class="pay-opt" onclick="selectPay('credito')" id="pay-qp">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:1.4rem">💎</span>
-            <div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0f172a">QuestPoints</div><div style="font-size:10px;color:#64748b">+11% sobre base</div></div>
-            <div style="font-weight:900;color:#7c3aed;font-size:1rem" id="pay-qp-tot">$0</div>
-          </div>
-        </div>
-        <div class="pay-opt" onclick="selectPay('cash')" id="pay-cash" id="pay-cash-col">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:1.4rem">💵</span>
-            <div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0f172a">Cash CLP</div><div style="font-size:10px;color:#64748b">Pago inmediato</div></div>
-            <div style="font-weight:900;color:#16a34a;font-size:1rem" id="pay-cash-tot">$0</div>
-          </div>
-        </div>
-      </div>
-      <textarea id="v-notas" placeholder="Notas internas (no se envían al vendedor)…"
-        class="input-clean mb-3" rows="2" style="resize:vertical"></textarea>
-      <div style="display:flex;gap:8px">
-        <button class="btn-pri" id="btn-confirm" onclick="confirmOrder()" style="flex:1;justify-content:center">
-          <i class="fas fa-paper-plane"></i>Registrar y enviar copia al vendedor
-        </button>
-        <button class="btn-out" onclick="exportSelected()"><i class="fas fa-download"></i>CSV</button>
-      </div>
-    </div>
-  </div><!-- /results -->
-</div>
-</div><!-- /app -->
-
-<!-- Totals bar -->
-<div id="totals-bar" style="display:none">
-  <div style="max-width:1200px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-    <div><span class="lbl">Sel.:</span><strong style="color:#0f172a;margin-left:4px" id="bar-count">0</strong></div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:20px">
-      <div style="text-align:center">
-        <div style="font-weight:900;font-size:1rem;color:#7c3aed;line-height:1" id="bar-qp">$0</div>
-        <div class="lbl">💎 QP</div>
-      </div>
-      <div style="text-align:center" id="bar-cash-wrap">
-        <div style="font-weight:900;font-size:1rem;color:#16a34a;line-height:1" id="bar-cash">$0</div>
-        <div class="lbl">💵 Cash</div>
-      </div>
-      <button class="btn-pri" onclick="document.getElementById('confirm-panel').scrollIntoView({behavior:'smooth'})">
-        Confirmar <i class="fas fa-arrow-right"></i>
-      </button>
-    </div>
-  </div>
-</div>
-
-<style>
-@media(max-width:768px){
-  .upload-stats-grid { grid-template-columns:1fr !important; }
-  #stats-row { grid-template-columns:repeat(3,1fr) !important; }
-  .tbl-head  { display:none !important; }
-  .tbl-row   { grid-template-columns:28px 1fr !important; padding:10px 12px; }
-  .col-desktop { display:none !important; }
-}
-</style>
-
 <script>
-const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
+const GAMECOINS_API_URL = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
   ? 'http://localhost:8000' : 'https://gamecoins.onrender.com';
 let token='', csvFile=null, allCards=[], payMode=null, cashEnabled=true;
 let statusFilter='all', tierFilter='all', searchQ='';
@@ -291,12 +17,11 @@ function canonical(s){
   return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
 }
 
-// ── Auth ──────────────────────────────────────────────────────────
 function doLogin(){
   const pwd=document.getElementById('pwd-inp').value.trim();
   if(!pwd){ showErr('Ingresa la contraseña'); return; }
   token=pwd;
-  fetch(`${API}/api/admin/cache_status`,{headers:ah()}).then(r=>{
+  fetch(`${GAMECOINS_API_URL}/api/admin/cache_status`,{headers:ah()}).then(r=>{
     if(r.ok){
       show('login-screen',false); show('app',true);
       document.getElementById('header-actions').style.display='flex';
@@ -313,7 +38,7 @@ document.getElementById('pwd-inp').addEventListener('keydown',e=>{ if(e.key==='E
 
 async function checkCashSetting(){
   try{
-    const r=await fetch(`${API}/api/public/buylist_status`);
+    const r=await fetch(`${GAMECOINS_API_URL}/api/public/buylist_status`);
     const s=await r.json(); cashEnabled=s.cash_enabled;
     if(!cashEnabled){
       ['pay-cash-col','bar-cash-wrap','cash-hdr'].forEach(id=>{
@@ -323,7 +48,6 @@ async function checkCashSetting(){
   }catch(e){}
 }
 
-// ── Analyze ───────────────────────────────────────────────────────
 function onFile(f){
   csvFile=f;
   document.getElementById('btn-analyze').disabled=!f;
@@ -334,7 +58,7 @@ async function analyze(){
   show('loading-state',true); show('results-section',false);
   try{
     const fd=new FormData(); fd.append('file',csvFile);
-    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd,headers:ahForm()});
+    const r=await fetch(`${GAMECOINS_API_URL}/api/public/analyze_buylist`,{method:'POST',body:fd,headers:ahForm()});
     if(!r.ok){const e=await r.json();throw new Error(e.detail||`HTTP ${r.status}`)}
     allCards=await r.json();
     renderAll();
@@ -344,7 +68,6 @@ async function analyze(){
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────
 function statusOf(c){
   if(c.stock_actual===null||c.stock_actual===undefined) return 'sinjs';
   const s=c.buying_status;
@@ -372,9 +95,10 @@ function renderAll(){
     const cupoFill=c.max_stock?Math.min(100,Math.round(((c.stock_actual||0)/c.max_stock)*100)):0;
 
     const tierBadge={
-      muy_alta:`<span class="tier-muy" onclick="openTier(${idx})">🔥 Muy Alta</span>`,
-      alta:    `<span class="tier-alta" onclick="openTier(${idx})">⭐ Alta</span>`,
-      normal:  `<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`,
+      muy_alta:   `<span class="tier-muy" onclick="openTier(${idx})">🔥 Muy Alta</span>`,
+      alta:       `<span class="tier-alta" onclick="openTier(${idx})">⭐ Alta</span>`,
+      normal:     `<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`,
+      no_comprar: `<span class="tier-muy" onclick="openTier(${idx})">🚫 No Comprar</span>`
     }[tier]||`<span class="tier-none" onclick="openTier(${idx})">— Sin tier</span>`;
 
     const statusBadge={
@@ -382,7 +106,7 @@ function renderAll(){
       partial: `<span class="gq-badge gb-partial"><i class="fas fa-bolt" style="font-size:9px"></i> Parcial ${maxQty}/${c.qty}</span>`,
       full:    `<span class="gq-badge gb-full"><i class="fas fa-ban" style="font-size:9px"></i> Completo</span>`,
       sinjs:   `<span class="gq-badge gb-sinjs"><i class="fas fa-triangle-exclamation" style="font-size:9px"></i> Sin JS</span>`,
-      unlisted:`<span class="gq-badge gb-sinlista">— Sin lista</span>`,
+      unlisted:`<span class="gq-badge gb-sinlista">🚫 No compramos</span>`,
     }[st]||'';
 
     const stockColor=(c.stock_actual||0)===0?'#dc2626':(c.stock_actual||0)<3?'#d97706':'#16a34a';
@@ -391,47 +115,40 @@ function renderAll(){
     div.className=`tbl-row card-row ${st==='full'?'row-full':st==='unlisted'?'row-unlisted':st==='sinjs'?'row-sinjs':''}`;
     div.id=`row-${idx}`; div.dataset.status=st; div.dataset.tier=tier; div.dataset.name=canonical(c.name);
 
-    // Col 1: checkbox
     const c1=`<div style="display:flex;align-items:flex-start;padding-top:2px">
       <input type="checkbox" class="gq-check cc" data-idx="${idx}"
         ${canBuy?'checked':''} ${canBuy?'':'disabled'} onchange="updateBar()">
     </div>`;
 
-    // Col 2: nombre + tags + badges
     const c2=`<div style="min-width:0">
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px">
         <span style="font-weight:700;font-size:13px;color:#0f172a">${esc(c.name)}</span>
         ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho ×${c.stake_mult}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho</span>`:''}
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${statusBadge}</div>
     </div>`;
 
-    // Col 3: tier
     const c3=`<div style="text-align:center">${tierBadge}</div>`;
 
-    // Col 4: Ref CK
     const c4=`<div class="col-desktop" style="text-align:right">
       <div style="font-size:12px;font-weight:700;color:#475569">${fmtUSD(c.price_usd_raw)}</div>
       ${c.is_estaca?`<div style="font-size:9px;color:#94a3b8">→ ${fmtUSD(c.price_usd)} · <span style="color:#7c3aed">${{csv:'CSV',cardkingdom:'CK',fallback_tipo:'tipo'}[c.nicho_base]||''}</span></div>`:''}
     </div>`;
 
-    // Col 5: QP
     const c5=`<div class="col-desktop" style="text-align:right">
       <div style="font-weight:900;font-size:12px;color:#7c3aed" id="pqp-${idx}">
         ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
       </div>
     </div>`;
 
-    // Col 6: Cash
     const c6=`<div class="col-desktop" style="text-align:right" id="pcash-wrap-${idx}">
       <div style="font-weight:700;font-size:12px;color:#16a34a" id="pcs-${idx}">
         ${canBuy&&cashEnabled?fmtCLP(c.price_cash*maxQty):'—'}
       </div>
     </div>`;
 
-    // Col 7: Stock JS
     const c7=`<div class="col-desktop" style="text-align:center">
       ${st==='sinjs'
         ?`<span style="color:#dc2626;font-size:11px;font-weight:700">N/A</span>`
@@ -440,12 +157,10 @@ function renderAll(){
         `}
     </div>`;
 
-    // Col 8: Cupo
     const c8=`<div class="col-desktop" style="text-align:center">
       <div style="font-weight:700;font-size:13px;color:${maxQty>0?'#16a34a':'#94a3b8'}">${canBuy?maxQty:'—'}</div>
     </div>`;
 
-    // Col 9: Qty controls
     const c9=canBuy?`<div style="display:flex;flex-direction:column;align-items:center;gap:2px">
       <div class="qty-wrap">
         <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
@@ -469,7 +184,6 @@ function renderAll(){
   }
 }
 
-// ── Interactions ──────────────────────────────────────────────────
 function changeQty(idx,d){
   const inp=document.getElementById(`qty-${idx}`);
   if(!inp) return;
@@ -534,14 +248,13 @@ function selectPay(m){
   document.getElementById('pay-cash').className='pay-opt'+(m==='cash'?' sel-cash':'');
 }
 
-// ── Cambiar tier ──────────────────────────────────────────────────
 async function openTier(idx){
   const c=allCards[idx];
   let selected=null;
   await Swal.fire({
     title:`Tier: ${c.name}`,
     html:`<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-      ${[['muy_alta','🔥 Muy Alta'],['alta','⭐ Alta'],['normal','📦 Normal'],['quitar','🗑 Quitar de lista']].map(([t,lbl])=>`
+      ${[['muy_alta','🔥 Muy Alta'],['alta','⭐ Alta'],['normal','📦 Normal'],['no_comprar','🚫 No Comprar'],['quitar','🗑 Resetear Automático']].map(([t,lbl])=>`
       <button data-tier="${t}"
         style="padding:10px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;font-weight:700;font-size:13px;cursor:pointer;text-align:left;transition:.12s"
         onmouseover="this.style.background='#f1f5f9'"
@@ -560,13 +273,13 @@ async function openTier(idx){
 
   try{
     if(selected==='quitar'){
-      const lr=await fetch(`${API}/api/admin/staples`,{headers:ah()});
+      const lr=await fetch(`${GAMECOINS_API_URL}/api/admin/staples`,{headers:ah()});
       const ll=await lr.json();
       const ex=ll.find(s=>canonical(s.name)===canonical(c.name));
-      if(ex) await fetch(`${API}/api/admin/staples/${ex.id}`,{method:'DELETE',headers:ah()});
-      allCards[idx].tier='sin_lista';
+      if(ex) await fetch(`${GAMECOINS_API_URL}/api/admin/staples/${ex.id}`,{method:'DELETE',headers:ah()});
+      allCards[idx].tier='normal';
     } else {
-      await fetch(`${API}/api/admin/staples`,{
+      await fetch(`${GAMECOINS_API_URL}/api/admin/staples`,{
         method:'POST',headers:ah(),
         body:JSON.stringify({name:c.name,tier:selected,margin_factor:2.5})
       });
@@ -576,7 +289,7 @@ async function openTier(idx){
     if(row) row.remove();
     renderRow(idx);
     updateBar();
-    toast(`✅ ${c.name} → ${selected==='quitar'?'quitado':selected}`);
+    toast(`✅ ${c.name} → ${selected==='quitar'?'Automático':selected}`);
   }catch(e){ toast(`❌ ${e.message}`,'error'); }
 }
 
@@ -589,7 +302,8 @@ function renderRow(idx){
     muy_alta:`<span class="tier-muy" onclick="openTier(${idx})">🔥 Muy Alta</span>`,
     alta:    `<span class="tier-alta" onclick="openTier(${idx})">⭐ Alta</span>`,
     normal:  `<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`,
-  }[tier]||`<span class="tier-none" onclick="openTier(${idx})">— Sin tier</span>`;
+    no_comprar:`<span class="tier-muy" onclick="openTier(${idx})">🚫 No Comprar</span>`
+  }[tier]||`<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`;
   const div=document.createElement('div');
   div.className='tbl-row card-row';
   div.id=`row-${idx}`; div.dataset.status=st; div.dataset.tier=tier; div.dataset.name=canonical(c.name);
@@ -604,7 +318,6 @@ function renderRow(idx){
   applyFilters();
 }
 
-// ── Confirmar ─────────────────────────────────────────────────────
 async function confirmOrder(){
   const email=document.getElementById('v-email').value.trim();
   const rut=document.getElementById('v-rut').value.trim();
@@ -636,7 +349,7 @@ async function confirmOrder(){
   const btn=document.getElementById('btn-confirm');
   btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin" style="margin-right:8px"></i>Registrando…';
   try{
-    const r=await fetch(`${API}/api/admin/commit_buylist`,{
+    const r=await fetch(`${GAMECOINS_API_URL}/api/admin/commit_buylist`,{
       method:'POST',headers:ah(),
       body:JSON.stringify({email:email||`admin-${Date.now()}@gq.internal`,rut,nombre,notas,
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash,source:'interna'}),
@@ -653,7 +366,6 @@ async function confirmOrder(){
   }
 }
 
-// ── Exportar CSV ──────────────────────────────────────────────────
 function exportSelected(){
   const rows=[['Carta','Tier','Condición','Foil','Version','Cant.','QP (CLP)','Cash (CLP)','Ref CK (USD)','Stock JS','Cupo','Estado']];
   document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
@@ -670,7 +382,6 @@ function exportSelected(){
   a.click();
 }
 
-// ── Utils ─────────────────────────────────────────────────────────
 function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
 function fmtUSD(n){return '$'+(n||0).toFixed(2)}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -681,5 +392,3 @@ function toast(msg,type='success'){
     .fire({icon:type,title:msg});
 }
 </script>
-</body>
-</html>

@@ -1,280 +1,12 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Buylist — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    body { font-family:'Inter',system-ui,sans-serif; background:#f8fafc; color:#1e293b; }
-    .card-shadow { box-shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04); }
-    .input-clean { background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:8px; padding:10px 14px; font-size:14px; width:100%; transition:border .2s; }
-    .input-clean:focus { border-color:#eab308; outline:none; box-shadow:0 0 0 3px rgba(234,179,8,.12); }
-    .input-clean::placeholder { color:#94a3b8; }
-    /* Dropzone */
-    #drop-zone { border:2px dashed #e2e8f0; border-radius:12px; padding:32px 20px; text-align:center; cursor:pointer; transition:.2s; background:#f8fafc; }
-    #drop-zone:hover,#drop-zone.drag-over { border-color:#eab308; background:rgba(234,179,8,.04); }
-    #drop-zone.has-file { border-color:#22c55e; background:rgba(34,197,94,.04); }
-    /* Checkbox */
-    .gq-check { width:16px; height:16px; border:2px solid #cbd5e1; border-radius:4px; background:#fff; cursor:pointer; appearance:none; -webkit-appearance:none; flex-shrink:0; transition:.15s; position:relative; }
-    .gq-check:checked { background:#0f172a; border-color:#0f172a; }
-    .gq-check:checked::after { content:''; position:absolute; top:1px; left:4px; width:4px; height:7px; border:2px solid #fff; border-top:none; border-left:none; transform:rotate(45deg); }
-    .gq-check:disabled { opacity:.3; cursor:not-allowed; }
-    /* Table layout */
-    .tbl-head,.tbl-row { display:grid; align-items:center; gap:8px; padding:10px 16px; }
-    .tbl-head { grid-template-columns:28px 1fr 96px 96px 106px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
-    .tbl-row  { grid-template-columns:28px 1fr 96px 96px 106px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
-    .tbl-row:last-child { border-bottom:none; }
-    .tbl-row:hover { background:#fafafa; }
-    .row-full    { opacity:.42; }
-    .row-unlisted{ opacity:.32; }
-    .row-hidden  { display:none !important; }
-    /* Qty */
-    .qty-wrap { display:flex; align-items:center; gap:3px; justify-content:center; }
-    .qty-btn  { width:26px; height:26px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#475569; font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:.12s; line-height:1; }
-    .qty-btn:hover:not(:disabled) { border-color:#94a3b8; background:#f8fafc; color:#0f172a; }
-    .qty-btn:disabled { opacity:.3; cursor:not-allowed; }
-    .qty-inp  { width:36px; text-align:center; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#0f172a; font-size:13px; font-weight:700; padding:3px 0; }
-    .qty-inp:focus  { outline:none; border-color:#eab308; }
-    .qty-inp:disabled { opacity:.3; background:#f8fafc; }
-    /* Cupo bar */
-    .cupo-bar  { height:3px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:3px; }
-    .cupo-fill { height:100%; background:#22c55e; border-radius:999px; transition:width .3s; }
-    /* Badges */
-    .gq-badge   { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; white-space:nowrap; border:1px solid; }
-    .gb-buying  { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
-    .gb-partial { background:#fffbeb; color:#d97706; border-color:#fde68a; }
-    .gb-full    { background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
-    .gb-unlisted{ background:#f8fafc; color:#94a3b8; border-color:#e2e8f0; }
-    .gb-muyalta { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
-    .gb-foil    { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; }
-    .gb-estaca  { background:#fffbeb; color:#b45309; border-color:#fde68a; }
-    /* Filter buttons */
-    .gq-fb { border:1px solid #e2e8f0; background:#fff; color:#64748b; border-radius:8px; padding:5px 13px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:.12s; white-space:nowrap; }
-    .gq-fb:hover { background:#f8fafc; border-color:#cbd5e1; color:#475569; }
-    .gq-fb.active { background:#0f172a; border-color:#0f172a; color:#fff; }
-    /* Pay options */
-    .pay-opt { border:2px solid #e2e8f0; border-radius:12px; padding:14px 16px; cursor:pointer; transition:.2s; background:#fff; }
-    .pay-opt:hover { border-color:#cbd5e1; background:#f8fafc; }
-    .pay-opt.sel-qp   { border-color:#7c3aed; background:#faf5ff; }
-    .pay-opt.sel-cash { border-color:#16a34a; background:#f0fdf4; }
-    /* Normas */
-    .norma   { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; font-size:13px; color:#334155; }
-    .norma:last-child { border-bottom:none; }
-    .norma-n { min-width:22px; height:22px; background:#0f172a; color:#fff; border-radius:999px; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
-    /* Totals bar */
-    #totals-bar { position:sticky; bottom:0; background:rgba(255,255,255,.97); border-top:1px solid #e2e8f0; backdrop-filter:blur(8px); z-index:90; }
-    /* Buttons */
-    .btn-pri  { background:#0f172a; color:#fff; font-weight:700; font-size:13px; border:none; border-radius:10px; padding:10px 20px; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:7px; }
-    .btn-pri:hover:not(:disabled) { background:#1e293b; }
-    .btn-pri:disabled { opacity:.4; cursor:not-allowed; }
-    .btn-out  { background:#fff; color:#475569; border:1px solid #e2e8f0; font-weight:600; font-size:11px; border-radius:8px; padding:5px 12px; cursor:pointer; transition:.12s; display:inline-flex; align-items:center; gap:5px; }
-    .btn-out:hover { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
-    .lbl   { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#94a3b8; }
-    .spin  { animation:_spin .8s linear infinite; display:inline-block; }
-    @keyframes _spin { to { transform:rotate(360deg); } }
-  </style>
-</head>
-<body class="min-h-screen">
-
-<!-- Header -->
-<header class="sticky top-0 z-50 bg-white border-b border-slate-200" style="box-shadow:0 1px 3px rgba(0,0,0,.05)">
-  <div style="max-width:820px;margin:0 auto;padding:12px 16px" class="flex items-center justify-between">
-    <div class="flex items-center gap-2.5">
-      <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-        <span style="color:#eab308;font-size:13px;font-weight:900">G</span>
-      </div>
-      <span style="font-size:15px;font-weight:900;color:#0f172a;letter-spacing:-.02em">game<span style="color:#eab308">quest</span></span>
-    </div>
-    <a href="/" class="btn-out no-underline" style="text-decoration:none"><i class="fas fa-store"></i><span>Tienda</span></a>
-  </div>
-</header>
-
-<!-- Cerrada -->
-<div id="closed-banner" style="display:none">
-  <div style="max-width:400px;margin:80px auto;padding:0 16px;text-align:center">
-    <div class="bg-white rounded-2xl border border-slate-100 p-8 card-shadow">
-      <div style="font-size:2.5rem;margin-bottom:12px">🔒</div>
-      <h4 style="font-weight:900;color:#0f172a;font-size:1.1rem;margin-bottom:8px">Buylist Temporalmente Cerrada</h4>
-      <p style="font-size:13px;color:#64748b;margin-bottom:16px">Estamos evaluando cotizaciones anteriores o reponiendo stock. ¡Vuelve pronto!</p>
-      <a href="mailto:contacto@gamequest.cl" class="btn-out no-underline" style="text-decoration:none;display:inline-flex"><i class="fas fa-envelope"></i>contacto@gamequest.cl</a>
-    </div>
-  </div>
-</div>
-
-<!-- App -->
-<div id="app-section" style="display:none">
-<div style="max-width:820px;margin:0 auto;padding:24px 16px 140px">
-
-  <div style="text-align:center;margin-bottom:24px">
-    <h1 style="font-weight:900;font-size:1.6rem;color:#0f172a;margin-bottom:6px">Cotiza tus cartas <span style="color:#eab308">al instante</span></h1>
-    <p style="font-size:13px;color:#64748b">Exporta desde Manabox, sube tu CSV y ve exactamente cuánto te pagamos.</p>
-  </div>
-
-  <!-- Normas -->
-  <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow">
-    <div class="lbl" style="margin-bottom:12px"><i class="fas fa-scroll mr-2 text-slate-400"></i>Normas de compra</div>
-    <div class="norma"><div class="norma-n">1</div><div>Compramos <strong>NM y LP</strong>. MP/HP/DMG con descuento automático según condición.</div></div>
-    <div class="norma"><div class="norma-n">2</div><div>El <strong>cupo</strong> indica cuántas unidades necesitamos para completar nuestro stock objetivo. No compramos más allá del cupo.</div></div>
-    <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ★ De Nicho tienen multiplicador especial.</div></div>
-    <div class="norma"><div class="norma-n">4</div><div>Al confirmar recibirás un email de respaldo. Cotización válida <strong>48 horas</strong>. Coordina entrega en tienda.</div></div>
-  </div>
-
-  <!-- Upload -->
-  <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow" id="upload-card">
-    <div class="lbl" style="margin-bottom:12px"><i class="fas fa-file-csv mr-2 text-slate-400"></i>1. Sube tu colección (CSV Manabox)</div>
-    <div id="drop-zone" onclick="document.getElementById('csv-inp').click()">
-      <div style="font-size:2rem;color:#cbd5e1;margin-bottom:8px"><i class="fas fa-cloud-arrow-up"></i></div>
-      <p style="font-weight:700;font-size:14px;color:#475569;margin-bottom:4px" id="drop-text">Arrastra tu CSV o haz clic para seleccionar</p>
-      <p style="font-size:12px;color:#94a3b8">Manabox → Mi Colección → Exportar CSV</p>
-    </div>
-    <input type="file" id="csv-inp" accept=".csv,.txt" style="display:none" onchange="setFile(this.files[0])">
-    <div id="upload-actions" style="display:none;gap:8px;margin-top:12px" class="flex">
-      <button class="btn-pri" style="flex:1" onclick="analyze()"><i class="fas fa-magnifying-glass"></i>Analizar Colección</button>
-      <button class="btn-out" onclick="resetFile()"><i class="fas fa-xmark"></i></button>
-    </div>
-  </div>
-
-  <!-- Loading -->
-  <div id="loading-state" class="bg-white rounded-2xl border border-slate-100 p-10 text-center mb-4 card-shadow" style="display:none">
-    <i class="fas fa-circle-notch spin mb-3 block" style="font-size:1.8rem;color:#eab308"></i>
-    <p style="font-weight:700;color:#0f172a;margin-bottom:4px">Analizando tu colección…</p>
-    <p style="font-size:12px;color:#64748b">Consultando precios y stock</p>
-  </div>
-
-  <!-- Results -->
-  <div id="results-section" style="display:none">
-
-    <!-- Summary -->
-    <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-3 card-shadow">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;margin-bottom:12px">
-        <div>
-          <div style="font-weight:900;font-size:1.5rem;color:#0f172a" id="sum-total">0</div>
-          <div class="lbl">Cartas</div>
-        </div>
-        <div>
-          <div style="font-weight:900;font-size:1.5rem;color:#16a34a" id="sum-buying">0</div>
-          <div class="lbl">Compramos</div>
-        </div>
-        <div>
-          <div style="font-weight:900;font-size:1.3rem;color:#7c3aed" id="sum-qp">$0</div>
-          <div class="lbl">💎 QP</div>
-        </div>
-        <div id="sum-cash-col">
-          <div style="font-weight:900;font-size:1.3rem;color:#16a34a" id="sum-cash">$0</div>
-          <div class="lbl">💵 Cash</div>
-        </div>
-      </div>
-      <div id="full-alert" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:8px 14px;font-size:12px;color:#64748b">
-        <i class="fas fa-info-circle mr-2" style="color:#94a3b8"></i><span id="full-alert-txt"></span>
-      </div>
-    </div>
-
-    <!-- Filtros -->
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
-      <button class="gq-fb active" onclick="setFilter('all',this)">🔍 Todas</button>
-      <button class="gq-fb"        onclick="setFilter('buying',this)">✅ Compramos</button>
-      <button class="gq-fb"        onclick="setFilter('partial',this)">⚡ Parcial</button>
-      <button class="gq-fb"        onclick="setFilter('full',this)">🚫 Completo</button>
-      <button class="gq-fb"        onclick="setFilter('unlisted',this)">— Sin lista</button>
-      <div style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn-out" onclick="selectAll(true)"><i class="fas fa-check-double"></i>Todas</button>
-        <button class="btn-out" onclick="selectAll(false)"><i class="fas fa-xmark"></i>Ninguna</button>
-      </div>
-    </div>
-
-    <!-- Cards table -->
-    <div class="bg-white rounded-2xl border border-slate-100 mb-4 card-shadow overflow-hidden" id="cards-wrap">
-      <!-- Header columnas -->
-      <div class="tbl-head">
-        <div><input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)"></div>
-        <div class="lbl">Carta</div>
-        <div class="lbl text-right" style="color:#7c3aed">💎 QP</div>
-        <div class="lbl text-right col-cash-hd" style="color:#16a34a" id="cash-col-hd">💵 Cash</div>
-        <div class="lbl text-center">Cantidad</div>
-      </div>
-      <div id="cards-list"></div>
-    </div>
-
-    <!-- Payment -->
-    <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow" id="payment-card">
-      <div class="lbl" style="margin-bottom:14px"><i class="fas fa-wallet mr-2 text-slate-400"></i>2. Elige cómo cobrar</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
-        <div class="pay-opt" onclick="selectPay('credito')" id="pay-qp">
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="font-size:1.6rem">💎</span>
-            <div style="flex:1">
-              <div style="font-weight:700;font-size:13px;color:#0f172a">QuestPoints (Crédito)</div>
-              <div style="font-size:11px;color:#64748b">+11% sobre base — máximo valor</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-weight:900;font-size:1.1rem;color:#7c3aed" id="pay-qp-tot">$0</div>
-              <div class="lbl">Total QP</div>
-            </div>
-          </div>
-        </div>
-        <div class="pay-opt" onclick="selectPay('cash')" id="pay-cash" id="pay-cash-col">
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="font-size:1.6rem">💵</span>
-            <div style="flex:1">
-              <div style="font-weight:700;font-size:13px;color:#0f172a">Cash (Pesos CLP)</div>
-              <div style="font-size:11px;color:#64748b">Pago inmediato en tienda</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-weight:900;font-size:1.1rem;color:#16a34a" id="pay-cash-tot">$0</div>
-              <div class="lbl">Total Cash</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="lbl" style="margin-bottom:10px"><i class="fas fa-user mr-2 text-slate-400"></i>3. Tus datos (para la copia)</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-        <input type="email" id="inp-email"  placeholder="Email *"             class="input-clean">
-        <input type="text"  id="inp-rut"    placeholder="RUT * (12.345.678-9)" class="input-clean">
-        <input type="text"  id="inp-nombre" placeholder="Nombre (opcional)"    class="input-clean" style="grid-column:span 2">
-      </div>
-      <button class="btn-pri" id="btn-submit" onclick="submitOrder()" style="width:100%;justify-content:center;padding:13px">
-        <i class="fas fa-paper-plane"></i>Confirmar Cotización
-      </button>
-      <p style="text-align:center;margin-top:8px;font-size:11px;color:#94a3b8">Sin compromiso de venta. Recibirás copia por email.</p>
-    </div>
-  </div><!-- /results -->
-</div>
-</div><!-- /app -->
-
-<!-- Totals bar -->
-<div id="totals-bar" style="display:none">
-  <div style="max-width:820px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-    <div><span class="lbl">Seleccionadas: </span><strong style="color:#0f172a;margin-left:4px" id="bar-count">0</strong></div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:20px">
-      <div style="text-align:center">
-        <div style="font-weight:900;font-size:1.05rem;color:#7c3aed;line-height:1" id="bar-qp">$0</div>
-        <div class="lbl">💎 QP</div>
-      </div>
-      <div style="text-align:center" id="bar-cash-wrap">
-        <div style="font-weight:900;font-size:1.05rem;color:#16a34a;line-height:1" id="bar-cash">$0</div>
-        <div class="lbl">💵 Cash</div>
-      </div>
-      <button class="btn-pri" onclick="document.getElementById('payment-card').scrollIntoView({behavior:'smooth'})">
-        Cotizar <i class="fas fa-arrow-right"></i>
-      </button>
-    </div>
-  </div>
-</div>
-
 <script>
-const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
+const GAMECOINS_API_URL = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
   ? 'http://localhost:8000' : 'https://gamecoins.onrender.com';
 
 let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
 
 (async()=>{
   try{
-    const r=await fetch(`${API}/api/public/buylist_status`);
+    const r=await fetch(`${GAMECOINS_API_URL}/api/public/buylist_status`);
     const s=await r.json();
     cashEnabled=s.cash_enabled;
     if(!s.open){
@@ -289,7 +21,6 @@ let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
       });
       const pc=document.getElementById('pay-cash');
       if(pc) pc.style.display='none';
-      // Reducir grid a 3 columnas sin cash
       document.querySelectorAll('.tbl-head,.tbl-row').forEach(el=>{
         el.style.gridTemplateColumns='28px 1fr 96px 106px';
       });
@@ -319,7 +50,7 @@ async function analyze(){
   show('upload-card',false); show('loading-state',true); show('results-section',false);
   try{
     const fd=new FormData(); fd.append('file',csvFile);
-    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd});
+    const r=await fetch(`${GAMECOINS_API_URL}/api/public/analyze_buylist`,{method:'POST',body:fd});
     if(!r.ok){const e=await r.json();throw new Error(e.detail||`Error ${r.status}`)}
     allCards=await r.json();
     renderResults();
@@ -341,10 +72,14 @@ function renderResults(){
   show('loading-state',false); show('results-section',true); show('totals-bar',true);
   const list=document.getElementById('cards-list');
   list.innerHTML='';
-  let nBuying=0, nFull=0;
+  let nBuying=0, nFull=0, nRendered=0;
 
   allCards.forEach((c,idx)=>{
     const st=statusOf(c);
+    
+    if (st === 'unlisted') return;
+
+    nRendered++;
     const canBuy=st==='buying'||st==='partial';
     if(canBuy) nBuying++;
     if(st==='full') nFull++;
@@ -357,14 +92,13 @@ function renderResults(){
     const badgeMap={
       buying:`<span class="gq-badge gb-buying"><i class="fas fa-circle-check" style="font-size:9px"></i> Compramos</span>`,
       partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt" style="font-size:9px"></i> Parcial: ${maxQty} de ${c.qty}</span>`,
-      full:`<span class="gq-badge gb-full"><i class="fas fa-ban" style="font-size:9px"></i> Stock completo</span>`,
-      unlisted:`<span class="gq-badge gb-unlisted">— Sin lista</span>`,
+      full:`<span class="gq-badge gb-full"><i class="fas fa-ban" style="font-size:9px"></i> Stock completo</span>`
     };
     const maBadge=c.buying_status==='muy_alta'?`<span class="gq-badge gb-muyalta" style="margin-left:4px"><i class="fas fa-fire" style="font-size:9px"></i> Alta demanda</span>`:'';
     const cupoFill=c.max_stock?Math.min(100,Math.round(((c.stock_actual||0)/c.max_stock)*100)):0;
 
     const div=document.createElement('div');
-    div.className=`tbl-row card-row ${st==='full'?'row-full':st==='unlisted'?'row-unlisted':''}`;
+    div.className=`tbl-row card-row ${st==='full'?'row-full':''}`;
     div.dataset.status=st; div.id=`row-${idx}`;
 
     const col1=`<div style="display:flex;align-items:flex-start;padding-top:2px">
@@ -376,7 +110,7 @@ function renderResults(){
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:700;font-size:13.5px;color:#0f172a">${esc(c.name)}</span>
         ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho ×${c.stake_mult}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho</span>`:''}
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${badgeMap[st]||''}${maBadge}</div>
@@ -417,7 +151,7 @@ function renderResults(){
   });
 
   const t=recalcTotals();
-  setText('sum-total',allCards.length);
+  setText('sum-total',nRendered);
   setText('sum-buying',nBuying);
   setText('sum-qp',fmtCLP(t.qp));
   setText('sum-cash',fmtCLP(t.cash));
@@ -520,7 +254,7 @@ async function submitOrder(){
   const btn=document.getElementById('btn-submit');
   btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin" style="margin-right:8px"></i>Enviando…';
   try{
-    const r=await fetch(`${API}/api/public/commit_buylist`,{
+    const r=await fetch(`${GAMECOINS_API_URL}/api/public/commit_buylist`,{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({email,rut,nombre:document.getElementById('inp-nombre').value.trim(),
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash}),
@@ -544,5 +278,3 @@ function show(id,v){const el=document.getElementById(id);if(el)el.style.display=
 function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v}
 function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#0f172a'})}
 </script>
-</body>
-</html>
