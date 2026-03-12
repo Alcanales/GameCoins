@@ -55,6 +55,10 @@ class BuylistCommitRequest(BaseModel):
     items:              List[BuylistItem]
     total_credito:      float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
     total_cash:         float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
+    nombre:             Optional[str] = None  # SCH-FIX: campo del HTML (opcional)
+
+    # Descartar cualquier campo extra que el HTML envíe (mismo patrón que BuylistItem)
+    model_config = {"extra": "ignore"}
 
     @field_validator("rut")
     @classmethod

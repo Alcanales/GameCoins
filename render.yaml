@@ -3,7 +3,8 @@ services:
     name: gamecoins
     env: python
     region: oregon
-    plan: free           # $7/mes — 512MB RAM, 1 CPU, se duerme sin tráfico
+    plan: free           # Plan gratuito — 512MB RAM, 1 CPU, se duerme sin tráfico
+    autoDeploy: true        # DEP-02 FIX: deploy automático al pushear a main
     buildCommand: >
       pip install --upgrade pip setuptools wheel &&
       pip install -r requirements.txt

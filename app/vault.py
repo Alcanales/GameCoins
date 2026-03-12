@@ -393,6 +393,8 @@ class VaultController:
             )
 
         # ── Paso 4: Verificar saldo ──────────────────────────────────────────
+        # DATA-02: Validación en código — saldo nunca queda negativo.
+        # BD no tiene CheckConstraint pero esta validación es la línea de defensa.
         if user.saldo < effective_amount:
             raise HTTPException(
                 status_code=400,

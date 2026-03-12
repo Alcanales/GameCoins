@@ -153,8 +153,9 @@ app.add_middleware(
     allow_origins=[
         "https://gamequest.cl",
         "https://www.gamequest.cl",
-        "https://gamecoins.onrender.com",   # dominio Render del propio backend
-        "http://localhost:10000",            # desarrollo local
+        "https://game-quest.jumpseller.com",   # CORS-FIX: preview/admin Jumpseller
+        "https://gamecoins.onrender.com",      # dominio Render del propio backend
+        "http://localhost:10000",              # desarrollo local
         "http://localhost:8000",
     ],
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
@@ -309,6 +310,9 @@ def _invalidate_staple_cache() -> None:
 # In-memory: se reinicia al reiniciar el servidor (aceptable — free tier duerme).
 # Thread-safety: asyncio single-threaded (1 worker) → no hay race condition.
 import datetime as _dt
+# NEW-06 KNOWN LIMITATION: _daily_cash_spent vive en RAM — se reinicia con cada deploy/cold start.
+# En free tier de Render los deploys son frecuentes. Para límite estricto, persistir en BD.
+# Decisión: aceptar como limitación conocida del free tier.
 _daily_cash_spent: dict[str, float] = {}
 
 def _check_and_register_cash_budget(amount_clp: float) -> None:
@@ -421,7 +425,7 @@ _APOSTROPHES = frozenset({
     '\uFF07',  # ＇ FULLWIDTH APOSTROPHE
 })
 
-@lru_cache(maxsize=16384)
+@lru_cache(maxsize=65536)   # PROD-02 FIX: 3.4M misses → aumentar cache para catálogo completo
 def _canonical(name: str) -> str:
     """
     Produce la clave normalizada canónica de una carta MTG.
@@ -505,17 +509,29 @@ _ESTACA_KEYWORDS = frozenset({
 
 def _is_estaca(foil: str, name: str, version: str = "") -> bool:
     """
-    True si la carta es versión especial premium.
+    True si la carta es una VARIANTE que debe excluirse del cálculo de precio base NM.
+
+    Se usa EXCLUSIVAMENTE en _build_base_min_price() para que base_nm sea siempre
+    el precio de la versión NM no-foil más barata — nunca una versión premium.
+
+    EXCLUYE:
+      - foil, etched (columna Foil del CSV) → variante de precio diferente
+      - versiones especiales premium (Extended Art, Showcase, Serialized, etc.)
+        detectadas en la columna Version del CSV
+
+    NO se usa para determinar si una carta es De Nicho.
+    El criterio De Nicho es SOLO price_csv > base_nm × STAKE_MULTIPLIER
+    y se evalúa en _compute_card_price().
+
     - foil   : columna Foil del CSV (normal | foil | etched)
-    - name   : nombre — solo se usa si version está vacío (backward compat)
+    - name   : no se usa (se mantiene por compatibilidad de firma)
     - version: columna Version del CSV (Extended Art, Showcase, etc.)
     """
     foil_l = (foil or "normal").strip().lower()
     if foil_l in ("foil", "etched"):
-        return True
-    # Preferir la columna Version sobre el nombre para evitar falsos positivos
-    source = version.strip() if version.strip() else ""
-    return any(kw in source.lower() for kw in _ESTACA_KEYWORDS)
+        return True   # excluir foil del precio base NM
+    source = (version or "").strip().lower()
+    return bool(source) and any(kw in source for kw in _ESTACA_KEYWORDS)
 
 
 # ── JS stock con cache ────────────────────────────────────────────────────────
@@ -698,10 +714,10 @@ def _compute_card_price(
     """
     Calcula precio efectivo USD y detecta si la carta es De Nicho.
 
-    DETECCIÓN DE NICHO (orden de prioridad):
-      1. base_nm = base_min_price[canonical]  — versión NM del mismo CSV
-      2. base_nm = ck_nm_prices[canonical]    — pricelist CardKingdom (buy_price NM)
-      3. Fallback                             — _is_estaca() (tipo: foil/etched/keywords)
+    DETECCIÓN DE PRECIO DE REFERENCIA NM (orden de prioridad):
+      1. base_nm = base_min_price[canonical]  — versión NM más barata del mismo CSV
+      2. base_nm = ck_nm_prices[canonical]    — precio CK de la tabla ck_prices
+      3. Sin referencia                        → is_nicho = False (no hay umbral)
 
     CRITERIO DE NICHO:
       Con base_nm disponible: es De Nicho si price_usd > base_nm × STAKE_MULTIPLIER
@@ -734,14 +750,20 @@ def _compute_card_price(
     else:
         base_nm         = None
         nicho_threshold = None
-        base_origin     = "fallback_tipo"
+        base_origin     = "sin_referencia"
 
     # ── Criterio De Nicho ─────────────────────────────────────────────────────
+    # REGLA DEFINITIVA: De Nicho SOLO por comparación de precios.
+    # Una carta es De Nicho si y solo si su precio en el CSV supera 1.5× el
+    # precio de referencia (CSV NM propio o tabla ck_prices).
+    # Sin precio de referencia → is_nicho = False. No hay fallback por tipo de carta.
+    # Esto garantiza que foil básico, etched, y cualquier versión sin precio CK
+    # se cotiza a precio normal sin multiplicador De Nicho.
     if nicho_threshold is not None:
         is_nicho = price_usd > nicho_threshold
     else:
-        is_nicho = _is_estaca(foil_raw, card_name, version)
-        base_nm  = price_usd   # sin referencia → el precio propio es la base
+        # Sin base de referencia: precio normal, sin De Nicho
+        is_nicho = False
 
     # ── Precio efectivo ───────────────────────────────────────────────────────
     eff_usd  = (nicho_threshold or price_usd) if is_nicho else price_usd
@@ -1086,11 +1108,10 @@ def buylist_status():
     }
 
 
-@app.post("/api/public/analyze_buylist")
-async def analyze_buylist(
-    file: UploadFile = File(...),
-    request: Request  = None,
-    db: Session = Depends(get_db),
+async def _analyze_buylist_impl(
+    file:    UploadFile,
+    request,
+    db:      Session,
 ):
     """
     Recibe CSV Manabox. Aplica foil/condición/moneda.
@@ -1246,6 +1267,60 @@ async def analyze_buylist(
             "matched_by":     "scryfall_id" if (sf_str and sf_str in _scryfall_map) else "name",
         })
 
+    # ── Sanitizar respuesta pública — ocultar campos sensibles de inventario ──
+    # stock_actual, max_stock, cupo, canonical, tier, etc. son información
+    # comercial interna que no debe exponerse al cliente en el endpoint público.
+    # qty_comprar se renombra a max_qty para que el frontend pueda limitar la
+    # cantidad sin revelar la lógica de cupo.
+    # _admin=True: retornar todos los campos sin filtrar (Buylist_Interna.html).
+    # _analyze_buylist_impl retorna los resultados completos sin sanitizar
+    return results
+
+
+# ── Endpoint público: sanitiza la respuesta ────────────────────────────────
+@app.post("/api/public/analyze_buylist")
+async def analyze_buylist(
+    file:    UploadFile = File(...),
+    request: Request    = None,
+    db:      Session    = Depends(get_db),
+):
+    """
+    Endpoint público de análisis de buylist.
+    Retorna solo los campos necesarios para el cliente — sin stock, tier ni metadatos.
+    """
+    results = await _analyze_buylist_impl(file=file, request=request, db=db)
+    # Sanitizar: eliminar campos de inventario interno
+    _SENSITIVE_FIELDS = frozenset({
+        "stock_actual", "max_stock", "cupo",
+        "canonical", "scryfall_id", "matched_by",
+        "nicho_base", "tier",
+        "price_usd_raw", "price_usd_base",
+    })
+    sanitized = []
+    for r in results:
+        pub = {k: v for k, v in r.items() if k not in _SENSITIVE_FIELDS}
+        # qty_comprar se expone solo como max_qty — sin revelar la lógica de cupo
+        pub["max_qty"] = r.get("qty_comprar", r["qty"])
+        pub.pop("qty_comprar", None)
+        sanitized.append(pub)
+    return sanitized
+
+
+@app.post("/api/admin/analyze_buylist", dependencies=[Depends(verify_admin)])
+async def admin_analyze_buylist(
+    file:    UploadFile = File(...),
+    db:      Session    = Depends(get_db),
+    request: Request    = None,
+):
+    """
+    NEW-01 FIX: endpoint admin independiente del público.
+    Retorna resultados completos sin sanitizar (stock_actual, max_stock, cupo,
+    tier, canonical, matched_by, nicho_base) — solo accesible con STORE_TOKEN.
+    La separación arquitectural garantiza que el flag admin no sea un query param HTTP.
+    """
+    # Delegar a la función interna — _analyze_buylist_impl hace la validación
+    # Admin recibe datos completos sin sanitizar (stock_actual, tier, cupo, etc.)
+    results = await _analyze_buylist_impl(file=file, request=request, db=db)
     return results
 
 
@@ -2873,8 +2948,8 @@ def health():
         "buylist_open":         settings.BUYLIST_OPEN,
         "cash_enabled":         settings.CASH_ENABLED,
         "budget_cash_limit":    limit,
-        "budget_cash_spent":    round(spent, 0),
-        "budget_cash_remaining": round(max(0.0, limit - spent), 0) if limit > 0 else None,
+        "budget_cash_spent":    int(spent),          # NEW-02 FIX: int en vez de float
+        "budget_cash_remaining": int(max(0.0, limit - spent)) if limit > 0 else None,
         "js_cache_age_sec":     int(time.monotonic() - _js_stock_cache_ts),
         "js_cache_cards":       len(_js_stock_cache),
         "js_cache_valid":       bool(_js_stock_cache and time.monotonic() - _js_stock_cache_ts < JS_STOCK_TTL),

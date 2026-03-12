@@ -18,8 +18,8 @@ psycopg2-binary==2.9.10
 # ÁREA 3: VALIDACIÓN Y SEGURIDAD
 # ==========================================
 pydantic==2.11.3
-pydantic-settings>=2.1.0
-email-validator>=2.0.0
+pydantic-settings==2.9.1
+email-validator==2.2.0
 # python-dotenv: ELIMINADO (FIX M-05) — pydantic-settings v2 tiene soporte
 # nativo para .env sin load_dotenv(). Confirmado: cero usos en /app/.
 python-multipart==0.0.9
@@ -32,10 +32,10 @@ aiohttp==3.11.18
 # ==========================================
 # ÁREA 5: ANÁLISIS DE DATOS (Buylist y CSV)
 # ==========================================
-pandas>=2.0.0
+pandas==2.2.3
 
 # ==========================================
 # ÁREA 6: PERFORMANCE
 # ==========================================
-orjson>=3.9.0
-ijson>=3.2.3          # streaming JSON parser — bulk data Scryfall sin OOM
+orjson==3.10.15
+ijson==3.3.0          # streaming JSON parser — bulk data Scryfall sin OOM

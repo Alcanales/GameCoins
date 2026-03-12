@@ -40,9 +40,7 @@
     .qty-inp  { width:36px; text-align:center; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#0f172a; font-size:13px; font-weight:700; padding:3px 0; }
     .qty-inp:focus  { outline:none; border-color:#eab308; }
     .qty-inp:disabled { opacity:.3; background:#f8fafc; }
-    /* Cupo bar */
-    .cupo-bar  { height:3px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:3px; }
-    .cupo-fill { height:100%; background:#22c55e; border-radius:999px; transition:width .3s; }
+    /* Cupo bar — CSS conservado para compatibilidad */
     /* Badges */
     .gq-badge   { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; white-space:nowrap; border:1px solid; }
     .gb-buying  { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
@@ -117,7 +115,7 @@
   <div class="bg-white rounded-2xl border border-slate-100 p-5 mb-4 card-shadow">
     <div class="lbl" style="margin-bottom:12px"><i class="fas fa-scroll mr-2 text-slate-400"></i>Normas de compra</div>
     <div class="norma"><div class="norma-n">1</div><div>Compramos <strong>NM y LP</strong>. MP/HP/DMG con descuento automático según condición.</div></div>
-    <div class="norma"><div class="norma-n">2</div><div>El <strong>cupo</strong> indica cuántas unidades necesitamos para completar nuestro stock objetivo. No compramos más allá del cupo.</div></div>
+    <div class="norma"><div class="norma-n">2</div><div>Cada carta tiene un <strong>límite de unidades</strong>. No compramos más allá del límite indicado.</div></div>
     <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ★ De Nicho tienen multiplicador especial.</div></div>
     <div class="norma"><div class="norma-n">4</div><div>Al confirmar recibirás un email de respaldo. Cotización válida <strong>48 horas</strong>. Coordina entrega en tienda.</div></div>
   </div>
@@ -272,7 +270,8 @@ let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
 
 (async()=>{
   try{
-    const r=await fetch(`${API}/api/public/buylist_status`);
+    const ac0=new AbortController(); setTimeout(()=>ac0.abort(),15000);
+    const r=await fetch(`${API}/api/public/buylist_status`,{signal:ac0.signal});
     const s=await r.json();
     cashEnabled=s.cash_enabled;
     if(!s.open){
@@ -317,13 +316,16 @@ async function analyze(){
   show('upload-card',false); show('loading-state',true); show('results-section',false);
   try{
     const fd=new FormData(); fd.append('file',csvFile);
-    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd});
+    const ac1=new AbortController(); const t1=setTimeout(()=>ac1.abort(),60000);
+    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd,signal:ac1.signal});
+    clearTimeout(t1);
     if(!r.ok){const e=await r.json();throw new Error(e.detail||`Error ${r.status}`)}
     allCards=await r.json();
     renderResults();
   }catch(e){
     show('loading-state',false); show('upload-card',true);
-    swal('Error',e.message,'error');
+    const msg=e.name==='AbortError'?'El servidor tardó demasiado en responder. Puede estar iniciando — intenta de nuevo en 30 segundos.':e.message;
+    swal('Error',msg,'error');
   }
 }
 
@@ -348,19 +350,18 @@ function renderResults(){
     const canBuy=st==='buying'||st==='partial';
     if(canBuy) nBuying++;
     if(st==='full') nFull++;
-    const maxQty=c.qty_comprar??(canBuy?c.qty:0);
+    const maxQty=c.max_qty??(canBuy?c.qty:0);
 
     const cond={near_mint:'NM',light_played:'LP',moderately_played:'MP',heavily_played:'HP',damaged:'DMG'}[c.condition]||'';
     const condColor={near_mint:'#16a34a',light_played:'#65a30d',moderately_played:'#d97706',heavily_played:'#dc2626',damaged:'#9f1239'}[c.condition]||'#94a3b8';
-    const isFoil=c.foil&&c.foil!=='normal';
+    const isFoil=(c.foil||'normal')!=='normal';  // NEW-07 FIX: null safe
 
     const badgeMap={
       buying:`<span class="gq-badge gb-buying"><i class="fas fa-circle-check" style="font-size:9px"></i> Compramos</span>`,
-      partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt" style="font-size:9px"></i> Parcial: ${maxQty} de ${c.qty}</span>`,
+      partial:`<span class="gq-badge gb-partial"><i class="fas fa-bolt" style="font-size:9px"></i> Parcial</span>`,  // STOCK-OCULTO
       full:`<span class="gq-badge gb-full"><i class="fas fa-ban" style="font-size:9px"></i> Stock completo</span>`,
     };
     const maBadge=c.buying_status==='muy_alta'?`<span class="gq-badge gb-muyalta" style="margin-left:4px"><i class="fas fa-fire" style="font-size:9px"></i> Alta demanda</span>`:'';
-    const cupoFill=c.max_stock?Math.min(100,Math.round(((c.stock_actual||0)/c.max_stock)*100)):0;
 
     const div=document.createElement('div');
     div.className=`tbl-row card-row ${st==='full'?'row-full':''}`;
@@ -379,36 +380,30 @@ function renderResults(){
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${badgeMap[st]||''}${maBadge}</div>
-      ${canBuy&&c.max_stock?`<div style="max-width:140px;margin-top:5px">
-        <div style="display:flex;justify-content:space-between;font-size:9px;color:#94a3b8">
-          <span>${c.stock_actual??'?'} / ${c.max_stock}</span><span>cupo: ${maxQty}</span>
-        </div>
-        <div class="cupo-bar"><div class="cupo-fill" style="width:${cupoFill}%"></div></div>
-      </div>`:''}
+
     </div>`;
 
     const col3=`<div style="text-align:right">
       <div style="font-weight:900;font-size:.95rem;color:#7c3aed;line-height:1" id="pqp-${idx}">
-        ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
+        ${canBuy?fmtCLP(c.price_credito):'—'}
       </div>
       ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_credito)}</div>`:''}
     </div>`;
 
     const col4=cashEnabled?`<div style="text-align:right">
       <div style="font-weight:700;font-size:.9rem;color:#16a34a;line-height:1" id="pcs-${idx}">
-        ${canBuy?fmtCLP(c.price_cash*maxQty):''}
+        ${canBuy?fmtCLP(c.price_cash):''}
       </div>
       ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_cash)}</div>`:''}
     </div>`:`<div></div>`;
 
-    const col5=canBuy?`<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+    const col5=canBuy?`<div style="display:flex;align-items:center;justify-content:center">
       <div class="qty-wrap">
         <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
-        <input type="number" class="qty-inp" id="qty-${idx}" value="${maxQty}" min="1" max="${maxQty}"
-          oninput="onQtyChange(${idx})">
+        <input type="number" class="qty-inp" id="qty-${idx}" value="1" min="1"
+          data-max="${maxQty}" oninput="onQtyChange(${idx})">
         <button class="qty-btn" onclick="changeQty(${idx},1)">+</button>
       </div>
-      <div style="font-size:9px;color:#94a3b8">máx ${maxQty}</div>
     </div>`:`<div></div>`;
 
     div.innerHTML=col1+col2+col3+col4+col5;
@@ -433,7 +428,7 @@ function onChk(idx){updateBar()}
 function changeQty(idx,d){
   const inp=document.getElementById(`qty-${idx}`);
   if(!inp) return;
-  const mx=parseInt(inp.max)||1;
+  const mx=parseInt(inp.dataset.max)||1;  // STOCK-OCULTO: usa data-max, no atributo max visible
   inp.value=Math.max(1,Math.min(mx,parseInt(inp.value||1)+d));
   onQtyChange(idx);
 }
@@ -441,7 +436,7 @@ function onQtyChange(idx){
   const c=allCards[idx];
   const inp=document.getElementById(`qty-${idx}`);
   if(!inp) return;
-  const mx=parseInt(inp.max)||1;
+  const mx=parseInt(inp.dataset.max)||1;  // STOCK-OCULTO: usa data-max
   let v=parseInt(inp.value)||1;
   if(v<1)v=1; if(v>mx)v=mx; inp.value=v;
   const el=document.getElementById(`pqp-${idx}`);
@@ -519,11 +514,14 @@ async function submitOrder(){
   const btn=document.getElementById('btn-submit');
   btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin" style="margin-right:8px"></i>Enviando…';
   try{
+    const ac2=new AbortController(); const t2=setTimeout(()=>ac2.abort(),30000);
     const r=await fetch(`${API}/api/public/commit_buylist`,{
       method:'POST',headers:{'Content-Type':'application/json'},
+      signal:ac2.signal,
       body:JSON.stringify({email,rut,nombre:document.getElementById('inp-nombre').value.trim(),
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash}),
     });
+    clearTimeout(t2);
     const d=await r.json();
     if(!r.ok) throw new Error(d.detail||'Error');
     Swal.fire({icon:'success',title:'¡Cotización enviada! 🎉',
@@ -533,7 +531,8 @@ async function submitOrder(){
   }catch(e){
     btn.disabled=false;
     btn.innerHTML='<i class="fas fa-paper-plane" style="margin-right:8px"></i>Confirmar Cotización';
-    swal('Error',e.message,'error');
+    const msg=e.name==='AbortError'?'Tiempo de espera agotado. Intenta de nuevo.':e.message;
+    swal('Error',msg,'error');
   }
 }
 function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
