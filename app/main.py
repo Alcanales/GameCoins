@@ -1,9 +1,3 @@
-"""
-main.py — GameQuest API v5.5
-Cambios v5.5: foil/nicho pipeline definitivo, stock info privado, AbortController,
-              CORS Jumpseller, lru_cache 65536, imports de módulo, fixes de sesión,
-            email en TODAS las buylists.
-"""
 import re
 import io
 import csv
@@ -256,6 +250,7 @@ _enrich_done:      int   = 0
 _enrich_errors:    int   = 0
 _enrich_skipped:   int   = 0
 _enrich_last_card: str   = ""
+_enrich_mb_down:   int   = 0   # MB descargados del bulk Scryfall (para el UI)
 _enrich_task:      object = None
 # FIX A4: asyncio.Lock para prevenir TOCTOU en start_enrich_scryfall.
 # Sin lock, dos requests simultáneos pueden ambos pasar el check `if _enrich_running`
@@ -2151,6 +2146,27 @@ def catalog_stats(db: Session = Depends(get_db)):
 # "default_cards": una entrada por impresión en inglés (~90,000 cards).
 # Actualizado cada 12h por Scryfall. Sin rate limiting — 1 solo request.
 
+def _wait_parse_result(result_queue, future):
+    """
+    Helper síncrono: espera el resultado del thread de parseo streaming.
+    Corre en executor para no bloquear el event loop.
+    Levanta excepción si el parseo falló.
+    """
+    import queue as queue_mod
+    try:
+        status, *rest = result_queue.get(timeout=600)
+        if status == "ok":
+            sf_map, seen, matched = rest
+            return sf_map, seen, matched
+        else:
+            exc = rest[0]
+            raise exc
+    except queue_mod.Empty:
+        raise RuntimeError("Timeout esperando resultado del parseo Scryfall (>10 min)")
+    finally:
+        future.cancel()
+
+
 async def _do_bulk_enrich() -> dict:
     """
     Descarga e indexa el bulk data 'default_cards' de Scryfall usando streaming JSON.
@@ -2158,12 +2174,13 @@ async def _do_bulk_enrich() -> dict:
     Diseñado para correr como asyncio.Task en background.
     """
     global _enrich_running, _enrich_total, _enrich_done, _enrich_errors
-    global _enrich_skipped, _enrich_last_card
+    global _enrich_skipped, _enrich_last_card, _enrich_mb_down
 
     _enrich_running  = True
     _enrich_done     = 0
     _enrich_errors   = 0
     _enrich_skipped  = 0
+    _enrich_mb_down  = 0
     _enrich_last_card = "obteniendo URL del bulk…"
 
     BULK_INDEX = "https://api.scryfall.com/bulk-data"
@@ -2202,102 +2219,108 @@ async def _do_bulk_enrich() -> dict:
         _enrich_total = len(canonical_set)
         logger.info(f"[BULK] {_enrich_total} cartas en catálogo a enriquecer")
 
-        # ── Paso 3: stream download (async) + parse ijson (thread pool) ───────
-        # sf_map_new, cards_seen y matched son inicializados y devueltos por
-        # _parse_scryfall_buffer() que corre en asyncio.to_thread() (FIX C3).
-
-        async with aiohttp.ClientSession(headers=HEADERS,
-                                          timeout=aiohttp.ClientTimeout(
-                                              total=600,    # 10 min — descarga grande
-                                              sock_read=60,
-                                          )) as session:
-            async with session.get(download_uri) as resp:
-                if resp.status != 200:
-                    raise RuntimeError(f"Download HTTP {resp.status}")
-
-                logger.info("[BULK] Descarga iniciada — acumulando en buffer…")
-
-                import io
-
-                buffer = io.BytesIO()
-                total_bytes = 0
-                CHUNK = 512 * 1024   # 512KB por chunk
-
-                async for chunk in resp.content.iter_chunked(CHUNK):
-                    buffer.write(chunk)
-                    total_bytes += len(chunk)
-                    _enrich_last_card = f"descargando… {total_bytes // 1_048_576} MB"
-                    if total_bytes % (4 * 1024 * 1024) == 0:
-                        await asyncio.sleep(0)
-
-                logger.info(f"[BULK] Descarga completa: {total_bytes // 1_048_576} MB")
-                # La conexión HTTP se cierra aquí al salir del context manager.
-                # FIX C3+C4: el parseo ijson ocurre FUERA de este bloque para:
-                #   (a) cerrar la conexión TCP a Scryfall antes de parsear.
-                #   (b) mover el parseo síncrono al thread pool (asyncio.to_thread)
-                #       para no bloquear el event loop 30-60 segundos.
-
-        # ── Paso 4: parsear card por card con ijson en thread pool ────────────
-        # FIX C3: ijson.items() es completamente síncrono. Con ~90k cartas / 100MB
-        # bloquea el event loop entre 30-60s, congelando TODOS los requests activos.
-        # asyncio.to_thread() mueve el parseo al ThreadPoolExecutor del event loop,
-        # liberando el hilo principal para atender requests mientras parsea.
+        # ── Paso 3: descarga + parseo simultáneo con streaming ijson ─────────
+        # FIX OOM: en lugar de acumular todo el archivo (~290MB) en BytesIO antes
+        # de parsear, usamos un pipe en memoria (os.pipe) para escribir chunks
+        # async mientras ijson los consume en un thread pool de forma simultánea.
+        # Memoria pico: ~2-5MB (tamaño del pipe buffer) vs ~290MB anterior.
         #
-        # FIX C4: buffer se cierra y libera explícitamente en el finally del helper
-        # para asegurar que los 100MB se devuelvan al GC independientemente del
-        # resultado del parseo (éxito, excepción o cancelación asyncio).
-        _enrich_last_card = "parseando JSON (thread pool)…"
-        await asyncio.sleep(0)   # yield antes del parseo para que FastAPI pueda atender requests
+        # Arquitectura:
+        #   AsyncIO (event loop)  →  pipe write  →  thread pool (ijson parse)
+        #   Los chunks llegan de la red y se escriben al pipe fd_write.
+        #   El thread con ijson lee del fd_read y emite objetos JSON.
+        #   Ambos corren en paralelo — sin buffer completo en RAM.
 
-        def _parse_scryfall_buffer(buf: io.BytesIO, known_canonicals: set) -> tuple[dict, int, int]:
+        import os, threading, queue as queue_mod
+
+        fd_read, fd_write = os.pipe()
+
+        # Queue para comunicar el resultado del thread al event loop
+        result_queue: queue_mod.Queue = queue_mod.Queue()
+
+        def _parse_streaming(fd_r: int, known_canonicals: set) -> None:
             """
-            Parsea el bulk data de Scryfall en un hilo separado (thread pool).
-            Devuelve (sf_map_new, cards_seen, matched).
-            Se ejecuta fuera del event loop — NO puede llamar a funciones async
-            ni acceder a globals asyncio sin sincronización.
+            Corre en ThreadPoolExecutor. Lee del pipe con ijson mientras el
+            event loop escribe chunks. No necesita BytesIO completo.
             """
             import ijson
             sf_map: dict[str, list] = {c: [] for c in known_canonicals}
             seen = matched = 0
-            buf.seek(0)
             try:
-                for card in ijson.items(buf, "item"):
-                    seen += 1
-                    name = card.get("name", "")
-                    if not name:
-                        continue
-                    layout = card.get("layout", "")
-                    if layout in ("token", "emblem", "art_series", "double_faced_token"):
-                        continue
-                    canonical = _canonical(name)
-                    if canonical not in known_canonicals:
-                        continue
-                    finishes = card.get("finishes") or []
-                    if not finishes:
-                        if card.get("foil"):    finishes.append("foil")
-                        if card.get("nonfoil"): finishes.append("nonfoil")
-                    if not finishes:
-                        finishes = ["nonfoil"]
-                    sf_map[canonical].append({
-                        "scryfall_id":      card["id"],
-                        "set_code":         card.get("set", "").upper(),
-                        "set_name":         card.get("set_name", ""),
-                        "collector_number": card.get("collector_number", ""),
-                        "lang":             card.get("lang", "en"),
-                        "finishes":         finishes,
-                    })
-                    matched += 1
-            finally:
-                # FIX C4: liberar el BytesIO (~100MB) explícitamente.
-                # Sin esto el GC puede tardar en reclamarlo en el free tier 512MB.
-                buf.close()
-            return sf_map, seen, matched
+                with os.fdopen(fd_r, "rb") as pipe_in:
+                    for card in ijson.items(pipe_in, "item"):
+                        seen += 1
+                        name = card.get("name", "")
+                        if not name:
+                            continue
+                        layout = card.get("layout", "")
+                        if layout in ("token", "emblem", "art_series", "double_faced_token"):
+                            continue
+                        canonical = _canonical(name)
+                        if canonical not in known_canonicals:
+                            continue
+                        finishes = card.get("finishes") or []
+                        if not finishes:
+                            if card.get("foil"):    finishes.append("foil")
+                            if card.get("nonfoil"): finishes.append("nonfoil")
+                        if not finishes:
+                            finishes = ["nonfoil"]
+                        sf_map[canonical].append({
+                            "scryfall_id":      card["id"],
+                            "set_code":         card.get("set", "").upper(),
+                            "set_name":         card.get("set_name", ""),
+                            "collector_number": card.get("collector_number", ""),
+                            "lang":             card.get("lang", "en"),
+                            "finishes":         finishes,
+                        })
+                        matched += 1
+                result_queue.put(("ok", sf_map, seen, matched))
+            except Exception as exc:
+                result_queue.put(("error", exc, 0, 0))
 
-        sf_map_new, cards_seen, matched = await asyncio.to_thread(
-            _parse_scryfall_buffer, buffer, canonical_set
+        # Lanzar el thread de parseo ANTES de empezar a descargar
+        import concurrent.futures
+        parse_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        parse_future = parse_executor.submit(_parse_streaming, fd_read, canonical_set)
+
+        logger.info("[BULK] Descarga streaming iniciada (sin buffer completo en RAM)…")
+        total_bytes = 0
+        CHUNK = 256 * 1024   # 256KB — balance entre overhead y latencia del pipe
+
+        try:
+            async with aiohttp.ClientSession(headers=HEADERS,
+                                              timeout=aiohttp.ClientTimeout(
+                                                  total=600,
+                                                  sock_read=60,
+                                              )) as session:
+                async with session.get(download_uri) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"Download HTTP {resp.status}")
+
+                    async for chunk in resp.content.iter_chunked(CHUNK):
+                        os.write(fd_write, chunk)
+                        total_bytes += len(chunk)
+                        _enrich_mb_down = total_bytes // 1_048_576
+                        _enrich_last_card = f"descargando… {_enrich_mb_down} MB"
+                        if total_bytes % (8 * 1024 * 1024) == 0:
+                            await asyncio.sleep(0)   # yield al event loop cada 8MB
+
+        finally:
+            # Cerrar el extremo de escritura del pipe → ijson ve EOF → termina
+            try:
+                os.close(fd_write)
+            except OSError:
+                pass
+
+        logger.info(f"[BULK] Descarga completa: {total_bytes // 1_048_576} MB — esperando parseo…")
+        _enrich_last_card = "parseando JSON (streaming)…"
+
+        # Esperar al thread de parseo sin bloquear el event loop
+        sf_map_new, cards_seen, matched = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: _wait_parse_result(result_queue, parse_future)
         )
-        # buffer fue cerrado dentro de _parse_scryfall_buffer → del ayuda al GC
-        del buffer
+        parse_executor.shutdown(wait=False)
 
         logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
 
@@ -2423,6 +2446,26 @@ def enrich_status():
     """Polling del estado del enriquecimiento en curso."""
     total = _enrich_total or 1
     pct   = round(100 * _enrich_done / total) if _enrich_total > 0 else 0
+    # phase_label para el UI: descargando / parseando / guardando / listo
+    if not _enrich_running:
+        phase = "idle"
+    elif "descargando" in _enrich_last_card:
+        phase = "downloading"
+    elif "parseando" in _enrich_last_card:
+        phase = "parsing"
+    elif "guardando" in _enrich_last_card:
+        phase = "saving"
+    else:
+        phase = "running"
+
+    phase_labels = {
+        "idle": "Inactivo",
+        "downloading": f"Descargando bulk Scryfall… {_enrich_mb_down} MB",
+        "parsing": "Parseando JSON (streaming)…",
+        "saving": "Guardando en base de datos…",
+        "running": _enrich_last_card or "Procesando…",
+    }
+
     return {
         "running":           _enrich_running,
         "done":              _enrich_done,
@@ -2432,6 +2475,9 @@ def enrich_status():
         "skipped":           _enrich_skipped,
         "last_card":         _enrich_last_card,
         "scryfall_map_size": len(_scryfall_map),
+        "mb_downloaded":     _enrich_mb_down,
+        "phase":             phase,
+        "phase_label":       phase_labels.get(phase, _enrich_last_card),
     }
 
 
