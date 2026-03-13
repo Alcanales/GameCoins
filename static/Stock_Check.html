@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stock Check — GameQuest</title>
-  <script src="https://cdn.tailwindcss.com"><\/script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"><\/script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
@@ -45,6 +45,8 @@
     /* Expand rows */
     .expand-row { display:none; background:#fafafa; }
     .expand-row.open { display:table-row; }
+    /* Glass card — resultado de búsqueda */
+    .glass { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
     /* Variante */
     .var-row { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center;
                padding:6px 10px; border-radius:8px; background:#fff; border:1px solid #e2e8f0; margin-top:4px; }
@@ -83,7 +85,7 @@
 </div>
 
 <!-- ══ APP ══ -->
-<div id="app" class="hidden min-h-screen flex flex-col">
+<div id="app" class="min-h-screen flex flex-col" style="display:none">
 
   <!-- Header -->
   <header class="px-5 py-3 border-b border-slate-200 bg-white sticky top-0 z-50
@@ -175,6 +177,17 @@
         <i class="fas fa-ghost text-3xl text-slate-300 mb-3 block"></i>
         <p class="font-bold text-slate-500" id="no-results-msg">Sin resultados</p>
         <p class="text-xs text-slate-400 mt-1">Prueba con otro nombre o revisa la ortografía</p>
+      </div>
+
+      <!-- Resultados de búsqueda -->
+      <div id="results-wrap" class="hidden space-y-3">
+        <div class="bg-white rounded-2xl border border-slate-100 p-3 card-shadow flex items-center justify-between">
+          <p class="text-xs text-slate-500">
+            <span id="res-count" class="font-black text-slate-800">0</span> resultado(s) para
+            <span id="res-q" class="font-black text-slate-700 italic"></span>
+          </p>
+        </div>
+        <div id="results-list" class="space-y-2"></div>
       </div>
 
     </div><!-- /panel-buscar -->
@@ -427,17 +440,18 @@ function ah() { return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'ap
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
-// HTML-03 FIX: wrapper fetch con timeout automático para cold starts de Render
+// Wrapper fetch con timeout automático para cold starts de Render
 async function fetchWT(url, opts={}) {
   const ac = new AbortController();
+  // Si ya viene una signal externa, respetarla combinándola
   const tid = setTimeout(() => ac.abort(), 45000);
   try {
-    const r = await fetchWT(url, {...opts, signal: ac.signal});
+    const r = await fetch(url, {...opts, signal: ac.signal});   // ← fetch nativa, no recursivo
     clearTimeout(tid);
     return r;
   } catch(e) {
     clearTimeout(tid);
-    if (e.name === 'AbortError') throw new Error('El servidor tardó demasiado. Puede estar iniciando — espera 30s y reintenta.');
+    if (e.name === 'AbortError') throw new Error('El servidor tardó demasiado. Puede estar iniciando — esperá 30s y reintentá.');
     throw e;
   }
 }
@@ -455,7 +469,7 @@ async function doLogin() {
     if (!r.ok) { errEl.textContent = 'Credenciales inválidas'; errEl.classList.remove('hidden'); return; }
     TOKEN = (await r.json()).access_token;
     document.getElementById('login-view').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('app').style.display = 'flex';   // evita conflicto hidden+flex de Tailwind
     checkCacheStatus();
     document.getElementById('q').focus();
   } catch(e) { errEl.textContent = 'Sin conexión'; errEl.classList.remove('hidden'); }
@@ -1042,7 +1056,9 @@ async function openTierMenuCatalog(canonical, displayName, stapleId) {
       } else {
         const lr = await fetchWT(`${API}/api/admin/staples`, { headers: ah() });
         const ll = await lr.json();
-        const ex = ll.find(s => canonical(s.name) === canonical);
+        // BUG-13 FIX: 'canonical' aquí es el parámetro string, no la función global
+        const canonParam = canonical;   // guardar referencia al parámetro
+        const ex = ll.find(s => s.canonical === canonParam || canonical(s.name) === canonParam);
         if (ex) await fetchWT(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
       }
     } else {
@@ -1089,7 +1105,7 @@ async function syncCatalog() {
     // Si no hay CSV, enviar como GET-like con form vacío
     const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${TOKEN}` },
       body: form,
     });
     const d = await r.json();
@@ -1137,7 +1153,7 @@ async function addToCatalogSync(canonical_key, displayName) {
     didOpen: () => Swal.showLoading() });
   try {
     const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
+      method: 'POST', headers: { 'Authorization': `Bearer ${TOKEN}` }, body: form });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Error');
     showToast(`✅ ${d.phase2_sf_added} Scryfall IDs vinculados`);
@@ -1170,6 +1186,8 @@ function catalogPage(dir) {
   catalogPage_ = Math.max(1, Math.min(maxPage, catalogPage_ + dir));
   loadCatalog();
 }
+function catPrevPage() { catalogPage(-1); }
+function catNextPage() { catalogPage(+1); }
 
 function renderCatalogPagination(data) {
   const pag = document.getElementById('cat-pagination');
@@ -1278,7 +1296,7 @@ async function openBulkImport() {
 
     const res  = await fetchWT(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${TOKEN}` },
       body: form,
     });
     const data = await res.json();
@@ -1395,7 +1413,27 @@ async function checkStaplesStatus() {
   btn.innerHTML = '<i class="fas fa-stethoscope text-[9px]"></i> Verificar';
 }
 
-// ── Importar staples masivamente desde CSV Manabox (fix P-01) ─────────────────
+// ── Función loadStaples — filtra la vista del catálogo por tier ───────────────
+function loadStaples(tier) {
+  // Actualizar estado visual de los botones del sidebar
+  document.querySelectorAll('#tier-btns .tier-btn').forEach(b => b.classList.remove('active'));
+  const clicked = [...document.querySelectorAll('#tier-btns .tier-btn')]
+    .find(b => b.getAttribute('onclick')?.includes(`'${tier}'`));
+  if (clicked) clicked.classList.add('active');
+
+  // Redirigir al filtro del catálogo
+  if (tier === 'all') {
+    setCatalogTierFilter('all');
+  } else {
+    setCatalogTierFilter(tier);
+  }
+  const hint = document.getElementById('tier-hint');
+  if (hint) hint.textContent = tier === 'all'
+    ? 'Haz click en una carta del catálogo para cambiar su tier.'
+    : `Mostrando cartas con tier: ${tier}. Click en el badge para cambiar.`;
+}
+
+// ── Importación masiva de staples desde CSV Manabox (fix P-01) ────────────────
 async function importStaplesBulk() {
   const fileInput = document.getElementById('staple-import-csv');
   const tier      = document.getElementById('staple-import-tier').value;
@@ -1427,7 +1465,7 @@ async function importStaplesBulk() {
   try {
     const r = await fetchWT(`${API}/api/admin/staples/bulk?tier=${tier}`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${TOKEN}` },
       body: fd,
     });
     const d = await r.json();
