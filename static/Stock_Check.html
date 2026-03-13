@@ -122,6 +122,13 @@
         <i id="sync-icon" class="fas fa-rotate-right"></i>
         <span class="hidden sm:inline">Sync JS</span>
       </button>
+      <button onclick="syncCKPrices()" id="btn-sync-ck"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+               bg-blue-50 text-blue-700 border border-blue-200
+               hover:bg-blue-100 transition">
+        <i id="sync-ck-icon" class="fas fa-dollar-sign"></i>
+        <span class="hidden sm:inline">Sync CK</span>
+      </button>
       <button onclick="doLogout()"
         class="text-slate-400 text-xs font-bold hover:text-slate-700 transition px-2">
         <i class="fas fa-sign-out-alt"></i>
@@ -445,6 +452,16 @@ function canonical(name) {
 
 function ah() { return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }; }
 
+// Helper: extrae mensaje legible de cualquier respuesta de error de la API
+// FastAPI puede devolver d.detail como string o como array de objetos Pydantic
+function parseApiError(d, fallback = 'Error desconocido') {
+  if (!d) return fallback;
+  if (typeof d.detail === 'string') return d.detail;
+  if (Array.isArray(d.detail)) return d.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('\n');
+  if (d.detail) return JSON.stringify(d.detail);
+  return d.message || fallback;
+}
+
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
 // Wrapper fetch con timeout automático para cold starts de Render
@@ -515,6 +532,28 @@ async function syncCache() {
     checkCacheStatus();
     // Re-ejecutar búsqueda con datos frescos
     if (document.getElementById('q').value.trim().length >= 2) search();
+  } catch(e) {
+    showToast(`❌ ${e.message}`, 'error');
+  } finally {
+    icon.classList.remove('spin'); btn.disabled = false;
+  }
+}
+
+async function syncCKPrices() {
+  const icon = document.getElementById('sync-ck-icon');
+  const btn  = document.getElementById('btn-sync-ck');
+  icon.classList.add('spin'); btn.disabled = true;
+  showToast('⏳ Sincronizando precios CardKingdom (~30s)…');
+  try {
+    const r = await fetchWT(`${API}/api/admin/sync_ck_prices`, { method: 'POST', headers: ah() });
+    const d = await r.json();
+    if (!r.ok) {
+      const msg = Array.isArray(d.detail)
+        ? d.detail.map(e=>e.msg||JSON.stringify(e)).join(', ')
+        : (d.detail || 'Error sync CK');
+      throw new Error(msg);
+    }
+    showToast(`✅ CK sync: ${(d.upserted||0).toLocaleString()} cartas — ${d.elapsed}s`);
   } catch(e) {
     showToast(`❌ ${e.message}`, 'error');
   } finally {

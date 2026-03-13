@@ -577,16 +577,32 @@ async def _sync_ck_prices() -> dict:
             return {"error": str(exc)}
 
         # ── 2. Reducir a min_buy_price por nombre canónico ───────────────────
+        # La API de CK devuelve data como objeto con keys numéricas ("0","1",...),
+        # NO como array. Campos reales: price_buy (no buy_price), is_foil como string.
         # {canonical → (name_raw, min_price)}
+        raw_data = payload.get("data", {})
+        # Soportar tanto objeto con keys numéricas como array legacy
+        entries = raw_data.values() if isinstance(raw_data, dict) else raw_data
+
         prices: dict[str, tuple[str, float]] = {}
-        for entry in payload.get("data", []):
-            if entry.get("is_foil"):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            # is_foil viene como string "true"/"false" — no como booleano
+            is_foil_val = entry.get("is_foil", "false")
+            if str(is_foil_val).lower() in ("true", "1", True):
                 continue                          # excluir foil
             name_raw = (entry.get("name") or "").strip()
             if not name_raw:
                 continue
             try:
-                buy = float(entry.get("buy_price") or entry.get("buylist_price") or 0)
+                # Campo real en la API de CK: price_buy
+                buy = float(
+                    entry.get("price_buy")
+                    or entry.get("buy_price")
+                    or entry.get("buylist_price")
+                    or 0
+                )
             except (ValueError, TypeError):
                 continue
             if buy <= 0:

@@ -315,7 +315,7 @@ async function fetchWT(url, opts={}) {
   const ac = new AbortController();
   const tid = setTimeout(() => ac.abort(), 45000);
   try {
-    const r = await fetchWT(url, {...opts, signal: ac.signal});
+    const r = await fetch(url, {...opts, signal: ac.signal});
     clearTimeout(tid);
     return r;
   } catch(e) {
@@ -656,7 +656,12 @@ async function confirmOrder(){
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash,source:'interna'}),
     });
     const d=await r.json();
-    if(!r.ok) throw new Error(d.detail||'Error');
+    if(!r.ok){
+      const errMsg=Array.isArray(d.detail)
+        ? d.detail.map(e=>e.msg||e.message||JSON.stringify(e)).join('\n')
+        : (typeof d.detail==='string'?d.detail:JSON.stringify(d.detail)||'Error desconocido');
+      throw new Error(errMsg);
+    }
     Swal.fire({icon:'success',title:`Orden #${d.order_id} registrada`,
       html:`<div style="font-size:13px;color:#475569">${email?`Copia enviada a <strong>${email}</strong>`:''}</div>`,
       confirmButtonColor:'#0f172a'});
