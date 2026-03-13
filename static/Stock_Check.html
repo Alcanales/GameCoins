@@ -108,6 +108,13 @@
         <i class="fas fa-file-import"></i>
         <span class="hidden sm:inline">Importar CSV</span>
       </button>
+      <button onclick="exportManaboxCSV()" id="btn-export"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
+               bg-emerald-50 text-emerald-700 border border-emerald-200
+               hover:bg-emerald-100 transition">
+        <i id="export-icon" class="fas fa-file-arrow-down"></i>
+        <span class="hidden sm:inline">Exportar</span>
+      </button>
       <button onclick="syncCache()" id="btn-sync"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase
                bg-yellow-50 text-yellow-700 border border-yellow-200
@@ -1343,6 +1350,94 @@ function selectBulkTier(btn) {
   window._bulkTierSelected = btn.dataset.tier;
   const hint = document.getElementById('tier-hint');
   if (hint) hint.textContent = `✅ Tier seleccionado: ${btn.dataset.tier}`;
+}
+
+// ── Export Manabox CSV ────────────────────────────────────────────────────────
+async function exportManaboxCSV() {
+  // Paso 1: opciones de export
+  const { isConfirmed, value: opts } = await Swal.fire({
+    title: '📥 Exportar Stock → Manabox CSV',
+    html: `
+      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">
+        Genera un CSV con el stock actual de Jumpseller<br>
+        en el formato exacto de exportación de <strong style="color:#e2e8f0">Manabox</strong>.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:10px;text-align:left">
+        <div>
+          <label style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;display:block;margin-bottom:6px">
+            Filtrar por tier
+          </label>
+          <select id="exp-tier" style="width:100%;padding:8px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:12px">
+            <option value="">Todos los tiers</option>
+            <option value="muy_alta">🔥 Muy Alta demanda</option>
+            <option value="alta">⭐ Alta demanda</option>
+            <option value="normal">📦 Normal</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px">
+          <input type="checkbox" id="exp-only-stock" style="width:16px;height:16px;accent-color:#10b981">
+          <label for="exp-only-stock" style="font-size:12px;color:#e2e8f0;cursor:pointer">
+            Solo cartas con stock &gt; 0
+          </label>
+        </div>
+      </div>`,
+    confirmButtonText: '<i class="fas fa-download mr-2"></i>Descargar CSV',
+    showCancelButton: true,
+    cancelButtonText: 'Cancelar',
+    confirmButtonColor: '#059669',
+    preConfirm: () => ({
+      tier:      document.getElementById('exp-tier').value || null,
+      onlyStock: document.getElementById('exp-only-stock').checked,
+    }),
+  });
+
+  if (!isConfirmed || !opts) return;
+
+  const icon  = document.getElementById('export-icon');
+  const btn   = document.getElementById('btn-export');
+  icon.className = 'fas fa-spinner fa-spin';
+  btn.disabled   = true;
+
+  try {
+    // Construir URL con parámetros
+    const params = new URLSearchParams();
+    if (opts.tier)      params.set('tier',       opts.tier);
+    if (opts.onlyStock) params.set('only_stock',  'true');
+
+    const url = `${API}/api/admin/catalog/export_manabox?${params}`;
+
+    // Descargar como blob para forzar el nombre de archivo
+    const r = await fetchWT(url, { headers: ah() });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `Error ${r.status}`);
+    }
+
+    const rows = r.headers.get('X-Rows-Written') || '?';
+    const blob = await r.blob();
+
+    // Extraer nombre de archivo del header Content-Disposition
+    const cd       = r.headers.get('Content-Disposition') || '';
+    const fnMatch  = cd.match(/filename="([^"]+)"/);
+    const filename = fnMatch ? fnMatch[1] : `gamequest_stock_${new Date().toISOString().slice(0,10)}.csv`;
+
+    // Disparar descarga en el navegador
+    const a = document.createElement('a');
+    a.href  = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+
+    showToast(`✅ ${rows} filas exportadas — ${filename}`);
+
+  } catch(e) {
+    showToast(`❌ ${e.message}`, 'error');
+  } finally {
+    icon.className = 'fas fa-file-arrow-down';
+    btn.disabled   = false;
+  }
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────

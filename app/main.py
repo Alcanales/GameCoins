@@ -1,5 +1,12 @@
+"""
+main.py — GameQuest API v5.5
+Cambios v5.5: foil/nicho pipeline definitivo, stock info privado, AbortController,
+              CORS Jumpseller, lru_cache 65536, imports de módulo, fixes de sesión,
+            email en TODAS las buylists.
+"""
 import re
 import io
+import csv
 import json
 import hmac
 import time
@@ -25,7 +32,7 @@ from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Header, Request, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, ORJSONResponse
+from fastapi.responses import FileResponse, ORJSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -1862,6 +1869,168 @@ async def catalog_list(
         "pages":    (total + limit - 1) // limit,
         "results":  result_rows,
     }
+
+
+@app.get("/api/admin/catalog/export_manabox", dependencies=[Depends(verify_admin)])
+async def catalog_export_manabox(
+    db: Session = Depends(get_db),
+    tier: Optional[str] = None,      # filtrar por tier: normal | alta | muy_alta | None = todos
+    only_stock: bool = False,         # True = solo cartas con stock > 0
+):
+    """
+    Exporta el stock actual de Jumpseller en formato CSV exacto de Manabox.
+
+    Columnas exportadas (mismas 15 que exporta Manabox):
+      Name, Set code, Set name, Collector number, Foil, Rarity, Quantity,
+      ManaBox ID, Scryfall ID, Purchase price, Misprint, Altered,
+      Condition, Language, Purchase price currency
+
+    Campos que JS no provee (Set code, Set name, Collector number, Rarity,
+    ManaBox ID, Language) se exportan vacíos o con valor por defecto.
+    Si la carta tiene Scryfall IDs vinculados en card_catalog, se usa el primero.
+
+    Parámetros opcionales:
+      - tier: filtrar por tier de staple_cards
+      - only_stock: solo cartas con stock > 0 en JS
+    """
+    js_stock   = await _fetch_js_stock_cached()
+    staple_map = _get_staple_map(db)
+
+    # Obtener scryfall_ids del catálogo para enriquecer el export
+    catalog_map: dict[str, "CardCatalog"] = {}
+    try:
+        catalog_map = {r.name_normalized: r for r in db.query(CardCatalog).all()}
+    except Exception:
+        pass
+
+    # Columnas en el orden exacto del export de Manabox
+    MANABOX_COLS = [
+        "Name", "Set code", "Set name", "Collector number", "Foil",
+        "Rarity", "Quantity", "ManaBox ID", "Scryfall ID",
+        "Purchase price", "Misprint", "Altered", "Condition",
+        "Language", "Purchase price currency",
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=MANABOX_COLS, lineterminator="\r\n")
+    writer.writeheader()
+
+    rows_written = 0
+
+    # Ordenar alfabéticamente por nombre canónico para consistencia
+    for canonical_key in sorted(js_stock.keys()):
+        js_data  = js_stock[canonical_key]
+        variants = js_data.get("variants", [])
+
+        # Filtro only_stock
+        total_stk = js_data.get("total_stock", 0)
+        if only_stock and total_stk == 0:
+            continue
+
+        # Filtro tier
+        if tier:
+            staple = staple_map.get(canonical_key)
+            if not staple or staple.tier != tier:
+                continue
+
+        # Intentar obtener Scryfall ID del catálogo
+        cat_row    = catalog_map.get(canonical_key)
+        sf_ids     = cat_row.scryfall_ids if cat_row else []
+        first_sf   = ""
+        first_set  = ""
+        first_setname = ""
+        first_num  = ""
+        if sf_ids:
+            entry = sf_ids[0] if isinstance(sf_ids[0], dict) else {"scryfall_id": sf_ids[0]}
+            first_sf      = entry.get("scryfall_id", "")
+            first_set     = entry.get("set_code", "").upper()
+            first_setname = entry.get("set_name", "")
+            first_num     = entry.get("collector_number", "")
+            first_lang    = entry.get("lang", "en") or "en"
+        else:
+            first_lang = "en"
+
+        # Una fila por variante en Jumpseller (cada SKU es una carta distinta)
+        # Si no hay variantes, una fila con el total
+        if variants:
+            for var in variants:
+                var_name  = var.get("name", "")
+                var_stock = int(var.get("stock", 0) or 0)
+                var_price = float(var.get("price", 0) or 0)
+
+                if only_stock and var_stock == 0:
+                    continue
+
+                # Detectar foil desde el nombre del producto (convención de GameQuest)
+                name_lower = var_name.lower()
+                if "etched" in name_lower:
+                    foil_val = "etched"
+                elif "foil" in name_lower:
+                    foil_val = "foil"
+                else:
+                    foil_val = "normal"
+
+                # Nombre limpio (sin | set info al final)
+                clean_name = var_name.split("|")[0].strip()
+
+                writer.writerow({
+                    "Name":                   clean_name,
+                    "Set code":               first_set,
+                    "Set name":               first_setname,
+                    "Collector number":       first_num,
+                    "Foil":                   foil_val,
+                    "Rarity":                 "",          # JS no provee rarity
+                    "Quantity":               var_stock,
+                    "ManaBox ID":             "",          # ID interno de Manabox — no aplica
+                    "Scryfall ID":            first_sf,
+                    "Purchase price":         round(var_price / 1000, 2) if var_price > 1000 else round(var_price, 2),
+                    "Misprint":               False,
+                    "Altered":                False,
+                    "Condition":              "near_mint",
+                    "Language":               first_lang,
+                    "Purchase price currency": "USD",
+                })
+                rows_written += 1
+        else:
+            # Carta sin variantes — fila única con total
+            best_price = float(js_data.get("best_price", 0) or 0)
+            # Nombre canónico → título
+            display_name = canonical_key.replace("-", " ").title()
+
+            writer.writerow({
+                "Name":                   display_name,
+                "Set code":               first_set,
+                "Set name":               first_setname,
+                "Collector number":       first_num,
+                "Foil":                   "normal",
+                "Rarity":                 "",
+                "Quantity":               total_stk,
+                "ManaBox ID":             "",
+                "Scryfall ID":            first_sf,
+                "Purchase price":         round(best_price / 1000, 2) if best_price > 1000 else round(best_price, 2),
+                "Misprint":               False,
+                "Altered":                False,
+                "Condition":              "near_mint",
+                "Language":               first_lang,
+                "Purchase price currency": "USD",
+            })
+            rows_written += 1
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")   # utf-8-sig: BOM para Excel/Sheets
+
+    from datetime import date
+    filename = f"gamequest_stock_{date.today().isoformat()}.csv"
+    if tier:
+        filename = f"gamequest_stock_{tier}_{date.today().isoformat()}.csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Rows-Written": str(rows_written),
+        },
+    )
 
 
 @app.get("/api/admin/catalog/stats", dependencies=[Depends(verify_admin)])
