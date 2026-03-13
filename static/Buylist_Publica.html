@@ -24,9 +24,9 @@
     .gq-check:checked::after { content:''; position:absolute; top:1px; left:4px; width:4px; height:7px; border:2px solid #fff; border-top:none; border-left:none; transform:rotate(45deg); }
     .gq-check:disabled { opacity:.3; cursor:not-allowed; }
     /* Table layout */
-    .tbl-head,.tbl-row { display:grid; align-items:center; gap:8px; padding:10px 16px; }
-    .tbl-head { grid-template-columns:28px 1fr 96px 96px 106px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
-    .tbl-row  { grid-template-columns:28px 1fr 96px 96px 106px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
+    .tbl-head,.tbl-row { display:grid; align-items:center; gap:6px; padding:10px 14px; }
+    .tbl-head { grid-template-columns:28px 1fr 72px 88px 88px 88px 100px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
+    .tbl-row  { grid-template-columns:28px 1fr 72px 88px 88px 88px 100px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
     .tbl-row:last-child { border-bottom:none; }
     .tbl-row:hover { background:#fafafa; }
     .row-full    { opacity:.42; }
@@ -188,8 +188,10 @@
       <div class="tbl-head">
         <div><input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)"></div>
         <div class="lbl">Carta</div>
+        <div class="lbl text-right" style="color:#64748b" title="Precio de compra del CSV en USD">Ref. USD</div>
         <div class="lbl text-right" style="color:#7c3aed">💎 QP</div>
         <div class="lbl text-right col-cash-hd" style="color:#16a34a" id="cash-col-hd">💵 Cash</div>
+        <div class="lbl text-right" style="color:#0f172a" id="total-col-hd">Total</div>
         <div class="lbl text-center">Cantidad</div>
       </div>
       <div id="cards-list"></div>
@@ -286,9 +288,9 @@ let csvFile=null, allCards=[], payMode=null, cashEnabled=true;
       });
       const pc=document.getElementById('pay-cash');
       if(pc) pc.style.display='none';
-      // Reducir grid a 3 columnas sin cash
+      // Reducir grid: sin columna cash (6 cols → checkbox, carta, ref_usd, qp, total, qty)
       document.querySelectorAll('.tbl-head,.tbl-row').forEach(el=>{
-        el.style.gridTemplateColumns='28px 1fr 96px 106px';
+        el.style.gridTemplateColumns='28px 1fr 72px 88px 88px 100px';
       });
     }
   }catch(e){ document.getElementById('app-section').style.display=''; }
@@ -376,27 +378,50 @@ function renderResults(){
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:700;font-size:13.5px;color:#0f172a">${esc(c.name)}</span>
         ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho ×${c.stake_mult}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho</span>`:''}
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${badgeMap[st]||''}${maBadge}</div>
-
     </div>`;
 
+    // Col Ref USD — precio raw del CSV (purchase price)
+    const refUsd = c.price_usd_raw ?? c.price_usd ?? 0;
+    const col_ref = `<div style="text-align:right">
+      ${canBuy
+        ? `<div style="font-weight:700;font-size:11px;color:#475569;line-height:1">$${refUsd.toFixed(2)}</div>
+           ${c.is_estaca
+             ? `<div style="font-size:9px;color:#b45309;margin-top:1px">De Nicho ×${c.stake_mult??1.5}</div>`
+             : `<div style="font-size:9px;color:#94a3b8;margin-top:1px">USD</div>`
+           }`
+        : `<div style="color:#94a3b8;font-size:11px">—</div>`
+      }
+    </div>`;
+
+    // Col QP — precio por unidad en CLP (credito)
     const col3=`<div style="text-align:right">
-      <div style="font-weight:900;font-size:.95rem;color:#7c3aed;line-height:1" id="pqp-${idx}">
+      <div style="font-weight:900;font-size:.9rem;color:#7c3aed;line-height:1" id="pqp-${idx}">
         ${canBuy?fmtCLP(c.price_credito):'—'}
       </div>
-      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_credito)}</div>`:''}
+      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u.</div>`:''}
     </div>`;
 
+    // Col Cash — precio por unidad en CLP (cash)
     const col4=cashEnabled?`<div style="text-align:right">
-      <div style="font-weight:700;font-size:.9rem;color:#16a34a;line-height:1" id="pcs-${idx}">
+      <div style="font-weight:700;font-size:.85rem;color:#16a34a;line-height:1" id="pcs-${idx}">
         ${canBuy?fmtCLP(c.price_cash):''}
       </div>
-      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u: ${fmtCLP(c.price_cash)}</div>`:''}
+      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:2px">/ u.</div>`:''}
     </div>`:`<div></div>`;
 
+    // Col Total — valor total según modo de pago seleccionado × cantidad
+    const col_total=canBuy?`<div style="text-align:right">
+      <div style="font-weight:900;font-size:.9rem;color:#0f172a;line-height:1" id="ptot-${idx}">
+        ${fmtCLP(c.price_credito)}
+      </div>
+      <div style="font-size:9px;color:#94a3b8;margin-top:2px" id="ptot-lbl-${idx}">× 1</div>
+    </div>`:`<div></div>`;
+
+    // Col Cantidad
     const col5=canBuy?`<div style="display:flex;align-items:center;justify-content:center">
       <div class="qty-wrap">
         <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
@@ -406,7 +431,7 @@ function renderResults(){
       </div>
     </div>`:`<div></div>`;
 
-    div.innerHTML=col1+col2+col3+col4+col5;
+    div.innerHTML=col1+col2+col_ref+col3+col4+col_total+col5;
     list.appendChild(div);
   });
 
@@ -436,13 +461,21 @@ function onQtyChange(idx){
   const c=allCards[idx];
   const inp=document.getElementById(`qty-${idx}`);
   if(!inp) return;
-  const mx=parseInt(inp.dataset.max)||1;  // STOCK-OCULTO: usa data-max
+  const mx=parseInt(inp.dataset.max)||1;
   let v=parseInt(inp.value)||1;
   if(v<1)v=1; if(v>mx)v=mx; inp.value=v;
   const el=document.getElementById(`pqp-${idx}`);
   const ec=document.getElementById(`pcs-${idx}`);
   if(el) el.textContent=fmtCLP(c.price_credito*v);
   if(ec) ec.textContent=fmtCLP(c.price_cash*v);
+  // Actualizar columna Total según modo de pago
+  const et=document.getElementById(`ptot-${idx}`);
+  const elbl=document.getElementById(`ptot-lbl-${idx}`);
+  if(et){
+    const totVal = payMode==='cash' ? c.price_cash*v : c.price_credito*v;
+    et.textContent=fmtCLP(totVal);
+    if(elbl) elbl.textContent=`× ${v}`;
+  }
   updateBar();
 }
 function recalcTotals(){
@@ -481,6 +514,19 @@ function selectPay(m){
   payMode=m;
   document.getElementById('pay-qp').className='pay-opt'+(m==='credito'?' sel-qp':'');
   document.getElementById('pay-cash').className='pay-opt'+(m==='cash'?' sel-cash':'');
+  // Actualizar columna Total y header para reflejar el modo de pago elegido
+  const hdr=document.getElementById('total-col-hd');
+  if(hdr) hdr.textContent = m==='cash' ? 'Total 💵' : 'Total 💎';
+  allCards.forEach((c,idx)=>{
+    const inp=document.getElementById(`qty-${idx}`);
+    const et=document.getElementById(`ptot-${idx}`);
+    const elbl=document.getElementById(`ptot-lbl-${idx}`);
+    if(!et) return;
+    const v=parseInt(inp?.value||1);
+    const totVal = m==='cash' ? c.price_cash*v : c.price_credito*v;
+    et.textContent=fmtCLP(totVal);
+    if(elbl) elbl.textContent=`× ${v}`;
+  });
   updateBar();
 }
 async function submitOrder(){
@@ -488,6 +534,12 @@ async function submitOrder(){
   const rut=document.getElementById('inp-rut').value.trim();
   if(!email||!email.includes('@')) return swal('Email requerido','Ingresa un email válido','warning');
   if(!rut) return swal('RUT requerido','Ingresa tu RUT','warning');
+  // Validación RUT formato chileno (igual que el regex del servidor)
+  // Acepta: 12.345.678-9 / 12345678-9 / 12.345.678-K
+  const rutClean=rut.replace(/\./g,'');
+  if(!/^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$/.test(rut) && !/^\d{7,8}-[\dkK]$/.test(rutClean)){
+    return swal('RUT inválido','Formato esperado: 12.345.678-9 o 12345678-9','warning');
+  }
   if(!payMode) return swal('Selecciona forma de pago','','warning');
   const items=[];
   document.querySelectorAll('.cc:checked:not(:disabled)').forEach(cb=>{
@@ -549,3 +601,4 @@ function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#
 </script>
 </body>
 </html>
+

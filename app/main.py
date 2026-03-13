@@ -149,6 +149,45 @@ app = FastAPI(title="GameCoins API", version="5.5", lifespan=lifespan,  # MAIN-0
               default_response_class=ORJSONResponse)
 
 app.add_middleware(GZipMiddleware, minimum_size=500)   # comprime JSON ≥500 bytes (~60-80% ahorro)
+
+# ── CORS robusto — fuerza el header en TODA respuesta, incluyendo 4xx/5xx ─────
+# El CORSMiddleware estándar de Starlette NO garantiza el header en errores no
+# manejados (500) ni en excepciones de validación Pydantic (422).
+# Sin el header, el browser bloquea la respuesta aunque el servidor respondió.
+# Este middleware se agrega PRIMERO (ejecuta ÚLTIMO en la cadena de respuesta)
+# para asegurar que Access-Control-Allow-Origin esté siempre presente.
+_CORS_ALLOWED_ORIGINS = {
+    "https://gamequest.cl",
+    "https://www.gamequest.cl",
+    "https://game-quest.jumpseller.com",
+    "https://gamecoins.onrender.com",
+    "http://localhost:10000",
+    "http://localhost:8000",
+}
+
+@app.middleware("http")
+async def force_cors_headers(request: Request, call_next):
+    origin = request.headers.get("origin", "")
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        # Error no capturado → respuesta 500 con CORS para que el browser lo lea
+        from starlette.responses import JSONResponse
+        response = JSONResponse({"detail": "Internal server error"}, status_code=500)
+        logger.error(f"[CORS-MW] Excepción no capturada: {exc}")
+    # Inyectar header CORS si el origen es permitido
+    if origin in _CORS_ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"]  = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    elif not origin:
+        # Request sin origen (curl, Postman, server-side) — no inyectar
+        pass
+    if request.method == "OPTIONS":
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization,Content-Type,X-Store-Token"
+        response.headers["Access-Control-Max-Age"]       = "86400"
+    return response
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -1383,7 +1422,7 @@ async def analyze_buylist(
         "stock_actual", "max_stock", "cupo",
         "canonical", "scryfall_id", "matched_by",
         "nicho_base", "tier",
-        "price_usd_raw", "price_usd_base",
+        "price_usd_base",
     })
     sanitized = []
     for r in results:
@@ -1419,6 +1458,27 @@ async def commit_buylist(
     request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+):
+    """
+    Guarda cotización en BD y envía emails de respaldo a AMBAS partes.
+    Rate limit: 3 submits/hora por IP.
+    """
+    try:
+        return await _commit_buylist_impl(req, request, background_tasks, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Captura errores inesperados (ej: body malformado por SDK Jumpseller)
+        # y devuelve 400 con CORS header garantizado por force_cors_headers middleware
+        logger.error(f"[COMMIT_BUYLIST] Error inesperado: {exc}")
+        raise HTTPException(400, f"Error procesando la solicitud: {type(exc).__name__}")
+
+
+async def _commit_buylist_impl(
+    req: BuylistCommitRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session,
 ):
     """
     Guarda cotización en BD y envía emails de respaldo a AMBAS partes.
