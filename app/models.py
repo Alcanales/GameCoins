@@ -18,79 +18,53 @@ class Gampoint(Base):
 
 
 class BuylistOrder(Base):
-    """
-    Guarda cada cotización comprometida por un vendedor externo.
-    """
+    """Guarda cada cotización comprometida por un vendedor externo."""
     __tablename__ = "buylist_orders"
 
     id                  = Column(Integer, primary_key=True, autoincrement=True)
     rut                 = Column(String,  nullable=False)
     email               = Column(String,  nullable=False, index=True)
-    payment_preference  = Column(String,  nullable=False)   # credito | cash | mixto
-    # FIX A6: MutableList.as_mutable() → SQLAlchemy detecta .append()/.remove()
-    # y marca el campo como dirty sin necesitar reasignación explícita.
+    payment_preference  = Column(String,  nullable=False)
     items               = Column(MutableList.as_mutable(JSON), nullable=False)
     total_credito       = Column(Numeric(12, 2), default=0)
     total_cash          = Column(Numeric(12, 2), default=0)
-    status              = Column(String,  default="pending") # pending | reviewed | closed | cancelled
+    status              = Column(String,  default="pending")
     created_at          = Column(DateTime, server_default=func.now())
-    # FIX M-06: updated_at para auditoría de cambios de estado.
-    # server_default garantiza que filas existentes sin la columna reciban NOW().
-    # onupdate=func.now() actualiza automáticamente al hacer db.commit() con cambios.
-    # Migración requerida en BD existente (ver script SQL al pie de este archivo).
     updated_at          = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class StapleCard(Base):
     """
     Lista de cartas por tier de demanda:
-      - normal    → stock mínimo MIN_STOCK_NORMAL (default 4)
-      - alta      → stock mínimo MIN_STOCK_ALTA   (default 8)
-      - muy_alta  → siempre comprar, sin límite de stock
+      normal / alta / muy_alta
     """
     __tablename__ = "staple_cards"
 
-    id              = Column(Integer, primary_key=True, autoincrement=True)
-    name_normalized = Column(String, nullable=False, unique=True, index=True)
-    name_display    = Column(String, nullable=False)
-    tier            = Column(String, default="alta", nullable=False)
-    min_stock_override = Column(Integer, nullable=True)
+    id                 = Column(Integer,        primary_key=True, autoincrement=True)
+    name_normalized    = Column(String,         nullable=False, unique=True, index=True)
+    name_display       = Column(String,         nullable=False)
+    tier               = Column(String,         default="alta", nullable=False)
+    min_stock_override = Column(Integer,        nullable=True)
     min_price_override = Column(Numeric(12, 2), nullable=True)
-    margin_factor   = Column(Float, default=2.5)
-    added_by        = Column(String, nullable=True)
-    created_at      = Column(DateTime, server_default=func.now())
-    updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    margin_factor      = Column(Float,          default=2.5)
+    added_by           = Column(String,         nullable=True)
+    created_at         = Column(DateTime,       server_default=func.now())
+    updated_at         = Column(DateTime,       server_default=func.now(), onupdate=func.now())
 
 
 class CardCatalog(Base):
     """
-    Catálogo persistente: nombre canónico → todos los product IDs de Jumpseller.
-
-    Resuelve el problema de que el caché RAM se pierde al reiniciar:
-    - Cada fila = una carta única identificada por su nombre canónico
-    - js_product_ids: lista de IDs de productos JS (todas las ediciones/versiones)
-    - js_variants: snapshot de las variantes con stock y precio
-    - total_stock: suma de stock de todas las variantes (cacheado)
-    - last_synced: cuándo se sincronizó desde la API de JS
-
-    Lookup flow (analyze_buylist / stock_check):
-      canonical = _canonical(csv_name)
-      catalog_entry = catalog_map[canonical]     # O(1), cargado en RAM al arrancar
-      product_ids   = catalog_entry.js_product_ids
-      total_stock   = sum(js_by_id[pid]["stock"] for pid in product_ids if pid in js_by_id)
+    Catálogo persistente: nombre canónico → product IDs de Jumpseller.
     """
     __tablename__ = "card_catalog"
 
     id              = Column(Integer, primary_key=True, autoincrement=True)
-    name_normalized = Column(String, nullable=False, unique=True, index=True)  # clave canónica
-    name_display    = Column(String, nullable=False)                            # nombre para mostrar
-    # FIX A6: MutableList.as_mutable() en todas las columnas JSON que son listas.
-    # Sin esto, SQLAlchemy no detecta mutaciones in-place (.append(), [i]=x)
-    # y los cambios se pierden silenciosamente sin error.
+    name_normalized = Column(String,  nullable=False, unique=True, index=True)
+    name_display    = Column(String,  nullable=False)
     js_product_ids  = Column(MutableList.as_mutable(JSON), default=list)
     js_variants     = Column(MutableList.as_mutable(JSON), default=list)
     scryfall_ids    = Column(MutableList.as_mutable(JSON), default=list)
-    total_stock     = Column(Integer, default=0)
+    total_stock     = Column(Integer,  default=0)
     last_synced     = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -98,74 +72,89 @@ class CardCatalog(Base):
 
 class CKPrice(Base):
     """
-    Precio mínimo de buylist de CardKingdom por nombre canónico de carta.
-
-    REGLA DE NEGOCIO:
-    - Se guarda el precio MÁS BAJO encontrado en la pricelist CK para ese nombre,
-      ignorando edición, variante y foil (is_foil=True se descarta al importar).
-    - Una carta es "De Nicho" si su precio en el CSV supera min_buy_price × STAKE_MULTIPLIER.
-    - Si la carta no existe en esta tabla, _compute_card_price() usa fallback por tipo.
-
-    ACTUALIZACIÓN:
-    - Un job diario en background llama a _sync_ck_prices() una vez al día.
-    - El job descarga la pricelist completa de CK y hace upsert masivo (INSERT ON CONFLICT DO UPDATE).
-    - Render free tier: el job corre en el mismo proceso, sin celery ni cron externo.
+    Precio mínimo de buylist CardKingdom por nombre canónico.
+    Job diario via _sync_ck_prices().
     """
     __tablename__ = "ck_prices"
 
-    name_canonical    = Column(String, primary_key=True, index=True)   # _canonical(name_raw)
-    name_raw          = Column(String, nullable=False)                  # nombre original de CK
-    min_buy_price     = Column(Numeric(10, 4), nullable=False)          # precio mínimo USD NM
-    nicho_threshold   = Column(Numeric(10, 4), nullable=False)          # min_buy_price × STAKE_MULTIPLIER
-    # nicho_threshold es el umbral precalculado: si price_csv > nicho_threshold → De Nicho.
-    # Se recalcula en cada sync diario usando el valor de STAKE_MULTIPLIER en ese momento.
-    updated_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    name_canonical  = Column(String,         primary_key=True, index=True)
+    name_raw        = Column(String,         nullable=False)
+    min_buy_price   = Column(Numeric(10, 4), nullable=False)
+    nicho_threshold = Column(Numeric(10, 4), nullable=False)
+    updated_at      = Column(DateTime,       server_default=func.now(), onupdate=func.now())
 
 
 class CashbackRecord(Base):
     """
-    Registro de idempotencia para el cashback del 2%.
-    Cada fila vincula un order_id de Jumpseller a un único evento de cashback.
-    Si el INSERT falla por violación de PK, la excepción es capturada y el
-    cashback no se acredita de nuevo.
+    Idempotencia del cashback 2%: INSERT ON CONFLICT DO NOTHING previene doble acreditación.
     """
     __tablename__ = "cashback_records"
 
-    order_id         = Column(BigInteger, primary_key=True)   # JS order.id — clave de idempotencia
-    email            = Column(String,     nullable=False, index=True)
-    amount_qp        = Column(Numeric(12, 2), nullable=False)  # QP acreditados
-    order_total_clp  = Column(Numeric(12, 2), nullable=False)  # total final de la orden
-    created_at       = Column(DateTime, server_default=func.now())
+    order_id        = Column(BigInteger,     primary_key=True)
+    email           = Column(String,         nullable=False, index=True)
+    amount_qp       = Column(Numeric(12, 2), nullable=False)
+    order_total_clp = Column(Numeric(12, 2), nullable=False)
+    created_at      = Column(DateTime,       server_default=func.now())
+
+
+class CanjeRecord(Base):
+    """
+    Historial de canjes QuestPoints → cupón Jumpseller.
+
+    Una fila por canje EXITOSO — solo se inserta en Paso 7a de process_canje()
+    cuando el cupón fue creado en Jumpseller. Canje revertido = sin fila.
+
+    PROPÓSITO:
+    - Cliente: último canje vía GET /api/public/last_canje/{email}
+    - Admin:   historial vía GET /api/admin/canje_history/{email}
+
+    CAMPOS:
+    - email:           usuario que canjeó
+    - amount_qp:       QP debitados (= valor del cupón en CLP)
+    - coupon_code:     código QP-XXXXXX
+    - monto_original:  QP solicitados (puede > amount_qp si se aplicó cart-cap QA-02)
+    - cart_total:      total del carrito al momento del canje
+    - adjusted:        1 si se aplicó cart-cap, 0 si el monto fue exacto
+    - created_at:      timestamp UTC
+    """
+    __tablename__ = "canje_records"
+
+    id             = Column(Integer,        primary_key=True, autoincrement=True)
+    email          = Column(String,         nullable=False, index=True)
+    amount_qp      = Column(Numeric(12, 2), nullable=False)
+    coupon_code    = Column(String,         nullable=False)
+    monto_original = Column(Numeric(12, 2), nullable=True)
+    cart_total     = Column(Numeric(12, 2), nullable=True)
+    adjusted       = Column(Integer,        default=0)
+    created_at     = Column(DateTime,       server_default=func.now(), index=True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MIGRACIÓN SQL REQUERIDA — BuylistOrder.updated_at (FIX M-06)
-# Ejecutar UNA VEZ en la base de datos de producción (Render PostgreSQL):
-#
-#   ALTER TABLE buylist_orders
-#     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
-#
-#   -- Rellenar filas existentes con la misma fecha de creación:
-#   UPDATE buylist_orders
-#     SET updated_at = created_at
-#   WHERE updated_at IS NULL;
-#
-# Nota: ADD COLUMN IF NOT EXISTS es idempotente — seguro de re-ejecutar.
+# MIGRACIONES SQL — solo si la BD ya existe y la tabla no fue creada
+# SQLAlchemy crea tablas nuevas automáticamente vía Base.metadata.create_all()
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# NUEVA TABLA — ck_prices (job diario de CardKingdom):
-# SQLAlchemy la crea automáticamente vía Base.metadata.create_all() al arrancar.
-# No requiere migración manual si la BD es nueva o si aún no existe la tabla.
-# Si la BD ya existe sin la tabla, ejecutar:
+# buylist_orders.updated_at (FIX M-06):
+#   ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+#   UPDATE buylist_orders SET updated_at = created_at WHERE updated_at IS NULL;
 #
+# ck_prices:
 #   CREATE TABLE IF NOT EXISTS ck_prices (
-#       name_canonical   TEXT          PRIMARY KEY,
-#       name_raw         TEXT          NOT NULL,
-#       min_buy_price    NUMERIC(10,4) NOT NULL,
-#       nicho_threshold  NUMERIC(10,4) NOT NULL,   -- min_buy_price × STAKE_MULTIPLIER
-#       updated_at       TIMESTAMP     DEFAULT NOW()
+#       name_canonical TEXT PRIMARY KEY, name_raw TEXT NOT NULL,
+#       min_buy_price NUMERIC(10,4) NOT NULL, nicho_threshold NUMERIC(10,4) NOT NULL,
+#       updated_at TIMESTAMP DEFAULT NOW()
 #   );
-#
-# Si la tabla ya existe pero le falta nicho_threshold:
+#   -- Si ya existe pero le falta nicho_threshold:
 #   ALTER TABLE ck_prices ADD COLUMN IF NOT EXISTS nicho_threshold NUMERIC(10,4);
 #   UPDATE ck_prices SET nicho_threshold = min_buy_price * 1.5 WHERE nicho_threshold IS NULL;
+#
+# canje_records (NUEVO v5.5):
+#   CREATE TABLE IF NOT EXISTS canje_records (
+#       id SERIAL PRIMARY KEY, email TEXT NOT NULL,
+#       amount_qp NUMERIC(12,2) NOT NULL, coupon_code TEXT NOT NULL,
+#       monto_original NUMERIC(12,2), cart_total NUMERIC(12,2),
+#       adjusted INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW()
+#   );
+#   CREATE INDEX IF NOT EXISTS ix_canje_records_email   ON canje_records (email);
+#   CREATE INDEX IF NOT EXISTS ix_canje_records_created ON canje_records (created_at);
 # ─────────────────────────────────────────────────────────────────────────────

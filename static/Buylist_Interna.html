@@ -309,9 +309,25 @@ function showErr(msg){
 }
 document.getElementById('pwd-inp').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
 
+
+// HTML-03 FIX: wrapper fetch con timeout automático para cold starts de Render
+async function fetchWT(url, opts={}) {
+  const ac = new AbortController();
+  const tid = setTimeout(() => ac.abort(), 45000);
+  try {
+    const r = await fetchWT(url, {...opts, signal: ac.signal});
+    clearTimeout(tid);
+    return r;
+  } catch(e) {
+    clearTimeout(tid);
+    if (e.name === 'AbortError') throw new Error('El servidor tardó demasiado. Puede estar iniciando — espera 30s y reintenta.');
+    throw e;
+  }
+}
+
 async function checkCashSetting(){
   try{
-    const r=await fetch(`${API}/api/public/buylist_status`);
+    const r=await fetchWT(`${API}/api/public/buylist_status`);
     const s=await r.json(); cashEnabled=s.cash_enabled;
     if(!cashEnabled){
       ['pay-cash-col','bar-cash-wrap','cash-hdr'].forEach(id=>{
@@ -332,7 +348,7 @@ async function analyze(){
   show('loading-state',true); show('results-section',false);
   try{
     const fd=new FormData(); fd.append('file',csvFile);
-    const r=await fetch(`${API}/api/public/analyze_buylist`,{method:'POST',body:fd,headers:ahForm()});
+    const r=await fetchWT(`${API}/api/admin/analyze_buylist`,{method:'POST',body:fd,headers:ahForm()});
     if(!r.ok){const e=await r.json();throw new Error(e.detail||`HTTP ${r.status}`)}
     allCards=await r.json();
     renderAll();
@@ -558,13 +574,13 @@ async function openTier(idx){
 
   try{
     if(selected==='quitar'){
-      const lr=await fetch(`${API}/api/admin/staples`,{headers:ah()});
+      const lr=await fetchWT(`${API}/api/admin/staples`,{headers:ah()});
       const ll=await lr.json();
       const ex=ll.find(s=>canonical(s.name)===canonical(c.name));
-      if(ex) await fetch(`${API}/api/admin/staples/${ex.id}`,{method:'DELETE',headers:ah()});
+      if(ex) await fetchWT(`${API}/api/admin/staples/${ex.id}`,{method:'DELETE',headers:ah()});
       allCards[idx].tier='normal';
     } else {
-      await fetch(`${API}/api/admin/staples`,{
+      await fetchWT(`${API}/api/admin/staples`,{
         method:'POST',headers:ah(),
         body:JSON.stringify({name:c.name,tier:selected,margin_factor:2.5})
       });
@@ -634,7 +650,7 @@ async function confirmOrder(){
   const btn=document.getElementById('btn-confirm');
   btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch spin" style="margin-right:8px"></i>Registrando…';
   try{
-    const r=await fetch(`${API}/api/admin/commit_buylist`,{
+    const r=await fetchWT(`${API}/api/admin/commit_buylist`,{
       method:'POST',headers:ah(),
       body:JSON.stringify({email:email||`admin-${Date.now()}@gq.internal`,rut,nombre,notas,
         payment_preference:payMode,items,total_credito:totalQP,total_cash:totalCash,source:'interna'}),

@@ -1,7 +1,7 @@
 """
-main.py — GameQuest API v5.4
-Cambios v4: Card Kingdom Buylist via Manabox como precio de referencia, async email,
-            JS stock cache, rate limiting, budget cap, name normalization,
+main.py — GameQuest API v5.5
+Cambios v5.5: foil/nicho pipeline definitivo, stock info privado, AbortController,
+              CORS Jumpseller, lru_cache 65536, imports de módulo, fixes de sesión,
             email en TODAS las buylists.
 """
 import re
@@ -44,7 +44,7 @@ from .vault import VaultController
 from .schemas import CanjeRequest, LoginRequest, TokenResponse, BuylistCommitRequest
 from .config import settings
 from . import email_service
-from .models import Gampoint, BuylistOrder, StapleCard, CardCatalog, CashbackRecord, CKPrice  # MAIN-08 FIX
+from .models import Gampoint, BuylistOrder, StapleCard, CardCatalog, CashbackRecord, CKPrice, CanjeRecord  # MAIN-08 FIX
 
 logger = logging.getLogger(__name__)
 
@@ -1088,6 +1088,78 @@ async def execute_canje(req: CanjeRequest, db: Session = Depends(get_db)):
     if req.monto < settings.MIN_CANJE:
         raise HTTPException(400, f"Monto mínimo de canje: {settings.MIN_CANJE} QP.")
     return await VaultController.process_canje(db, req.email, req.monto, req.cart_total)
+
+
+@app.get("/api/public/last_canje/{email}", dependencies=[Depends(verify_public_token)])
+def get_last_canje(email: str, db: Session = Depends(get_db)):
+    """
+    Retorna el último canje QP del cliente, para mostrarlo en account.liquid.
+
+    Respuesta cuando hay canje:
+      { found: true, amount_qp, coupon_code, adjusted, created_at }
+    Respuesta cuando no hay:
+      { found: false }
+
+    Seguridad: requiere x-store-token = PUBLIC_STORE_TOKEN (igual que /api/public/balance).
+    No expone el historial completo — solo el último registro.
+    """
+    try:
+        record = (
+            db.query(CanjeRecord)
+            .filter(CanjeRecord.email == email.lower().strip())
+            .order_by(CanjeRecord.created_at.desc())
+            .first()
+        )
+        if not record:
+            return {"found": False}
+        return {
+            "found":           True,
+            "amount_qp":       float(record.amount_qp),
+            "coupon_code":     record.coupon_code,
+            "adjusted":        bool(record.adjusted),
+            "monto_original":  float(record.monto_original) if record.monto_original else None,
+            "created_at":      record.created_at.isoformat() if record.created_at else None,
+        }
+    except Exception as exc:
+        logger.error(f"[LAST_CANJE] Error para {email}: {exc}")
+        raise HTTPException(503, "Servicio temporalmente no disponible")
+
+
+@app.get("/api/admin/canje_history/{email}", dependencies=[Depends(verify_admin)])
+def get_canje_history(email: str, limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Historial completo de canjes de un cliente — para la Bóveda admin.
+
+    Parámetros:
+      - email: email del cliente
+      - limit: máximo de registros a retornar (default 20, max 100)
+
+    Retorna lista ordenada por fecha desc con todos los canjes del cliente.
+    """
+    limit = min(limit, 100)
+    records = (
+        db.query(CanjeRecord)
+        .filter(CanjeRecord.email == email.lower().strip())
+        .order_by(CanjeRecord.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "email": email.lower().strip(),
+        "total": len(records),
+        "canjes": [
+            {
+                "id":             r.id,
+                "amount_qp":      float(r.amount_qp),
+                "coupon_code":    r.coupon_code,
+                "adjusted":       bool(r.adjusted),
+                "monto_original": float(r.monto_original) if r.monto_original else None,
+                "cart_total":     float(r.cart_total) if r.cart_total else None,
+                "created_at":     r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in records
+        ],
+    }
 
 
 # =====================================================================
@@ -2272,6 +2344,52 @@ async def bulk_import_staples(
         "inserted": inserted,
         "updated":  updated,
         "skipped":  skipped,
+    }
+
+
+@app.get("/api/admin/staples_status", dependencies=[Depends(verify_admin)])
+def staples_status(db: Session = Depends(get_db)):
+    """
+    P-01 FIX: Diagnóstico del caché de staples y estado de la tabla staple_cards.
+
+    Devuelve:
+      - cache_valid / cache_entries / cache_age_sec — estado del caché en RAM
+      - db_total / db_tiers — cartas en la tabla staple_cards por tier
+      - ck_prices_total — cartas en la tabla ck_prices
+    """
+    cache_entries = len(_staple_map_cache) if _staple_map_cache else 0
+    cache_age     = int(time.monotonic() - _staple_map_cache_ts)
+    cache_valid   = cache_entries > 0 and cache_age < STAPLE_CACHE_TTL
+
+    try:
+        db_total = db.query(StapleCard).count()
+        tiers    = db.query(StapleCard.tier,
+                            func.count(StapleCard.id).label("n")) \
+                     .group_by(StapleCard.tier).all()
+        db_tiers = {t.tier: t.n for t in tiers}
+    except Exception as exc:
+        db_total = -1
+        db_tiers = {"error": str(exc)}
+
+    try:
+        ck_total = db.query(CKPrice).count()
+    except Exception as exc:
+        ck_total = -1
+
+    return {
+        "cache_valid":      cache_valid,
+        "cache_entries":    cache_entries,
+        "cache_age_sec":    cache_age,
+        "db_staples_total": db_total,
+        "db_staples_tiers": db_tiers,
+        "ck_prices_total":  ck_total,
+        "recommendation":   (
+            "tabla staple_cards vacía — poblar con POST /api/admin/staples/bulk"
+            if db_total == 0 else
+            "cache inválido pero BD tiene datos — próximo request lo recargará"
+            if not cache_valid and db_total > 0 else
+            "ok"
+        ),
     }
 
 

@@ -22,6 +22,10 @@
         .order-pending  { border-left-color:#f59e0b; }
         .order-reviewed { border-left-color:#22c55e; }
         .order-closed   { border-left-color:#94a3b8; }
+        .coupon-chip { font-family:monospace;font-size:10px;background:#fefce8;color:#92400e;
+                       border:1px solid #fde68a;border-radius:6px;padding:2px 6px;
+                       cursor:pointer;transition:.15s;white-space:nowrap; }
+        .coupon-chip:hover { background:#fde68a; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -34,7 +38,7 @@
             <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Acceso Bóveda</h1>
         </div>
         <form onsubmit="event.preventDefault(); login();" class="space-y-5">
-            <input type="text" id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
+            <input type="text"     id="user" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="Usuario">
             <input type="password" id="pass" class="input-clean w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••">
             <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg transition-all shadow-md transform active:scale-95">INGRESAR</button>
         </form>
@@ -78,17 +82,20 @@
             </div>
             <div class="flex w-full md:w-auto gap-3 items-center">
                 <select id="filter-mode" onchange="load()" class="input-clean rounded-lg py-2.5 px-3 text-sm font-bold text-slate-600 bg-slate-50 cursor-pointer">
-                    <option value="all">👁️ Ver Todos</option>
-                    <option value="balance">💰 Solo con Saldo</option>
+                    <option value="all">&#128065;&#65039; Ver Todos</option>
+                    <option value="balance">&#128176; Solo con Saldo</option>
                 </select>
                 <button onclick="load()" class="bg-slate-900 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm">BUSCAR</button>
             </div>
         </div>
+
         <div class="bg-white rounded-xl border border-slate-200 card-shadow overflow-hidden">
             <div class="hidden md:grid grid-cols-12 bg-slate-50 p-4 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <div class="col-span-3 pl-2">Cliente</div><div class="col-span-3">Nombre</div>
-                <div class="col-span-2 text-center">Histórico</div>
-                <div class="col-span-2 text-center">Saldo</div>
+                <div class="col-span-3 pl-2">Cliente</div>
+                <div class="col-span-2">Nombre</div>
+                <div class="col-span-2 text-center">Hist. Canjeado</div>
+                <div class="col-span-2 text-center">Último Canje</div>
+                <div class="col-span-1 text-center">Saldo</div>
                 <div class="col-span-2 text-center">Acciones</div>
             </div>
             <div id="user-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto"></div>
@@ -103,9 +110,9 @@
         <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-3 items-center justify-between">
             <div class="flex gap-2 flex-wrap">
                 <button onclick="setOrderFilter('all')"      id="of-all"      class="tab-btn tab-on">Todas</button>
-                <button onclick="setOrderFilter('pending')"  id="of-pending"  class="tab-btn tab-off">⏳ Pendientes</button>
-                <button onclick="setOrderFilter('reviewed')" id="of-reviewed" class="tab-btn tab-off">✅ Revisadas</button>
-                <button onclick="setOrderFilter('closed')"   id="of-closed"   class="tab-btn tab-off">🔒 Cerradas</button>
+                <button onclick="setOrderFilter('pending')"  id="of-pending"  class="tab-btn tab-off">&#9203; Pendientes</button>
+                <button onclick="setOrderFilter('reviewed')" id="of-reviewed" class="tab-btn tab-off">&#9989; Revisadas</button>
+                <button onclick="setOrderFilter('closed')"   id="of-closed"   class="tab-btn tab-off">&#128274; Cerradas</button>
             </div>
             <button onclick="loadOrders()" class="px-5 py-2.5 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 transition">
                 <i class="fas fa-rotate-right mr-1.5"></i>Actualizar
@@ -132,7 +139,6 @@
     </div>
 
 </div>
-
 <script>
 const API = "https://gamecoins.onrender.com";
 let authToken = null;
@@ -165,6 +171,63 @@ function showTab(tab) {
     if (tab === 'orders') loadOrders();
 }
 
+
+// ── Copiar código de cupón al clipboard ──────────────────────────────────────
+async function copyCode(code) {
+    try {
+        await navigator.clipboard.writeText(code);
+        Swal.fire({ icon:'success', title:'Copiado', text: code, timer:1200, showConfirmButton:false, toast:true, position:'top-end' });
+    } catch(_) {
+        Swal.fire({ title:'Código del cupón', text: code, confirmButtonText:'Cerrar' });
+    }
+}
+
+// ── Historial completo de canjes de un cliente ────────────────────────────────
+async function showCanjeHistory(email) {
+    Swal.fire({ title: 'Cargando canjes...', html:'<div class="p-4 text-slate-400 text-sm">Un momento...</div>', showConfirmButton:false, width:'620px' });
+    try {
+        const res = await fetch(`${API}/api/admin/canje_history/${encodeURIComponent(email)}?limit=20`, { headers: authH() });
+        const data = await res.json();
+        if (!data.canjes || !data.canjes.length) {
+            Swal.fire({ title:'Sin canjes', text:`${email} no tiene canjes registrados.`, icon:'info' });
+            return;
+        }
+        const rows = data.canjes.map(c => {
+            const fecha = c.created_at
+                ? new Date(c.created_at).toLocaleString('es-CL', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})
+                : '—';
+            const adjTag = c.adjusted
+                ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 5px;margin-left:4px">ajustado: ${(c.monto_original||0).toLocaleString()} solicitado</span>`
+                : '';
+            return `<tr style="border-bottom:1px solid #f1f5f9;font-size:12px">
+                <td style="padding:8px 10px">${fecha}</td>
+                <td style="padding:8px;text-align:right;font-weight:700;color:#047857">$${(c.amount_qp||0).toLocaleString()} QP${adjTag}</td>
+                <td style="padding:8px;text-align:center">
+                    <span class="coupon-chip" onclick="copyCode('${c.coupon_code}')" title="Clic para copiar">${c.coupon_code}</span>
+                </td>
+            </tr>`;
+        }).join('');
+        Swal.fire({
+            title: `Historial de canjes`,
+            width: '620px',
+            html: `<p style="font-size:12px;color:#64748b;margin-bottom:12px">${email} — ${data.total} canje${data.total!==1?'s':''}</p>
+                <div style="max-height:320px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+                <table style="width:100%;border-collapse:collapse">
+                    <thead style="background:#f8fafc;position:sticky;top:0">
+                        <tr style="font-size:10px;color:#64748b;text-transform:uppercase">
+                            <th style="padding:8px 10px;text-align:left">Fecha</th>
+                            <th style="padding:8px;text-align:right">Monto</th>
+                            <th style="padding:8px;text-align:center">Cupón</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                </div>`,
+            confirmButtonText: 'Cerrar',
+            confirmButtonColor: '#0f172a',
+        });
+    } catch(e) { Swal.fire('Error', 'No se pudo cargar el historial.', 'error'); }
+}
 // ── QuestPoints ───────────────────────────────────────────────────────────────
 async function load() {
     if (!authToken) return;
@@ -182,21 +245,69 @@ async function load() {
         if (!data.users.length) {
             html = '<div class="p-8 text-center text-slate-500">No se encontraron clientes.</div>';
         } else {
+            // Cargar último canje de todos los usuarios en paralelo (lotes de 10)
+            const BATCH = 10;
+            const lastCanjes = {};
+            for (let i = 0; i < data.users.length; i += BATCH) {
+                const batch = data.users.slice(i, i + BATCH);
+                await Promise.all(batch.map(async u => {
+                    try {
+                        const r = await fetch(`${API}/api/admin/canje_history/${encodeURIComponent(u.email)}?limit=1`, { headers: authH() });
+                        if (r.ok) {
+                            const d = await r.json();
+                            lastCanjes[u.email] = d.canjes && d.canjes.length ? d.canjes[0] : null;
+                        }
+                    } catch(_) { lastCanjes[u.email] = null; }
+                }));
+            }
+
             data.users.forEach(u => {
-                const name     = (u.name||u.surname) ? `${u.name||''} ${u.surname||''}` : '<i class="text-slate-400">Sin nombre</i>';
-                const initials = u.email.substring(0,2).toUpperCase();
+                const displayName = (u.display_name && u.display_name.trim()) ? u.display_name.trim() : null;
+                const nameHtml    = displayName
+                    ? `<span>${displayName}</span>`
+                    : '<i class="text-slate-400">Sin nombre</i>';
+                const initials = displayName
+                    ? displayName.split(/\s+/).map(w => w[0]).join('').toUpperCase().substring(0,2)
+                    : u.email.substring(0,2).toUpperCase();
+
+                // ── Celda Último Canje ────────────────────────────────────
+                const lc = lastCanjes[u.email];
+                let lastCanjeHtml;
+                if (!lc) {
+                    lastCanjeHtml = `<span class="text-[10px] text-slate-400 italic">Sin canjes</span>`;
+                } else {
+                    const fecha = lc.created_at
+                        ? new Date(lc.created_at).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'2-digit'})
+                        : '—';
+                    const adjBadge = lc.adjusted
+                        ? `<span class="ml-1 text-[8px] font-bold bg-amber-100 text-amber-700 border border-amber-200 rounded px-1">ajustado</span>`
+                        : '';
+                    lastCanjeHtml = `
+                        <div class="flex flex-col items-center gap-0.5">
+                            <span class="text-xs font-black text-emerald-700">$${(lc.amount_qp||0).toLocaleString()} QP${adjBadge}</span>
+                            <span class="coupon-chip" title="Clic para copiar" onclick="copyCode('${lc.coupon_code}')">${lc.coupon_code}</span>
+                            <span class="text-[9px] text-slate-400">${fecha}</span>
+                        </div>`;
+                }
+
                 html += `
                 <div class="grid grid-cols-1 md:grid-cols-12 items-center p-4 hover:bg-slate-50 transition-colors gap-4 md:gap-0 border-b border-slate-100 md:border-0">
                     <div class="md:col-span-3 flex items-center gap-3 pl-2 overflow-hidden">
                         <div class="w-10 h-10 flex-shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">${initials}</div>
                         <p class="font-bold text-slate-800 text-sm truncate-text" title="${u.email}">${u.email}</p>
                     </div>
-                    <div class="md:col-span-3 text-sm text-slate-600 truncate-text">${name}</div>
-                    <div class="md:col-span-2 text-center"><span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span></div>
-                    <div class="md:col-span-2 text-center"><span class="inline-block border rounded-lg px-3 py-1 text-sm font-bold ${u.saldo>0?'bg-yellow-50 text-yellow-700 border-yellow-200':'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span></div>
-                    <div class="md:col-span-2 flex justify-center gap-2">
-                        <button onclick="adjust('${u.email}','add')"      class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition"><i class="fas fa-plus"></i></button>
-                        <button onclick="adjust('${u.email}','subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition"><i class="fas fa-minus"></i></button>
+                    <div class="md:col-span-2 text-sm text-slate-600 truncate-text">${nameHtml}</div>
+                    <div class="md:col-span-2 text-center">
+                        <span class="px-3 py-1 rounded-full bg-slate-100 text-xs font-mono font-bold text-slate-600">$${(u.historico_canjeado||0).toLocaleString()}</span>
+                    </div>
+                    <div class="md:col-span-2 text-center">${lastCanjeHtml}</div>
+                    <div class="md:col-span-1 text-center">
+                        <span class="inline-block border rounded-lg px-2 py-1 text-sm font-bold ${u.saldo>0?'bg-yellow-50 text-yellow-700 border-yellow-200':'bg-slate-50 text-slate-400 border-slate-200'}">${u.saldo.toLocaleString()} QP</span>
+                    </div>
+                    <div class="md:col-span-2 flex justify-center gap-1.5">
+                        <button onclick="adjust('${u.email}','add')"      class="w-8 h-8 rounded-lg border border-slate-200 text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center justify-center transition" title="Abonar QP"><i class="fas fa-plus"></i></button>
+                        <button onclick="adjust('${u.email}','subtract')" class="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center transition" title="Descontar QP"><i class="fas fa-minus"></i></button>
+                        <button onclick="showCanjeHistory('${u.email}')"  class="w-8 h-8 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 flex items-center justify-center transition" title="Historial de canjes"><i class="fas fa-history"></i></button>
                     </div>
                 </div>`;
             });
@@ -390,6 +501,7 @@ async function updateOrderStatus(id, newStatus) {
         Swal.fire({icon:'success', title:'Estado actualizado', timer:1400, showConfirmButton:false});
     } catch(e) { Swal.fire('Error', e.message, 'error'); }
 }
+
 </script>
 </body>
 </html>

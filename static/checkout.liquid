@@ -1,0 +1,155 @@
+<script src="{{ 'cart.js' | asset }}" defer></script>
+
+<section class="container-fluid cart-page" data-bundle-color="{{ options.cart_bundle_color }}">
+  <div class="row cart-page__container">
+    
+    <div class="col-12 col-lg-8 cart-page__content">
+      {% render 'cart_header' %}
+
+      {% if customer == null and store.customers_enabled and store.customers_optional %}
+        <div class="cart-page__message text-center">
+          {% capture login_text -%}
+            <a href="{{ customer_login_url }}" class="cart-page__link" title="{% t 'Log in to your account' %}">{% t "Log in" %}</a>
+          {%- endcapture %}
+          {%- t "Already have an account? You can %{login} here", login: login_text -%}
+        </div>
+      {% endif %}
+
+      {{ index_for_components }}
+    </div>
+
+    <div class="col-12 col-lg-4 cart-summary{% if order.products_count == 0 %} cart-summary--empty{% endif %}">
+      
+      {% if customer %}
+        <div class="card mb-3 border-0 shadow-sm" id="gamecoins-widget" style="display:none; border-left: 5px solid #D32F2F !important;">
+          <div class="card-body p-3">
+            <h5 class="mb-2 text-danger fw-bold"><i class="fas fa-coins"></i> CANJEAR GAMECOINS</h5>
+            
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <span class="small text-muted fw-bold">Saldo Disponible:</span>
+              <strong class="text-dark fs-5" id="gc-balance">...</strong>
+            </div>
+            
+            <div class="input-group mb-2">
+              <input type="number" id="gc-input" class="form-control fw-bold" placeholder="Monto" min="100">
+              <button class="btn btn-danger fw-bold px-4" id="gc-btn" onclick="canjearDesdeCarrito()">USAR</button>
+            </div>
+            
+            <div id="gc-msg" class="small fw-bold text-center mt-2 text-muted">Mínimo para canjear: $100 CLP</div>
+          </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" defer></script>
+        <script>
+          const GC_API = "https://gamecoins.onrender.com";
+          const GC_EMAIL = "{{ customer.email }}";
+          const GC_TOKEN = "f98yWtYyIpvJDjLhnssu8ntuKfFSnA7NSft0NoaFZIE";
+          let maxSaldoCart = 0;
+
+          // Cargar Saldo
+          (function loadGcBalance() {
+            const _ctrl  = new AbortController();
+            const _timer = setTimeout(() => _ctrl.abort(), 8000);
+            fetch(`${GC_API}/api/public/balance/${encodeURIComponent(GC_EMAIL)}`, {
+              headers: { 'x-store-token': GC_TOKEN },
+              signal: _ctrl.signal
+            })
+              .then(r => { clearTimeout(_timer); if (!r.ok) throw new Error('balance'); return r.json(); })
+              .then(d => {
+                if (d.saldo >= 100) {
+                  maxSaldoCart = d.saldo;
+                  document.getElementById('gc-balance').innerText = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(d.saldo);
+                  document.getElementById('gc-input').value = Math.floor(d.saldo);
+                  document.getElementById('gc-input').max   = Math.floor(d.saldo);
+                  document.getElementById('gamecoins-widget').style.display = 'block';
+                }
+              })
+              .catch(e => { if (e.name !== 'AbortError') console.error('GameCoins: balance', e); });
+          })();
+
+          async function canjearDesdeCarrito() {
+            const inp = document.getElementById('gc-input');
+            const btn = document.getElementById('gc-btn');
+            const msg = document.getElementById('gc-msg');
+            const monto = Math.floor(Number(inp.value));
+
+            if (!monto || monto < 100 || monto > maxSaldoCart) {
+              msg.innerText = "Monto inválido o insuficiente";
+              msg.className = "text-danger small fw-bold text-center mt-2";
+              return;
+            }
+
+            inp.disabled = true;
+            btn.disabled = true;
+            msg.innerText = "Generando cupón y copiando...";
+            msg.className = "text-warning small fw-bold text-center mt-2";
+
+            try {
+              const _cCtrl  = new AbortController();
+              const _cTimer = setTimeout(() => _cCtrl.abort(), 15000);
+              const res = await fetch(`${GC_API}/api/canje`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-store-token': GC_TOKEN
+                },
+                body: JSON.stringify({ email: GC_EMAIL, monto: monto, cart_total: monto }),
+                signal: _cCtrl.signal
+              });
+              clearTimeout(_cTimer);
+
+              const data = await res.json();
+
+              if (res.ok && data.status === 'ok') {
+                const cuponGenerado = data.cupon_codigo;
+                const fmtCLP = n => new Intl.NumberFormat('es-CL', { style:'currency', currency:'CLP', minimumFractionDigits:0 }).format(n);
+                const adjHTML = data.adjusted
+                    ? `<p style="font-size:11px;color:#b45309;background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:4px 8px;margin-top:6px">
+                         ⚠️ Monto ajustado al disponible: solicitaste ${fmtCLP(data.monto_original||monto)}, se generó por ${fmtCLP(monto)}</p>`
+                    : '';
+
+                const mostrarExito = () => {
+                  msg.innerText = "¡Cupón Generado!";
+                  msg.className = "text-success small fw-bold text-center mt-2";
+                  setTimeout(() => window.location.reload(), 2500);
+                };
+
+                const _swalHtml = `
+                    <p>Tu cupón por <b>${fmtCLP(monto)}</b> es:</p>
+                    <h3 style="color:#D32F2F;font-weight:900;letter-spacing:2px;margin:12px 0;font-family:monospace">${cuponGenerado}</h3>
+                    <p style="color:#28a745;font-size:0.85em">📋 Copiado al portapapeles automáticamente</p>
+                    <p style="font-size:0.8em;color:#666">Pégalo en la casilla de descuentos de tu compra.</p>
+                    ${adjHTML}`;
+
+                const _fire = () => Swal.fire({
+                    title: '¡Canje Exitoso!', html: _swalHtml,
+                    icon: 'success', confirmButtonColor: '#D32F2F',
+                    confirmButtonText: 'Entendido', allowOutsideClick: false
+                }).then(mostrarExito);
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(cuponGenerado).then(_fire).catch(_fire);
+                } else { _fire(); }
+
+              } else {
+                let errorMsg = 'Error al canjear';
+                if (typeof data.detail === 'string') {
+                    errorMsg = data.detail;
+                } else if (Array.isArray(data.detail)) {
+                    errorMsg = 'Datos incompletos en la petición.';
+                }
+                throw new Error(errorMsg);
+              }
+            } catch (e) {
+              msg.innerText = "Error: " + e.message;
+              msg.className = "text-danger small fw-bold text-center mt-2";
+              inp.disabled = false;
+              btn.disabled = false;
+            }
+          }
+        </script>
+      {% endif %}
+      {% render 'cart_summary' %}
+    </div>
+  </div>
+</section>

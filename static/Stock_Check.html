@@ -353,6 +353,36 @@
         <p id="tier-hint" class="text-[9px] text-slate-400 mt-3">Haz click en una carta del catálogo para cambiar su tier.</p>
       </div>
 
+      <!-- ══ Diagnóstico de Staples (P-01) ══ -->
+      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Diagnóstico Staple Cache</div>
+          <button onclick="checkStaplesStatus()" id="btn-staple-diag"
+                  class="text-[10px] font-bold px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition flex items-center gap-1">
+            <i class="fas fa-stethoscope text-[9px]"></i> Verificar
+          </button>
+        </div>
+        <div id="staple-diag-result" class="space-y-1.5 text-[11px]">
+          <p class="text-slate-400 italic text-[10px]">Presiona "Verificar" para diagnosticar el estado del caché.</p>
+        </div>
+        <!-- Importar staples desde CSV (fix P-01) -->
+        <div class="mt-3 pt-3 border-t border-slate-100">
+          <label class="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Poblar Staples desde CSV</label>
+          <p class="text-[9px] text-slate-400 mb-2">Sube un CSV Manabox para importar masivamente cartas como staples. Asigna el tier a todas.</p>
+          <select id="staple-import-tier" class="inp text-xs py-1 mb-2 w-full">
+            <option value="alta">⭐ Alta demanda</option>
+            <option value="muy_alta">🔥 Muy Alta demanda</option>
+            <option value="normal">📦 Normal</option>
+          </select>
+          <input type="file" id="staple-import-csv" accept=".csv" class="inp text-xs py-1 mb-2">
+          <button onclick="importStaplesBulk()"
+                  class="w-full text-[10px] font-bold px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition flex items-center justify-center gap-1.5">
+            <i class="fas fa-upload text-[9px]"></i> Importar Staples
+          </button>
+          <p id="staple-import-result" class="text-[10px] mt-2 text-slate-500 hidden"></p>
+        </div>
+      </div>
+
       <!-- Bulk import modal trigger + SF CSV -->
       <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow space-y-3">
         <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Importación / Exportación</div>
@@ -396,13 +426,29 @@ function canonical(name) {
 function ah() { return { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }; }
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
+
+// HTML-03 FIX: wrapper fetch con timeout automático para cold starts de Render
+async function fetchWT(url, opts={}) {
+  const ac = new AbortController();
+  const tid = setTimeout(() => ac.abort(), 45000);
+  try {
+    const r = await fetchWT(url, {...opts, signal: ac.signal});
+    clearTimeout(tid);
+    return r;
+  } catch(e) {
+    clearTimeout(tid);
+    if (e.name === 'AbortError') throw new Error('El servidor tardó demasiado. Puede estar iniciando — espera 30s y reintenta.');
+    throw e;
+  }
+}
+
 async function doLogin() {
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value.trim();
   const errEl = document.getElementById('login-err');
   errEl.classList.add('hidden');
   try {
-    const r = await fetch(`${API}/api/auth/login`, {
+    const r = await fetchWT(`${API}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: u, password: p })
     });
@@ -420,7 +466,7 @@ function doLogout() { TOKEN = null; location.reload(); }
 // ── Cache status ───────────────────────────────────────────────────────────────
 async function checkCacheStatus() {
   try {
-    const r = await fetch(`${API}/api/admin/cache_status`, { headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/cache_status`, { headers: ah() });
     const d = await r.json();
     const badge = document.getElementById('cache-badge');
     if (d.cache_valid) {
@@ -441,7 +487,7 @@ async function syncCache() {
   const btn  = document.getElementById('btn-sync');
   icon.classList.add('spin'); btn.disabled = true;
   try {
-    const r = await fetch(`${API}/api/admin/warmup_cache`, { method: 'POST', headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/warmup_cache`, { method: 'POST', headers: ah() });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Error');
     showToast(`✅ ${d.cards_loaded} cartas cargadas — ${d.total_stock} u. en stock`);
@@ -482,7 +528,7 @@ async function search() {
   document.getElementById('no-results').classList.add('hidden');
 
   try {
-    const r = await fetch(`${API}/api/admin/stock_lookup?q=${encodeURIComponent(q)}`, { headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/stock_lookup?q=${encodeURIComponent(q)}`, { headers: ah() });
     if (!r.ok) throw new Error((await r.json()).detail || 'Error');
     const d = await r.json();
     lastResults = d.results || [];
@@ -634,21 +680,21 @@ async function openTierMenu(key, displayName, currentTier, stapleId, idx) {
     if (selected === 'quitar') {
       if (!stapleId) {
         // buscar por nombre canónico (inmune a apóstrofes tipográficos)
-        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
+        const lr = await fetchWT(`${API}/api/admin/staples`, { headers: ah() });
         const ll = await lr.json();
         const nameCanon = canonical(displayName || key);
         const ex = ll.find(s => canonical(s.name) === nameCanon);
         if (ex) {
-          await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
+          await fetchWT(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
         }
       } else {
-        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
+        await fetchWT(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
       }
       lastResults[idx].in_list   = false;
       lastResults[idx].tier      = null;
       lastResults[idx].staple_id = null;
     } else {
-      const r = await fetch(`${API}/api/admin/staples`, {
+      const r = await fetchWT(`${API}/api/admin/staples`, {
         method: 'POST', headers: ah(),
         body: JSON.stringify({ name: displayName || key, tier: selected, margin_factor: 2.5 })
       });
@@ -691,7 +737,7 @@ let catalogDebounce = null;
 // ── Cargar stats del catálogo ──────────────────────────────────────────────────
 async function loadCatalogStats() {
   try {
-    const r = await fetch(`${API}/api/admin/catalog/stats`, { headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/catalog/stats`, { headers: ah() });
     if (!r.ok) return;
     const d = await r.json();
     document.getElementById('cs-cards').textContent     = d.total_cards?.toLocaleString()    || '0';
@@ -740,7 +786,7 @@ async function startEnrich(reprocess = false) {
   if (!isConfirmed) return;
 
   try {
-    const r = await fetch(`${API}/api/admin/catalog/enrich_scryfall`,
+    const r = await fetchWT(`${API}/api/admin/catalog/enrich_scryfall`,
       { method: 'POST', headers: ah() });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Error');
@@ -756,7 +802,7 @@ async function startEnrich(reprocess = false) {
 }
 
 async function cancelEnrich() {
-  await fetch(`${API}/api/admin/catalog/enrich_cancel`, { method: 'POST', headers: ah() });
+  await fetchWT(`${API}/api/admin/catalog/enrich_cancel`, { method: 'POST', headers: ah() });
   showToast('⏹ Enriquecimiento detenido');
   stopEnrichPoll();
 }
@@ -776,7 +822,7 @@ function stopEnrichPoll() {
 
 async function pollEnrichStatus() {
   try {
-    const r = await fetch(`${API}/api/admin/catalog/enrich_status`, { headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/catalog/enrich_status`, { headers: ah() });
     const d = await r.json();
 
     // Fase label
@@ -834,7 +880,7 @@ async function loadCatalog() {
   });
 
   try {
-    const r = await fetch(`${API}/api/admin/catalog?${params}`, { headers: ah() });
+    const r = await fetchWT(`${API}/api/admin/catalog?${params}`, { headers: ah() });
     if (!r.ok) throw new Error('Error cargando catálogo');
     const data = await r.json();
 
@@ -992,15 +1038,15 @@ async function openTierMenuCatalog(canonical, displayName, stapleId) {
   try {
     if (selected === 'quitar') {
       if (stapleId) {
-        await fetch(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
+        await fetchWT(`${API}/api/admin/staples/${stapleId}`, { method: 'DELETE', headers: ah() });
       } else {
-        const lr = await fetch(`${API}/api/admin/staples`, { headers: ah() });
+        const lr = await fetchWT(`${API}/api/admin/staples`, { headers: ah() });
         const ll = await lr.json();
         const ex = ll.find(s => canonical(s.name) === canonical);
-        if (ex) await fetch(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
+        if (ex) await fetchWT(`${API}/api/admin/staples/${ex.id}`, { method: 'DELETE', headers: ah() });
       }
     } else {
-      await fetch(`${API}/api/admin/staples`, {
+      await fetchWT(`${API}/api/admin/staples`, {
         method: 'POST', headers: ah(),
         body: JSON.stringify({ name: displayName, tier: selected, margin_factor: 2.5 })
       });
@@ -1041,7 +1087,7 @@ async function syncCatalog() {
     if (uploadCsv) form.append('file', uploadCsv);
 
     // Si no hay CSV, enviar como GET-like con form vacío
-    const r = await fetch(`${API}/api/admin/catalog/sync`, {
+    const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: form,
@@ -1090,7 +1136,7 @@ async function addToCatalogSync(canonical_key, displayName) {
   Swal.fire({ title: 'Vinculando…', allowOutsideClick: false, showConfirmButton: false,
     didOpen: () => Swal.showLoading() });
   try {
-    const r = await fetch(`${API}/api/admin/catalog/sync`, {
+    const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Error');
@@ -1230,7 +1276,7 @@ async function openBulkImport() {
     const form = new FormData();
     form.append('file', file);
 
-    const res  = await fetch(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
+    const res  = await fetchWT(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
       body: form,
@@ -1289,6 +1335,113 @@ function showToast(msg, type = 'success') {
     background: '#1e293b', color: '#e2e8f0',
     iconColor: type === 'error' ? '#f87171' : '#4ade80'
   }).fire({ icon: type === 'error' ? 'error' : 'success', title: msg });
+}
+
+// ── Diagnóstico de Staple Cache (P-01) ────────────────────────────────────────
+async function checkStaplesStatus() {
+  const btn = document.getElementById('btn-staple-diag');
+  const out = document.getElementById('staple-diag-result');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin text-[9px]"></i> Verificando...';
+  out.innerHTML = '<p class="text-slate-400 italic text-[10px]">Consultando...</p>';
+  try {
+    const r = await fetchWT(`${API}/api/admin/staples_status`, { headers: ah() });
+    const d = await r.json();
+
+    // Semáforo cache
+    const cacheOk    = d.cache_valid;
+    const cacheColor = cacheOk ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                : 'text-red-700 bg-red-50 border-red-200';
+    const cacheIcon  = cacheOk ? '✅' : '❌';
+
+    // Semáforo BD
+    const dbOk    = d.db_staples_total > 0;
+    const dbColor = dbOk ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                          : 'text-amber-700 bg-amber-50 border-amber-200';
+    const dbIcon  = dbOk ? '✅' : '⚠️';
+
+    // Tiers breakdown
+    const tiers = d.db_staples_tiers || {};
+    const tiersHtml = Object.entries(tiers).length
+      ? Object.entries(tiers).map(([t,n]) => `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600">${t}: ${n}</span>`).join(' ')
+      : '<span class="text-slate-400">sin datos</span>';
+
+    // Recomendación
+    const recColor = d.recommendation === 'ok'
+      ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
+      : 'text-amber-800 bg-amber-50 border border-amber-200';
+
+    out.innerHTML = `
+      <div class="space-y-1.5">
+        <div class="flex items-center justify-between rounded-lg border px-2 py-1.5 ${cacheColor}">
+          <span class="font-bold text-[10px]">${cacheIcon} Caché RAM</span>
+          <span class="text-[10px]">${d.cache_entries} entradas · ${d.cache_age_sec}s ago</span>
+        </div>
+        <div class="flex items-center justify-between rounded-lg border px-2 py-1.5 ${dbColor}">
+          <span class="font-bold text-[10px]">${dbIcon} BD staple_cards</span>
+          <span class="text-[10px]">${d.db_staples_total} staples</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 px-2 py-1.5 bg-slate-50">
+          <p class="text-[9px] font-bold text-slate-400 mb-1">Por tier:</p>
+          <div class="flex flex-wrap gap-1">${tiersHtml}</div>
+        </div>
+        <div class="text-[9px] text-slate-500">CK prices en BD: <strong>${d.ck_prices_total}</strong></div>
+        <div class="rounded-lg px-2 py-1.5 text-[10px] font-medium ${recColor}">${d.recommendation}</div>
+      </div>`;
+  } catch(e) {
+    out.innerHTML = `<p class="text-red-600 text-[10px]">Error: ${e.message}</p>`;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fas fa-stethoscope text-[9px]"></i> Verificar';
+}
+
+// ── Importar staples masivamente desde CSV Manabox (fix P-01) ─────────────────
+async function importStaplesBulk() {
+  const fileInput = document.getElementById('staple-import-csv');
+  const tier      = document.getElementById('staple-import-tier').value;
+  const resultEl  = document.getElementById('staple-import-result');
+
+  if (!fileInput.files.length) {
+    showToast('Selecciona un CSV primero', 'error'); return;
+  }
+  const file = fileInput.files[0];
+  const confirmResult = await Swal.fire({
+    title: 'Importar Staples',
+    html: `<p class="text-sm text-slate-600">Se importarán las cartas del CSV<br>
+           con tier <strong>${tier}</strong>.</p>
+           <p class="text-xs text-amber-700 mt-2">Las cartas existentes solo actualizan su tier.</p>`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'Importar',
+    confirmButtonColor: '#d97706',
+    cancelButtonText: 'Cancelar',
+  });
+  if (!confirmResult.isConfirmed) return;
+
+  resultEl.textContent = 'Importando...';
+  resultEl.className = 'text-[10px] mt-2 text-slate-500';
+  resultEl.classList.remove('hidden');
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetchWT(`${API}/api/admin/staples/bulk?tier=${tier}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error en el servidor');
+    resultEl.textContent = `✅ Insertas: ${d.inserted} · Actualizadas: ${d.updated} · Omitidas: ${d.skipped}`;
+    resultEl.className = 'text-[10px] mt-2 text-emerald-700 font-bold';
+    showToast(`${d.inserted} staples nuevos importados`, 'success');
+    // Refrescar diagnóstico automáticamente
+    setTimeout(checkStaplesStatus, 800);
+  } catch(e) {
+    resultEl.textContent = `❌ Error: ${e.message}`;
+    resultEl.className = 'text-[10px] mt-2 text-red-600 font-bold';
+    showToast('Error al importar', 'error');
+  }
 }
 </script>
 </body>

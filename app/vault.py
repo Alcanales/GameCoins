@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from .models import Gampoint
+from .models import Gampoint, CanjeRecord, CanjeRecord
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -451,7 +451,27 @@ class VaultController:
                 detail="Error creando cupón en Jumpseller. Tu saldo ha sido restaurado."
             )
 
-        # ── Paso 7a: Éxito ───────────────────────────────────────────────────
+        # ── Paso 7a: Éxito — registrar en historial ──────────────────────────
+        try:
+            registro = CanjeRecord(
+                email          = email.lower(),
+                amount_qp      = amount_dec,
+                coupon_code    = coupon_code,
+                monto_original = Decimal(amount),
+                cart_total     = Decimal(cart_total),
+                adjusted       = 1 if adjusted else 0,
+            )
+            db.add(registro)
+            db.commit()
+        except Exception as log_e:
+            # El canje ya fue exitoso — este error solo afecta el log histórico.
+            # No revertir ni lanzar excepción: el cliente ya tiene su cupón.
+            db.rollback()
+            logger.error(
+                f"[CANJE] ⚠️ Canje OK pero CanjeRecord falló para {email}: {log_e}. "
+                f"Cupón: {coupon_code}, monto: {effective_amount} QP"
+            )
+
         response: dict = {"status": "ok", "cupon_codigo": coupon_code}
         if adjusted:
             response["monto_ajustado"]  = True
