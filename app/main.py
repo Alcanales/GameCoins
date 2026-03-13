@@ -1,9 +1,3 @@
-"""
-main.py — GameQuest API v5.5
-Cambios v5.5: foil/nicho pipeline definitivo, stock info privado, AbortController,
-              CORS Jumpseller, lru_cache 65536, imports de módulo, fixes de sesión,
-            email en TODAS las buylists.
-"""
 import re
 import io
 import json
@@ -1567,7 +1561,11 @@ def get_users(
     db: Session = Depends(get_db),
     search: Optional[str] = None,
     only_balance: bool = False,
+    limit: int = 50,            # máx resultados por página (default 50, máx absoluto 200)
 ):
+    # Clamp: nunca traer más de 200 filas en una sola llamada
+    limit = max(1, min(limit, 200))
+
     query = db.query(Gampoint)
     if search:
         term = f"%{search.lower()}%"
@@ -1579,7 +1577,12 @@ def get_users(
         )
     if only_balance:
         query = query.filter(Gampoint.saldo > 0)
-    users = query.order_by(Gampoint.saldo.desc()).all()
+
+    # Contar antes de limitar (para saber si hay más resultados)
+    matched_count = query.count()
+
+    users = query.order_by(Gampoint.saldo.desc()).limit(limit).all()
+
     total_circulante = db.query(func.sum(Gampoint.saldo)).scalar()              or 0
     total_canjeado   = db.query(func.sum(Gampoint.historico_canjeado)).scalar() or 0
     total_users      = db.query(func.count(Gampoint.email)).scalar()            or 0
@@ -1587,8 +1590,9 @@ def get_users(
     def _display_name(u: Gampoint) -> str:
         """
         Nombre para mostrar en la Bóveda.
-        Prioriza el nombre completo si ambas partes existen.
-        Si solo hay una parte, la retorna sola.
+        `name` y `surname` ya contienen el nombre de la dirección de envío
+        (priorizado en services._extract_display_name durante el sync).
+        Prioriza nombre completo; si solo hay una parte, la retorna sola.
         Si no hay ninguna, retorna cadena vacía (la UI muestra 'Sin nombre').
         """
         parts = [p for p in [u.name, u.surname] if p and p.strip()]
@@ -1608,6 +1612,9 @@ def get_users(
         "totalCount":         total_users,
         "totalPointsInVault": float(total_circulante),
         "totalRedeemed":      float(total_canjeado),
+        # matchedCount: cuántos coinciden con el filtro actual (puede ser > len(users))
+        "matchedCount":       matched_count,
+        "hasMore":            matched_count > limit,
     }
 
 
