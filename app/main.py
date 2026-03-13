@@ -2212,10 +2212,20 @@ async def _do_bulk_enrich() -> dict:
         if not download_uri:
             raise RuntimeError("No se encontró 'default_cards' en el índice de bulk data")
 
-        # ── Paso 2: cargar todos los canonicals existentes en BD → set ────────
-        # Solo queremos enriquecer cartas que YA están en card_catalog
-        existing_rows = {r.name_normalized: r for r in db.query(CardCatalog).all()}
-        canonical_set = set(existing_rows.keys())
+        # ── Paso 2: cargar solo {name_normalized → id} — NO los objetos ORM ───
+        # FIX DetachedInstanceError: si cargamos objetos ORM completos y luego
+        # hacemos db.commit() en lotes, SQLAlchemy expira los objetos
+        # (expire_on_commit=True por defecto) → DetachedInstanceError al acceder
+        # a cualquier atributo después del primer commit.
+        # Solución: cargar solo los IDs (sin objetos ORM) y hacer bulk UPDATE
+        # por id usando bulk_update_mappings — más rápido y sin el problema de sesión.
+        existing_ids = {
+            name: row_id
+            for name, row_id in db.query(
+                CardCatalog.name_normalized, CardCatalog.id
+            ).all()
+        }
+        canonical_set = set(existing_ids.keys())
         _enrich_total = len(canonical_set)
         logger.info(f"[BULK] {_enrich_total} cartas en catálogo a enriquecer")
 
@@ -2324,18 +2334,21 @@ async def _do_bulk_enrich() -> dict:
 
         logger.info(f"[BULK] Parseo completo: {cards_seen} cartas vistas, {matched} matches")
 
-        # ── Paso 5: upsert masivo en BD en lotes de 200 ───────────────────────
+        # ── Paso 5: bulk UPDATE masivo en BD en lotes de 500 ─────────────────
+        # bulk_update_mappings: UPDATE directo por id, sin cargar objetos ORM.
+        # No sufre de DetachedInstanceError porque no hay objetos en sesión.
+        # Más rápido que modificar instancias: ~3x menos overhead por fila.
         _enrich_last_card = "guardando en base de datos…"
         batch   = []
         written = 0
 
         for canonical, sf_ids in sf_map_new.items():
-            row = existing_rows.get(canonical)
-            if not row:
+            row_id = existing_ids.get(canonical)
+            if not row_id:
+                _enrich_skipped += 1
                 continue
-            if sf_ids:   # solo actualizar si encontramos algo
-                row.scryfall_ids = sf_ids
-                batch.append(row)
+            if sf_ids:
+                batch.append({"id": row_id, "scryfall_ids": sf_ids})
                 written += 1
                 _enrich_done += 1
             else:
@@ -2343,8 +2356,9 @@ async def _do_bulk_enrich() -> dict:
 
             _enrich_last_card = canonical
 
-            if len(batch) >= 200:
+            if len(batch) >= 500:
                 try:
+                    db.bulk_update_mappings(CardCatalog, batch)
                     db.commit()
                     batch = []
                     logger.info(f"[BULK] BD: {written} cartas escritas…")
@@ -2356,6 +2370,7 @@ async def _do_bulk_enrich() -> dict:
         # Commit del lote final
         if batch:
             try:
+                db.bulk_update_mappings(CardCatalog, batch)
                 db.commit()
             except Exception as e:
                 db.rollback()
