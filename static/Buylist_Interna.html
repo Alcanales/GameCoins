@@ -32,7 +32,7 @@
     .tier-muy   { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
     .tier-alta  { background:#fffbeb; color:#d97706; border:1px solid #fde68a; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
     .tier-normal{ background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
-    .tier-none  { background:#f8fafc; color:#94a3b8; border:1px solid #e2e8f0; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }
+.tier-none{ background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer; transition:.12s; }  /* deprecated — default es normal */
     .tier-muy:hover,.tier-alta:hover,.tier-normal:hover,.tier-none:hover { opacity:.75; }
     /* Filter buttons — same as Bóveda tab-btn */
     .tab-btn { padding:6px 14px; border-radius:8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; transition:all .15s; border:1px solid transparent; }
@@ -398,7 +398,7 @@ function renderAll(){
       muy_alta:`<span class="tier-muy" onclick="openTier(${idx})">🔥 Muy Alta</span>`,
       alta:    `<span class="tier-alta" onclick="openTier(${idx})">⭐ Alta</span>`,
       normal:  `<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`,
-    }[tier]||`<span class="tier-none" onclick="openTier(${idx})">— Sin tier</span>`;
+    }[tier]||`<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`;
 
     const statusBadge={
       buying:  `<span class="gq-badge gb-buying"><i class="fas fa-circle-check" style="font-size:9px"></i> Compramos</span>`,
@@ -647,7 +647,7 @@ function renderRow(idx){
     muy_alta:`<span class="tier-muy" onclick="openTier(${idx})">🔥 Muy Alta</span>`,
     alta:    `<span class="tier-alta" onclick="openTier(${idx})">⭐ Alta</span>`,
     normal:  `<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`,
-  }[tier]||`<span class="tier-none" onclick="openTier(${idx})">— Sin tier</span>`;
+  }[tier]||`<span class="tier-normal" onclick="openTier(${idx})">📦 Normal</span>`;
   const div=document.createElement('div');
   div.className='tbl-row card-row';
   div.id=`row-${idx}`; div.dataset.status=st; div.dataset.tier=tier; div.dataset.name=canonical(c.name);

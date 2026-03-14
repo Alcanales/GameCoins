@@ -52,7 +52,7 @@ class BuylistCommitRequest(BaseModel):
     rut:                str
     email:              EmailStr
     payment_preference: Literal["credito", "cash", "mixto"]   # #14: solo valores válidos
-    items:              List[BuylistItem]
+    items:              List[BuylistItem] = Field(min_length=1)  # SCH-03 FIX: al menos 1 carta
     total_credito:      float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
     total_cash:         float = Field(ge=0)   # SCH-02 FIX: no permitir negativos
     nombre:             Optional[str] = None  # SCH-FIX: campo del HTML (opcional)

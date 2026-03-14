@@ -689,10 +689,10 @@ function renderResults(d) {
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <p class="font-black text-white text-sm">${c.display_name}</p>
+            <p class="font-black text-white text-sm">${esc(c.display_name)}</p>
             ${tierPill}
           </div>
-          <p class="text-[9px] text-slate-700 mt-0.5 font-mono">${c.key}</p>
+          <p class="text-[9px] text-slate-700 mt-0.5 font-mono">${esc(c.key)}</p>
           ${c.min_stock ? `<p class="text-[10px] text-slate-600 mt-1">mín. ${c.min_stock} u. según tier</p>` : ''}
           ${varsHtml}
         </div>
@@ -909,7 +909,15 @@ function stopEnrichPoll() {
 async function pollEnrichStatus() {
   try {
     const r = await fetchWT(`${API}/api/admin/catalog/enrich_status`, { headers: ah() });
+    if (!r.ok) {
+      // 502/503 = servidor reiniciando — detener el poll
+      stopEnrichPoll();
+      document.getElementById('enrich-progress-wrap').classList.add('hidden');
+      showToast('Servidor reiniciando — verifica el catálogo cuando esté disponible', 'error');
+      return;
+    }
     const d = await r.json();
+    window._enrichPollErrors = 0;
 
     // Fase label
     const phaseEl = document.getElementById('enrich-phase-label');
@@ -940,7 +948,14 @@ async function pollEnrichStatus() {
       catalogLoaded = false;
       loadCatalog();
     }
-  } catch(e) {}
+  } catch(e) {
+    // Fallos consecutivos de red → detener poll
+    window._enrichPollErrors = (window._enrichPollErrors || 0) + 1;
+    if (window._enrichPollErrors >= 3) {
+      stopEnrichPoll();
+      showToast('Sin respuesta del servidor — polling detenido', 'error');
+    }
+  }
 }
 
 function updateEnrichBar(done, total, running) {

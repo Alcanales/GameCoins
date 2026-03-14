@@ -64,12 +64,32 @@ except Exception as e:
 # Estas columnas pueden no existir en instancias desplegadas antes de añadirlas.
 # ADD COLUMN IF NOT EXISTS es idempotente — seguro ejecutarlo en cada arranque.
 _MIGRATIONS = [
+    # ── buylist_orders — columnas añadidas después del primer deploy ──────────
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS status      VARCHAR DEFAULT 'pending'",
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS created_at  TIMESTAMP DEFAULT NOW()",
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()",
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS nombre      VARCHAR",
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS notas       VARCHAR",
     "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS source      VARCHAR DEFAULT 'publica'",
+    # ── gampoints — saldo nunca negativo (defensa en BD) ─────────────────────
+    # DO $$ BLOCK para ignorar si ya existe el constraint
+    """DO $$ BEGIN
+        ALTER TABLE gampoints ADD CONSTRAINT saldo_no_negativo CHECK (saldo >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$""",
+    # ── staple_cards — columnas opcionales ───────────────────────────────────
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS min_stock_override  INTEGER",
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS min_price_override  NUMERIC(12,4)",
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS margin_factor       NUMERIC(5,2) DEFAULT 2.5",
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS added_by            VARCHAR",
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS created_at          TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE staple_cards ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMP DEFAULT NOW()",
+    # ── card_catalog — columnas opcionales ───────────────────────────────────
+    "ALTER TABLE card_catalog ADD COLUMN IF NOT EXISTS created_at  TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE card_catalog ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()",
+    # ── canje_records — columnas opcionales ──────────────────────────────────
+    "ALTER TABLE canje_records ADD COLUMN IF NOT EXISTS monto_original  INTEGER",
+    "ALTER TABLE canje_records ADD COLUMN IF NOT EXISTS cart_total      INTEGER",
+    "ALTER TABLE canje_records ADD COLUMN IF NOT EXISTS adjusted        INTEGER",
 ]
 try:
     with engine.connect() as _conn:
@@ -1537,6 +1557,12 @@ async def _commit_buylist_impl(
     if not settings.BUYLIST_OPEN:
         raise HTTPException(503, "La Buylist está temporalmente cerrada.")
 
+    # Validación explícita de items — defensa adicional al min_length=1 del schema
+    # Pydantic v2 debería rechazarlo con 422, pero si el código deployado es anterior
+    # esta validación garantiza que nunca se creen órdenes sin cartas
+    if not req.items:
+        raise HTTPException(400, "La cotización no contiene cartas seleccionadas.")
+
     # Rate limiting por IP real (ver nota en analyze_buylist sobre X-Forwarded-For)
     ip = (
         (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
@@ -1611,6 +1637,10 @@ async def admin_commit_buylist(
     if not settings.CASH_ENABLED and req.payment_preference in ("cash", "mixto"):
         raise HTTPException(400,
             "Por el momento solo estamos recibiendo cartas por QuestPoints.")
+
+    # Validación explícita — no crear órdenes sin cartas
+    if not req.items:
+        raise HTTPException(400, "La orden no contiene cartas seleccionadas.")
 
     items_dict = [it.model_dump() for it in req.items]
 
@@ -3442,6 +3472,9 @@ def health():
         "canonical_cache_hits": ci.hits,
         "canonical_cache_miss": ci.misses,
         "canonical_cache_size": ci.currsize,
+        # Diagnóstico SMTP — verifica que las vars estén configuradas (sin enviar email)
+        "smtp_configured":      bool(settings.SMTP_EMAIL and settings.SMTP_PASSWORD),
+        "smtp_email":           settings.SMTP_EMAIL or "NO CONFIGURADO",
     }
 
 

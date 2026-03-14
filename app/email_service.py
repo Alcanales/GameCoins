@@ -39,7 +39,11 @@ def _send_sync(to: str, subject: str, html_body: str) -> bool:
     msg["To"]      = to
     msg.attach(MIMEText(html_body, "html"))
 
-    _RETRYABLE = (smtplib.SMTPServerDisconnected, OSError, TimeoutError)
+    _RETRYABLE = (smtplib.SMTPServerDisconnected, TimeoutError)
+    # NOTA: OSError era demasiado amplio — SMTPAuthenticationError hereda de OSError
+    # pero NO es retryable (contraseña incorrecta nunca mejora con reintentos).
+    # Solo reintentamos errores de red/conexión genuinos.
+    # SMTPAuthenticationError, SMTPRecipientsRefused → fall through al except Exception.
     last_error: Exception | None = None
 
     for attempt in range(1, 4):   # intentos 1, 2, 3
@@ -51,6 +55,17 @@ def _send_sync(to: str, subject: str, html_body: str) -> bool:
                 srv.sendmail(settings.SMTP_EMAIL, to, msg.as_string())
             logger.info(f"[EMAIL] ✅ → {to} | {subject}")
             return True
+        except smtplib.SMTPAuthenticationError as e:
+            # Error de autenticación — NUNCA retryable.
+            # Causa más común: App Password de Gmail incorrecto o revocado.
+            # Verificar en Render → Environment → SMTP_PASSWORD (sin comillas, sin espacios extra)
+            # El formato correcto de App Password es: xxxx xxxx xxxx xxxx (16 chars)
+            logger.error(
+                f"[EMAIL] ❌ SMTPAuthenticationError → {to} | "
+                f"Verificar SMTP_PASSWORD en Render. "
+                f"Email: '{settings.SMTP_EMAIL}' | Error: {e.smtp_code} {e.smtp_error}"
+            )
+            return False
         except _RETRYABLE as e:
             last_error = e
             if attempt < 3:
@@ -64,8 +79,8 @@ def _send_sync(to: str, subject: str, html_body: str) -> bool:
                     f"[EMAIL] ❌ 3/3 intentos agotados → {to} | {subject} | {e}"
                 )
         except Exception as e:
-            # Errores no recuperables (auth fallida, destino inválido, etc.)
-            logger.error(f"[EMAIL] ❌ Error no recuperable → {to} | {e}")
+            # Errores no recuperables (destino inválido, etc.)
+            logger.error(f"[EMAIL] ❌ Error no recuperable → {to} | {type(e).__name__}: {e}")
             return False
 
     return False
