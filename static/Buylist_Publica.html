@@ -323,6 +323,15 @@ async function analyze(){
     clearTimeout(t1);
     if(!r.ok){const e=await r.json();throw new Error(e.detail||`Error ${r.status}`)}
     allCards=await r.json();
+    // Ordenar: compramos primero (mayor precio QP), stock completo al final
+    allCards.sort((a,b)=>{
+      const stA=statusOf(a), stB=statusOf(b);
+      const order={'buying':0,'partial':1,'full':2};
+      const oA=order[stA]??2, oB=order[stB]??2;
+      if(oA!==oB) return oA-oB;
+      // Mismo estado → ordenar por precio QP descendente
+      return (b.price_credito||0)-(a.price_credito||0);
+    });
     renderResults();
   }catch(e){
     show('loading-state',false); show('upload-card',true);
@@ -390,7 +399,7 @@ function renderResults(){
       ${canBuy
         ? `<div style="font-weight:700;font-size:11px;color:#475569;line-height:1">$${refUsd.toFixed(2)}</div>
            ${c.is_estaca
-             ? `<div style="font-size:9px;color:#b45309;margin-top:1px">De Nicho ×${c.stake_mult??1.5}</div>`
+             ? `<div style="font-size:9px;color:#b45309;margin-top:1px">★ De Nicho</div>`
              : `<div style="font-size:9px;color:#94a3b8;margin-top:1px">USD</div>`
            }`
         : `<div style="color:#94a3b8;font-size:11px">—</div>`

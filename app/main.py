@@ -59,6 +59,27 @@ try:
 except Exception as e:
     logger.warning(f"[DB WARN] {e}")
 
+# ── Migración segura: columnas añadidas después del primer deploy ──────────────
+# create_all NO hace ALTER TABLE — solo crea tablas nuevas.
+# Estas columnas pueden no existir en instancias desplegadas antes de añadirlas.
+# ADD COLUMN IF NOT EXISTS es idempotente — seguro ejecutarlo en cada arranque.
+_MIGRATIONS = [
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS status      VARCHAR DEFAULT 'pending'",
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS created_at  TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS nombre      VARCHAR",
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS notas       VARCHAR",
+    "ALTER TABLE buylist_orders ADD COLUMN IF NOT EXISTS source      VARCHAR DEFAULT 'publica'",
+]
+try:
+    with engine.connect() as _conn:
+        for _sql in _MIGRATIONS:
+            _conn.execute(text(_sql))
+        _conn.commit()
+    logger.info("[DB] Migraciones OK")
+except Exception as _e:
+    logger.warning(f"[DB MIGRATION WARN] {_e}")
+
 # ── App ───────────────────────────────────────────────────────────────────────
 async def _background_cache_refresh():
     """
@@ -2839,7 +2860,7 @@ async def stock_check(
                 base_used   = raw_usd
                 origin_desc = "sin NM disponible — detección por tipo"
             alerts.append({"type": "info",
-                           "msg": f"De Nicho ×{STAKE_M} ({origin_desc})"})
+                           "msg": f"★ De Nicho ({origin_desc})"})
 
         if not is_muy_alta:
             overstock_limit = min_stock * 3

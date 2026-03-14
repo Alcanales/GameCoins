@@ -392,41 +392,65 @@
         <div id="staple-diag-result" class="space-y-1.5 text-[11px]">
           <p class="text-slate-400 italic text-[10px]">Presiona "Verificar" para diagnosticar el estado del caché.</p>
         </div>
-        <!-- Importar staples desde CSV (fix P-01) -->
+        <!-- Cartas de alta rotación — modal con selector de tier -->
         <div class="mt-3 pt-3 border-t border-slate-100">
-          <label class="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Poblar Staples desde CSV</label>
-          <p class="text-[9px] text-slate-400 mb-2">Sube un CSV Manabox para importar masivamente cartas como staples. Asigna el tier a todas.</p>
-          <select id="staple-import-tier" class="inp text-xs py-1 mb-2 w-full">
-            <option value="alta">⭐ Alta demanda</option>
-            <option value="muy_alta">🔥 Muy Alta demanda</option>
-            <option value="normal">📦 Normal</option>
-          </select>
-          <input type="file" id="staple-import-csv" accept=".csv" class="inp text-xs py-1 mb-2">
-          <button onclick="importStaplesBulk()"
-                  class="w-full text-[10px] font-bold px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition flex items-center justify-center gap-1.5">
-            <i class="fas fa-upload text-[9px]"></i> Importar Staples
+          <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Cartas de alta rotación</p>
+          <p class="text-[9px] text-slate-400 mb-2">Define qué cartas comprás siempre. El nivel controla el stock mínimo objetivo.</p>
+          <button onclick="openImportStaplesModal()"
+                  class="w-full text-[11px] font-bold px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition flex items-center justify-center gap-2">
+            <i class="fas fa-file-import"></i> Cargar lista de cartas prioritarias
           </button>
           <p id="staple-import-result" class="text-[10px] mt-2 text-slate-500 hidden"></p>
         </div>
       </div>
 
-      <!-- Bulk import modal trigger + SF CSV -->
-      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow space-y-3">
-        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Importación / Exportación</div>
-        <div class="flex gap-2 flex-wrap">
+      <!-- Herramientas de catálogo — botones descriptivos -->
+      <div class="bg-white rounded-2xl border border-slate-100 p-4 card-shadow space-y-2">
+        <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Herramientas de catálogo</p>
+
+        <button onclick="syncCatalog()"
+                class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-orange-50 hover:border-orange-200 transition flex items-center gap-3 group">
+          <span class="w-7 h-7 rounded-lg bg-orange-50 group-hover:bg-orange-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-rotate-right text-orange-500 text-[11px]"></i>
+          </span>
           <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">Bulk CSV Jumpseller</label>
-            <input type="file" id="bulk-csv" accept=".csv" class="inp text-xs py-1.5">
+            <div class="text-[12px] font-bold text-slate-800">Sincronizar catálogo con Jumpseller</div>
+            <div class="text-[9px] text-slate-400 mt-0.5">Actualiza productos, stock y precios desde tu tienda</div>
           </div>
+        </button>
+
+        <button onclick="exportManaboxCSV()"
+                class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-green-50 hover:border-green-200 transition flex items-center gap-3 group">
+          <span class="w-7 h-7 rounded-lg bg-green-50 group-hover:bg-green-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-file-arrow-down text-green-600 text-[11px]"></i>
+          </span>
           <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">CSV con Scryfall IDs</label>
-            <input type="file" id="sf-csv" accept=".csv" class="inp text-xs py-1.5">
+            <div class="text-[12px] font-bold text-slate-800">Exportar inventario como CSV Manabox</div>
+            <div class="text-[9px] text-slate-400 mt-0.5">Descarga tu stock en formato compatible con Manabox</div>
           </div>
+        </button>
+
+        <button onclick="openScryfallCSVModal()"
+                class="w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-purple-50 hover:border-purple-200 transition flex items-center gap-3 group">
+          <span class="w-7 h-7 rounded-lg bg-purple-50 group-hover:bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-fingerprint text-purple-500 text-[11px]"></i>
+          </span>
           <div>
-            <label class="text-[10px] font-bold text-slate-500 block mb-1">Sync desde CSV</label>
-            <input type="file" id="sync-csv" accept=".csv" class="inp text-xs py-1.5">
+            <div class="text-[12px] font-bold text-slate-800">Vincular IDs de Scryfall desde CSV</div>
+            <div class="text-[9px] text-slate-400 mt-0.5">Sube un CSV de Manabox para asociar UUIDs al catálogo</div>
           </div>
-        </div>
+        </button>
+
+        <!-- file inputs ocultos — activados desde modales -->
+        <input type="file" id="bulk-csv"        accept=".csv" class="hidden">
+        <input type="file" id="sf-csv"          accept=".csv" class="hidden">
+        <input type="file" id="staple-import-csv" accept=".csv" class="hidden">
+        <!-- sync-csv existe en el modal de syncCatalog — no duplicar aquí -->
+        <select id="staple-import-tier" class="hidden">
+          <option value="alta">alta</option>
+          <option value="muy_alta">muy_alta</option>
+          <option value="normal">normal</option>
+        </select>
       </div>
 
     </div><!-- /panel-catalogo -->
@@ -1618,6 +1642,156 @@ async function importStaplesBulk() {
     resultEl.className = 'text-[10px] mt-2 text-red-600 font-bold';
     showToast('Error al importar', 'error');
   }
+}
+
+// ── Modal: cargar lista de cartas prioritarias (reemplaza file selector directo) ──
+// Abre un SweetAlert2 con selector de tier + file input — más claro que los inputs raw
+async function openImportStaplesModal() {
+  const { value: result } = await Swal.fire({
+    title: '📋 Cargar cartas prioritarias',
+    html: `
+      <p style="font-size:13px;color:#64748b;margin-bottom:16px;line-height:1.6">
+        Sube un CSV exportado desde <strong>Manabox</strong>.<br>
+        Todas las cartas del archivo se marcarán como cartas que<br>
+        <strong>siempre comprás</strong> con el nivel de demanda que elijas.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:8px">
+            Nivel de demanda para todas las cartas
+          </label>
+          <div style="display:flex;gap:8px;justify-content:center" id="imp-tier-btns">
+            <button data-tier="normal" onclick="selectImpTier(this)"
+              style="flex:1;padding:10px;border-radius:10px;font-size:12px;font-weight:700;border:2px solid #e2e8f0;background:#f8fafc;color:#475569;cursor:pointer">
+              📦 Normal
+            </button>
+            <button data-tier="alta" onclick="selectImpTier(this)"
+              style="flex:1;padding:10px;border-radius:10px;font-size:12px;font-weight:700;border:2px solid #f59e0b;background:#fffbeb;color:#92400e;cursor:pointer">
+              ⭐ Alta demanda
+            </button>
+            <button data-tier="muy_alta" onclick="selectImpTier(this)"
+              style="flex:1;padding:10px;border-radius:10px;font-size:12px;font-weight:700;border:2px solid #ef4444;background:#fef2f2;color:#991b1b;cursor:pointer">
+              🔥 Muy Alta
+            </button>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">
+            Archivo CSV de Manabox
+          </label>
+          <input type="file" id="modal-staple-csv" accept=".csv"
+            style="width:100%;padding:8px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12px;color:#475569">
+        </div>
+      </div>`,
+    confirmButtonText: 'Importar',
+    confirmButtonColor: '#d97706',
+    showCancelButton: true,
+    cancelButtonText: 'Cancelar',
+    preConfirm: () => {
+      const tier = document.querySelector('#imp-tier-btns [data-tier].sel-tier')?.dataset.tier || 'alta';
+      const file = document.getElementById('modal-staple-csv').files[0];
+      if (!file) { Swal.showValidationMessage('Selecciona un archivo CSV'); return false; }
+      return { tier, file };
+    },
+    didOpen: () => {
+      // Pre-seleccionar "Alta demanda" como default
+      const btn = document.querySelector('#imp-tier-btns [data-tier="alta"]');
+      if (btn) selectImpTier(btn);
+    }
+  });
+  if (!result) return;
+
+  const { tier, file } = result;
+  const resultEl = document.getElementById('staple-import-result');
+  resultEl.textContent = 'Importando...';
+  resultEl.className = 'text-[10px] mt-2 text-slate-500';
+  resultEl.classList.remove('hidden');
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetchWT(`${API}/api/admin/staples/bulk?tier=${encodeURIComponent(tier)}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${TOKEN}` },
+      body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(parseApiError(d, 'Error'));
+    resultEl.textContent = `✅ Nuevas: ${d.inserted} · Actualizadas: ${d.updated} · Omitidas: ${d.skipped}`;
+    resultEl.className = 'text-[10px] mt-2 text-emerald-700 font-bold';
+    showToast(`✅ ${d.inserted} cartas prioritarias cargadas`, 'success');
+    setTimeout(checkStaplesStatus, 800);
+  } catch(e) {
+    resultEl.textContent = `❌ ${e.message}`;
+    resultEl.className = 'text-[10px] mt-2 text-red-600 font-bold';
+    showToast('Error al importar', 'error');
+  }
+}
+
+function selectImpTier(btn) {
+  document.querySelectorAll('#imp-tier-btns [data-tier]').forEach(b => {
+    b.classList.remove('sel-tier');
+    b.style.borderColor = '#e2e8f0';
+    b.style.background  = '#f8fafc';
+    b.style.color       = '#475569';
+  });
+  btn.classList.add('sel-tier');
+  const colors = { normal: ['#e2e8f0','#f1f5f9','#1e293b'], alta: ['#f59e0b','#fffbeb','#92400e'], muy_alta: ['#ef4444','#fef2f2','#991b1b'] };
+  const [border, bg, color] = colors[btn.dataset.tier] || colors.alta;
+  btn.style.borderColor = border;
+  btn.style.background  = bg;
+  btn.style.color       = color;
+}
+
+// ── Modal: vincular Scryfall IDs desde CSV ────────────────────────────────────
+async function openScryfallCSVModal() {
+  const { value: file } = await Swal.fire({
+    title: '🔬 Vincular IDs de Scryfall',
+    html: `
+      <p style="font-size:13px;color:#64748b;margin-bottom:14px;line-height:1.6">
+        Sube un CSV de Manabox que contenga la columna <strong>Scryfall ID</strong>.<br>
+        Los UUIDs se vincularán automáticamente a las cartas del catálogo.
+      </p>
+      <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;font-size:11px;color:#6d28d9;margin-bottom:14px">
+        <i class="fas fa-info-circle"></i>
+        Esto mejora la precisión del análisis de cartas en la Buylist.
+      </div>
+      <input type="file" id="sf-csv-modal" accept=".csv"
+        style="width:100%;padding:8px;background:#f8fafc;border:1px dashed #a78bfa;border-radius:8px;font-size:12px;color:#475569">`,
+    confirmButtonText: 'Vincular IDs',
+    confirmButtonColor: '#7c3aed',
+    showCancelButton: true,
+    cancelButtonText: 'Cancelar',
+    preConfirm: () => {
+      const file = document.getElementById('sf-csv-modal').files[0];
+      if (!file) { Swal.showValidationMessage('Selecciona un archivo CSV'); return false; }
+      return file;
+    }
+  });
+  if (!file) return;
+
+  const form = new FormData();
+  form.append('file', file);
+  Swal.fire({ title: 'Vinculando IDs…', allowOutsideClick: false, showConfirmButton: false,
+    didOpen: () => Swal.showLoading() });
+  try {
+    const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${TOKEN}` },
+      body: form,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(parseApiError(d, 'Error'));
+    Swal.fire({
+      icon: 'success', title: '✅ IDs vinculados',
+      html: `<div style="font-size:13px;color:#64748b">
+        <strong style="color:#1e293b">${d.phase2_sf_added || 0}</strong> IDs de Scryfall añadidos al catálogo
+      </div>`,
+      confirmButtonColor: '#7c3aed',
+    });
+    catalogLoaded = false;
+    loadCatalog();
+  } catch(e) { Swal.fire('Error', e.message, 'error'); }
 }
 </script>
 </body>
