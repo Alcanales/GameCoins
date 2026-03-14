@@ -435,7 +435,9 @@
 </div><!-- /app -->
 
 <script>
-const API = "https://gamecoins.onrender.com";
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : 'https://gamecoins.onrender.com';
 let TOKEN = null;
 let lastResults = [];
 
@@ -527,7 +529,7 @@ async function syncCache() {
   try {
     const r = await fetchWT(`${API}/api/admin/warmup_cache`, { method: 'POST', headers: ah() });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
+    if (!r.ok) throw new Error(parseApiError(d, 'Error'));
     showToast(`✅ ${d.cards_loaded} cartas cargadas — ${d.total_stock} u. en stock`);
     checkCacheStatus();
     // Re-ejecutar búsqueda con datos frescos
@@ -849,7 +851,7 @@ async function startEnrich(reprocess = false) {
     const r = await fetchWT(`${API}/api/admin/catalog/enrich_scryfall`,
       { method: 'POST', headers: ah() });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
+    if (!r.ok) throw new Error(parseApiError(d, 'Error'));
 
     if (d.status === 'already_running') {
       showToast('⚠️ Ya hay un proceso en curso', 'error');
@@ -1145,17 +1147,19 @@ async function syncCatalog() {
     didOpen: () => Swal.showLoading() });
 
   try {
-    const form = new FormData();
-    if (uploadCsv) form.append('file', uploadCsv);
-
-    // Si no hay CSV, enviar como GET-like con form vacío
-    const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
+    // Si hay CSV subir como multipart, si no enviar sin body (endpoint acepta ambos)
+    const fetchOpts = {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}` },
-      body: form,
-    });
+    };
+    if (uploadCsv) {
+      const form = new FormData();
+      form.append('file', uploadCsv);
+      fetchOpts.body = form;
+    }
+    const r = await fetchWT(`${API}/api/admin/catalog/sync`, fetchOpts);
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error en sync');
+    if (!r.ok) throw new Error(parseApiError(d, 'Error en sync'));
 
     Swal.fire({
       icon: 'success', title: '✅ Catálogo sincronizado',
@@ -1201,7 +1205,7 @@ async function addToCatalogSync(canonical_key, displayName) {
     const r = await fetchWT(`${API}/api/admin/catalog/sync`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${TOKEN}` }, body: form });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error');
+    if (!r.ok) throw new Error(parseApiError(d, 'Error'));
     showToast(`✅ ${d.phase2_sf_added} Scryfall IDs vinculados`);
     catalogLoaded = false;
     loadCatalog();
@@ -1449,7 +1453,7 @@ async function exportManaboxCSV() {
     const r = await fetchWT(url, { headers: ah() });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `Error ${r.status}`);
+      throw new Error(parseApiError(err, `Error ${r.status}`));
     }
 
     const rows = r.headers.get('X-Rows-Written') || '?';
@@ -1603,7 +1607,7 @@ async function importStaplesBulk() {
       body: fd,
     });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || 'Error en el servidor');
+    if (!r.ok) throw new Error(parseApiError(d, 'Error en el servidor'));
     resultEl.textContent = `✅ Insertas: ${d.inserted} · Actualizadas: ${d.updated} · Omitidas: ${d.skipped}`;
     resultEl.className = 'text-[10px] mt-2 text-emerald-700 font-bold';
     showToast(`${d.inserted} staples nuevos importados`, 'success');

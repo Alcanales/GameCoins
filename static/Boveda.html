@@ -78,7 +78,7 @@
         <div class="bg-white p-4 rounded-xl border border-slate-200 card-shadow mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
             <div class="relative w-full md:w-96">
                 <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400"><i class="fas fa-search"></i></div>
-                <input type="text" id="search-input" onkeyup="if(event.key==='Enter') load()" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre o email...">
+                <input type="text" id="search-input" oninput="gqDebounceSearch()" onkeydown="if(event.key==='Escape'){this.value='';load();}" class="input-clean w-full rounded-lg pl-10 pr-4 py-2.5 text-sm" placeholder="Buscar por nombre, email..." autocomplete="off">
             </div>
             <div class="flex w-full md:w-auto gap-3 items-center">
                 <select id="filter-mode" onchange="load()" class="input-clean rounded-lg py-2.5 px-3 text-sm font-bold text-slate-600 bg-slate-50 cursor-pointer">
@@ -99,8 +99,12 @@
                 <div class="col-span-2 text-center">Acciones</div>
             </div>
             <div id="user-table" class="divide-y divide-slate-100 max-h-[560px] overflow-y-auto"></div>
-            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
-                Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500 space-y-1">
+                <div>Mostrando <span id="results-count" class="font-bold text-slate-800">0</span> resultados</div>
+                <div id="has-more-banner" class="hidden text-amber-700 font-semibold bg-amber-50 border border-amber-200 rounded-lg px-3 py-1 inline-block">
+                    <i class="fas fa-exclamation-triangle mr-1 text-xs"></i>
+                    Hay <span id="matched-count" class="font-black">0</span> coincidencias — refiná la búsqueda para ver todas
+                </div>
             </div>
         </div>
     </div>
@@ -140,7 +144,9 @@
 
 </div>
 <script>
-const API = "https://gamecoins.onrender.com";
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : 'https://gamecoins.onrender.com';
 let authToken = null;
 let allOrders = [];
 let orderFilter = 'all';
@@ -228,6 +234,13 @@ async function showCanjeHistory(email) {
         });
     } catch(e) { Swal.fire('Error', 'No se pudo cargar el historial.', 'error'); }
 }
+// ── Debounce para búsqueda en tiempo real ─────────────────────────────────────
+let _searchTimer = null;
+function gqDebounceSearch() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => load(), 300);  // 300ms tras dejar de escribir
+}
+
 // ── QuestPoints ───────────────────────────────────────────────────────────────
 async function load() {
     if (!authToken) return;
@@ -235,7 +248,7 @@ async function load() {
     const mode   = document.getElementById('filter-mode').value;
     document.getElementById('user-table').innerHTML = '<div class="p-8 text-center text-slate-400 italic">Cargando datos...</div>';
     try {
-        let url = `${API}/admin/users?limit=100`;
+        let url = `${API}/admin/users?limit=50`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (mode === 'balance') url += `&only_balance=true`;
         const res = await fetch(url, { headers: authH() });
@@ -263,9 +276,10 @@ async function load() {
 
             data.users.forEach(u => {
                 const displayName = (u.display_name && u.display_name.trim()) ? u.display_name.trim() : null;
-                const nameHtml    = displayName
-                    ? `<span>${displayName}</span>`
-                    : '<i class="text-slate-400">Sin nombre</i>';
+                // Nota: display_name prioriza nombre de dirección de envío (via sync Jumpseller)
+                const nameHtml = displayName
+                    ? `<span class="text-slate-700" title="Nombre de dirección de envío">${displayName}</span>`
+                    : '<i class="text-slate-400 text-xs">Sin nombre</i>';
                 const initials = displayName
                     ? displayName.split(/\s+/).map(w => w[0]).join('').toUpperCase().substring(0,2)
                     : u.email.substring(0,2).toUpperCase();
@@ -317,6 +331,16 @@ async function load() {
         document.getElementById('stat-pts').innerText      = data.totalPointsInVault.toLocaleString();
         document.getElementById('stat-redeemed').innerText = '$' + data.totalRedeemed.toLocaleString();
         document.getElementById('results-count').innerText = data.users.length;
+
+        // Banner "hay más resultados"
+        const moreBanner  = document.getElementById('has-more-banner');
+        const matchedEl   = document.getElementById('matched-count');
+        if (data.hasMore && moreBanner && matchedEl) {
+            matchedEl.textContent = (data.matchedCount || 0).toLocaleString();
+            moreBanner.classList.remove('hidden');
+        } else if (moreBanner) {
+            moreBanner.classList.add('hidden');
+        }
     } catch(e) { console.error(e); }
 }
 

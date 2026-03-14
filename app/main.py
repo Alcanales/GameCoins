@@ -2001,12 +2001,9 @@ async def catalog_export_manabox(
     js_stock   = await _fetch_js_stock_cached()
     staple_map = _get_staple_map(db)
 
-    # Obtener scryfall_ids del catálogo para enriquecer el export
-    catalog_map: dict[str, "CardCatalog"] = {}
-    try:
-        catalog_map = {r.name_normalized: r for r in db.query(CardCatalog).all()}
-    except Exception:
-        pass
+    # Obtener scryfall_ids del catálogo — usar _get_catalog_map que devuelve dicts
+    # (no objetos ORM) para consistencia con el resto de la app
+    catalog_map = _get_catalog_map(db)   # {canonical → dict con scryfall_ids, js_product_ids, etc.}
 
     # Columnas en el orden exacto del export de Manabox
     MANABOX_COLS = [
@@ -2040,7 +2037,7 @@ async def catalog_export_manabox(
 
         # Intentar obtener Scryfall ID del catálogo
         cat_row    = catalog_map.get(canonical_key)
-        sf_ids     = cat_row.scryfall_ids if cat_row else []
+        sf_ids     = cat_row.get("scryfall_ids", []) if cat_row else []
         first_sf   = ""
         first_set  = ""
         first_setname = ""

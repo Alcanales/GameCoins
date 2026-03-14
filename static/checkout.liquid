@@ -42,7 +42,7 @@
         <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" defer></script>
         <script>
           const GC_API = "https://gamecoins.onrender.com";
-          const GC_EMAIL = "{{ customer.email }}";
+          const GC_EMAIL = "{{ customer.email | downcase | strip }}";
           const GC_TOKEN = "f98yWtYyIpvJDjLhnssu8ntuKfFSnA7NSft0NoaFZIE";
           let maxSaldoCart = 0;
 

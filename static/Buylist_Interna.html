@@ -41,8 +41,8 @@
     .tab-off:hover { background:#f1f5f9; color:#334155; }
     /* Table */
     .tbl-head,.tbl-row { display:grid; align-items:center; gap:8px; padding:9px 14px; }
-    .tbl-head { grid-template-columns:28px 1fr 90px 90px 90px 100px 58px 52px 80px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
-    .tbl-row  { grid-template-columns:28px 1fr 90px 90px 90px 100px 58px 52px 80px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
+    .tbl-head { grid-template-columns:28px 1fr 90px 72px 88px 88px 90px 52px 52px 80px; background:#f8fafc; border-bottom:2px solid #e2e8f0; }
+    .tbl-row  { grid-template-columns:28px 1fr 90px 72px 88px 88px 90px 52px 52px 80px; border-bottom:1px solid #f1f5f9; transition:background .1s; }
     .tbl-row:last-child { border-bottom:none; }
     .tbl-row:hover { background:#fafafa; }
     .row-full     { opacity:.42; }
@@ -192,9 +192,10 @@
         <div><input type="checkbox" id="chk-all" class="gq-check" onchange="toggleAll(this.checked)"></div>
         <div class="lbl">Carta</div>
         <div class="lbl text-center">Tier</div>
-        <div class="lbl text-right" style="color:#64748b">Ref. CK</div>
-        <div class="lbl text-right" style="color:#7c3aed">💎 QP</div>
-        <div class="lbl text-right" style="color:#16a34a" id="cash-hdr">💵 Cash</div>
+        <div class="lbl text-right" style="color:#64748b" title="Precio del CSV en USD">Ref. USD</div>
+        <div class="lbl text-right" style="color:#7c3aed">💎 QP/u</div>
+        <div class="lbl text-right" style="color:#16a34a" id="cash-hdr">💵 Cash/u</div>
+        <div class="lbl text-right" style="color:#0f172a" id="total-col-hd-i">Total</div>
         <div class="lbl text-center">Stock</div>
         <div class="lbl text-center">Cupo</div>
         <div class="lbl text-center">Cant.</div>
@@ -416,7 +417,7 @@ function renderAll(){
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:3px">
         <span style="font-weight:700;font-size:13px;color:#0f172a">${esc(c.name)}</span>
         ${isFoil?`<span class="gq-badge gb-foil">✨ ${c.foil}</span>`:''}
-        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho ×${c.stake_mult}</span>`:''}
+        ${c.is_estaca?`<span class="gq-badge gb-estaca">★ De Nicho</span>`:''}
         ${cond?`<span style="font-size:10px;font-weight:700;color:${condColor}">${cond}</span>`:''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${statusBadge}</div>
@@ -425,25 +426,38 @@ function renderAll(){
     // Col 3: tier
     const c3=`<div style="text-align:center">${tierBadge}</div>`;
 
-    // Col 4: Ref CK
+    // Col 4: Ref USD — precio del CSV (purchase price raw)
+    const refUsd = c.price_usd_raw ?? c.price_usd ?? 0;
     const c4=`<div class="col-desktop" style="text-align:right">
-      <div style="font-size:12px;font-weight:700;color:#475569">${fmtUSD(c.price_usd_raw)}</div>
-      ${c.is_estaca?`<div style="font-size:9px;color:#94a3b8">→ ${fmtUSD(c.price_usd)} · <span style="color:#7c3aed">${{csv:'CSV',cardkingdom:'CK',fallback_tipo:'tipo'}[c.nicho_base]||''}</span></div>`:''}
+      <div style="font-size:12px;font-weight:700;color:#475569">$${refUsd.toFixed(2)}</div>
+      ${c.is_estaca
+        ? `<div style="font-size:9px;color:#b45309;margin-top:1px">De Nicho ×${c.stake_mult??1.5}</div>`
+        : `<div style="font-size:9px;color:#94a3b8;margin-top:1px">USD</div>`
+      }
     </div>`;
 
-    // Col 5: QP
+    // Col 5: QP por unidad
     const c5=`<div class="col-desktop" style="text-align:right">
       <div style="font-weight:900;font-size:12px;color:#7c3aed" id="pqp-${idx}">
-        ${canBuy?fmtCLP(c.price_credito*maxQty):'—'}
+        ${canBuy?fmtCLP(c.price_credito):'—'}
       </div>
+      ${canBuy?`<div style="font-size:9px;color:#94a3b8;margin-top:1px">/ u.</div>`:''}
     </div>`;
 
-    // Col 6: Cash
+    // Col 6: Cash por unidad
     const c6=`<div class="col-desktop" style="text-align:right" id="pcash-wrap-${idx}">
       <div style="font-weight:700;font-size:12px;color:#16a34a" id="pcs-${idx}">
-        ${canBuy&&cashEnabled?fmtCLP(c.price_cash*maxQty):'—'}
+        ${canBuy&&cashEnabled?fmtCLP(c.price_cash):'—'}
       </div>
+      ${canBuy&&cashEnabled?`<div style="font-size:9px;color:#94a3b8;margin-top:1px">/ u.</div>`:''}
     </div>`;
+
+    // Col Total — valor × cantidad según modo de pago activo
+    const initTot = payMode==='cash' ? c.price_cash*maxQty : c.price_credito*maxQty;
+    const c_total=canBuy?`<div style="text-align:right">
+      <div style="font-weight:900;font-size:12px;color:#0f172a" id="ptot-${idx}">${fmtCLP(initTot)}</div>
+      <div style="font-size:9px;color:#94a3b8;margin-top:1px" id="ptot-lbl-${idx}">× ${maxQty}</div>
+    </div>`:`<div></div>`;
 
     // Col 7: Stock JS
     const c7=`<div class="col-desktop" style="text-align:center">
@@ -470,7 +484,7 @@ function renderAll(){
       <div style="font-size:9px;color:#94a3b8">máx ${maxQty}</div>
     </div>`:`<div style="text-align:center;color:#94a3b8;font-size:12px">—</div>`;
 
-    div.innerHTML=c1+c2+c3+c4+c5+c6+c7+c8+c9;
+    div.innerHTML=c1+c2+c3+c4+c5+c6+c_total+c7+c8+c9;
     list.appendChild(div);
   });
 
@@ -500,6 +514,14 @@ function onQtyChange(idx){
   const ep=document.getElementById(`pqp-${idx}`), ec=document.getElementById(`pcs-${idx}`);
   if(ep) ep.textContent=fmtCLP(c.price_credito*v);
   if(ec) ec.textContent=fmtCLP(c.price_cash*v);
+  // Actualizar columna Total según modo de pago
+  const et=document.getElementById(`ptot-${idx}`);
+  const elbl=document.getElementById(`ptot-lbl-${idx}`);
+  if(et){
+    const totVal = payMode==='cash' ? c.price_cash*v : c.price_credito*v;
+    et.textContent=fmtCLP(totVal);
+    if(elbl) elbl.textContent=`× ${v}`;
+  }
   updateBar();
 }
 function recalcTotals(){
@@ -546,6 +568,20 @@ function selectPay(m){
   payMode=m;
   document.getElementById('pay-qp').className='pay-opt'+(m==='credito'?' sel-qp':'');
   document.getElementById('pay-cash').className='pay-opt'+(m==='cash'?' sel-cash':'');
+  // Actualizar header y columna Total para reflejar modo de pago
+  const hdr=document.getElementById('total-col-hd-i');
+  if(hdr) hdr.textContent = m==='cash' ? 'Total 💵' : 'Total 💎';
+  allCards.forEach((c,idx)=>{
+    const inp=document.getElementById(`qty-${idx}`);
+    const et=document.getElementById(`ptot-${idx}`);
+    const elbl=document.getElementById(`ptot-lbl-${idx}`);
+    if(!et) return;
+    const v=parseInt(inp?.value||1);
+    const totVal = m==='cash' ? c.price_cash*v : c.price_credito*v;
+    et.textContent=fmtCLP(totVal);
+    if(elbl) elbl.textContent=`× ${v}`;
+  });
+  updateBar();
 }
 
 // ── Cambiar tier ──────────────────────────────────────────────────

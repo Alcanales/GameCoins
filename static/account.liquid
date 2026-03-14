@@ -285,7 +285,8 @@ async function gqRedeemPoints() {
             },
             body: JSON.stringify({
                 email: GQ_EMAIL,
-                monto: cantidadSeleccionada
+                monto: cantidadSeleccionada,
+                cart_total: cantidadSeleccionada
             }),
             signal: _canjeCtrl.signal
         });
