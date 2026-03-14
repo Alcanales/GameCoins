@@ -1,3 +1,9 @@
+"""
+main.py — GameQuest API v5.5
+Cambios v5.5: foil/nicho pipeline definitivo, stock info privado, AbortController,
+              CORS Jumpseller, lru_cache 65536, imports de módulo, fixes de sesión,
+            email en TODAS las buylists.
+"""
 import re
 import io
 import csv
@@ -262,8 +268,15 @@ _enrich_lock: asyncio.Lock = asyncio.Lock()
 
 def _get_catalog_map(db) -> dict:
     """
-    Devuelve el catálogo (canonical → CardCatalog) desde RAM si está fresco.
+    Devuelve el catálogo (canonical → dict de datos) desde RAM si está fresco.
     También reconstruye _scryfall_map para lookup O(1) por Scryfall UUID.
+
+    FIX DetachedInstanceError DEFINITIVO:
+    Guarda DICTS con los datos necesarios, NO objetos ORM CardCatalog.
+    Los objetos ORM están ligados a la sesión db que los cargó — cuando esa
+    sesión se cierra (al terminar el request), quedan "detached" y cualquier
+    acceso posterior a sus atributos lanza DetachedInstanceError.
+    Un dict es un objeto Python normal, independiente de cualquier sesión.
     """
     global _catalog_cache, _catalog_cache_ts, _scryfall_map
     if _catalog_cache and time.monotonic() - _catalog_cache_ts < CATALOG_CACHE_TTL:
@@ -272,7 +285,18 @@ def _get_catalog_map(db) -> dict:
     cache: dict = {}
     sf_map: dict[str, str] = {}
     for r in rows:
-        cache[r.name_normalized] = r
+        # Serializar a dict — independiente de la sesión db
+        cache[r.name_normalized] = {
+            "id":               r.id,
+            "name_normalized":  r.name_normalized,
+            "name_display":     r.name_display,
+            "js_product_ids":   list(r.js_product_ids or []),
+            "js_variants":      list(r.js_variants    or []),
+            "scryfall_ids":     list(r.scryfall_ids   or []),
+            "total_stock":      r.total_stock or 0,
+            "tier":             getattr(r, "tier", None),  # via StapleCard join si existe
+            "last_synced":      r.last_synced,
+        }
         for sf_entry in (r.scryfall_ids or []):
             sid = sf_entry.get("scryfall_id") if isinstance(sf_entry, dict) else sf_entry
             if sid:
@@ -295,11 +319,11 @@ def _resolve_stock(canonical: str, js_stock: dict) -> dict:
     Siempre devuelve {"stock": int|None, "price": float, "variants": [...]}
     """
     entry = _catalog_cache.get(canonical)
-    if entry and entry.js_product_ids and _js_by_id:
+    if entry and entry.get("js_product_ids") and _js_by_id:
         total = 0
         best_price = 0.0
         variants = []
-        for pid in entry.js_product_ids:
+        for pid in entry["js_product_ids"]:
             v = _js_by_id.get(pid)
             if v:
                 total += v.get("stock", 0)
@@ -737,14 +761,24 @@ def _build_staple_map(staple_rows: list) -> dict:
       2. s.name_normalized        — para compatibilidad con registros en BD
          guardados antes de la normalización de apóstrofes (U+2019)
     Sin fallback O(n²): el doble-indexado lo cubre.
+
+    FIX DetachedInstanceError: guarda SimpleNamespace con datos primitivos,
+    no objetos ORM — los objetos ORM expiran cuando su sesión se cierra.
     """
+    from types import SimpleNamespace
     sm: dict = {}
     for s in staple_rows:
-        # Clave canónica fresca (garantiza apóstrofes normalizados)
-        sm[_canonical(s.name_display)] = s
-        # Clave tal como está en BD (puede ser pre-fix con U+2019)
+        # Serializar a objeto simple con atributos — compatible con srec.tier, srec.id, etc.
+        snap = SimpleNamespace(
+            id=s.id,
+            name_display=s.name_display,
+            name_normalized=s.name_normalized,
+            tier=s.tier,
+            min_stock_override=getattr(s, "min_stock_override", None),
+        )
+        sm[_canonical(s.name_display)] = snap
         if s.name_normalized not in sm:
-            sm[s.name_normalized] = s
+            sm[s.name_normalized] = snap
     return sm
 
 
