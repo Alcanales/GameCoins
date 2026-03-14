@@ -604,4 +604,7 @@ async function submitOrder(){
 function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
 function fmtUSD(n){return '$'+(n||0).toFixed(2)}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function show(id,v){const el=document.getElemen
+function show(id,v){const el=document.getElementById(id);if(el)el.style.display=v?'':'none';}
+</script>
+</body>
+</html>

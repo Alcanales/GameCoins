@@ -2018,7 +2018,18 @@ async def catalog_list(
 
     result_rows = []
     for r in rows:
-        srec      = staple_map.get(r.name_normalized)
+        # FIX: doble lookup cubre diferencias de normalización entre
+        # CardCatalog.name_normalized y StapleCard keys en staple_map
+        srec = (staple_map.get(r.name_normalized)
+                or staple_map.get(_canonical(r.name_display)))
+
+        # FIX: si el filtro tier está activo, el JOIN ya garantiza que la carta
+        # pertenece a ese tier. Usar tier del filtro como fallback si srec=None
+        # para que el badge sea consistente con el filtro aplicado.
+        tier_efectivo = (srec.tier if srec
+                         else tier if tier and tier not in ("all", "sin_tier")
+                         else "normal")
+
         live_data = _resolve_stock(r.name_normalized, js_stock)
         live_stk  = live_data.get("stock") if live_data else r.total_stock
 
@@ -2031,11 +2042,11 @@ async def catalog_list(
             "total_stock":     live_stk,
             "total_stock_db":  r.total_stock,
             "last_synced":     r.last_synced.isoformat() if r.last_synced else None,
-            "tier":            srec.tier      if srec else None,
-            "staple_id":       srec.id        if srec else None,
+            "tier":            tier_efectivo,
+            "staple_id":       srec.id if srec else None,
             "min_stock":       (srec.min_stock_override if srec and srec.min_stock_override
-                                else settings.MIN_STOCK_ALTA if srec and srec.tier == "alta"
-                                else settings.MIN_STOCK_NORMAL if srec else None),
+                                else settings.MIN_STOCK_ALTA   if tier_efectivo == "alta"
+                                else settings.MIN_STOCK_NORMAL),
         })
 
     return {

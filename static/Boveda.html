@@ -364,10 +364,29 @@ async function syncUsers() {
 
 async function adjust(email, op) {
     const isAdd = op === 'add';
-    const { value: amt } = await Swal.fire({ title: isAdd?'ABONAR':'DESCONTAR', html:`<p class="text-sm text-slate-500">${email}</p>`, input:'number', confirmButtonColor:isAdd?'#22c55e':'#ef4444', showCancelButton:true });
-    if (amt && parseInt(amt) > 0) {
-        await fetch(`${API}/admin/adjust_balance`, { method:'POST', headers:authH(), body:JSON.stringify({email, amount:parseInt(amt), operation:op}) });
+    const { value: amt } = await Swal.fire({
+        title: isAdd ? 'ABONAR' : 'DESCONTAR',
+        html: `<p class="text-sm text-slate-500 mb-2">Monto QP a ${isAdd?'agregar':'descontar'}:</p>
+               <input id="adj-amt" class="form-control" type="number" min="1" placeholder="Ej: 1000">`,
+        showCancelButton: true,
+        preConfirm: () => document.getElementById('adj-amt').value
+    });
+    const n = parseInt(amt, 10);
+    if (!amt || isNaN(n) || n <= 0) return;
+    try {
+        const r = await fetch(`${API}/admin/adjust_balance`, {
+            method: 'POST', headers: authH(),
+            body: JSON.stringify({ email, amount: n, operation: op })
+        });
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `Error ${r.status}`);
+        }
+        await Swal.fire({ icon:'success', title: isAdd ? `+${n} QP acreditados` : `-${n} QP descontados`,
+            timer: 2000, showConfirmButton: false });
         load();
+    } catch(e) {
+        Swal.fire('Error', e.message, 'error');
     }
 }
 

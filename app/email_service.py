@@ -445,6 +445,7 @@ async def send_public_buylist_store(
 async def send_public_buylist_both(
     vendor_email: str, rut: str, payment_pref: str,
     items: list, total_credito: float, total_cash: float, order_id: int,
+    csv_token: str = "",   # no se usa en esta función — reservado para compatibilidad
 ) -> dict:
     # Dos emails en paralelo:
     # 1. Al vendedor → resumen HTML (sin CSV)

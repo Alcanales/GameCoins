@@ -346,7 +346,7 @@
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Stock Total</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">Versiones Totales</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">SKUs</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Scryfall</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Demanda</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Ver</th>
             </tr>
           </thead>
@@ -441,8 +441,6 @@
         </button>
 
         <!-- file inputs ocultos — activados desde modales -->
-        <input type="file" id="bulk-csv"        accept=".csv" class="hidden">
-        <input type="file" id="sf-csv"          accept=".csv" class="hidden">
         <input type="file" id="staple-import-csv" accept=".csv" class="hidden">
         <!-- sync-csv existe en el modal de syncCatalog — no duplicar aquí -->
         <select id="staple-import-tier" class="hidden">
@@ -1310,7 +1308,7 @@ async function openBulkImport() {
       </p>
       <div style="display:flex;flex-direction:column;gap:10px">
         <label style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Tier para TODAS las cartas</label>
-        <div style="display:flex;gap:8px;justify-content:center" id="tier-btns">
+        <div style="display:flex;gap:8px;justify-content:center" id="bulk-tier-btns">
           <button data-tier="normal"   onclick="selectBulkTier(this)" 
             style="padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;border:2px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer">
             📦 Normal
@@ -1324,7 +1322,7 @@ async function openBulkImport() {
             🔥 Muy Alta
           </button>
         </div>
-        <p id="tier-hint" style="font-size:11px;color:#64748b;margin-top:4px">Selecciona un tier para continuar</p>
+        <p id="bulk-tier-hint" style="font-size:11px;color:#64748b;margin-top:4px">Selecciona un tier para continuar</p>
       </div>`,
     confirmButtonText: 'Siguiente →',
     showCancelButton: true,
@@ -1429,7 +1427,7 @@ function selectBulkTier(btn) {
   btn.style.opacity = '1';
   btn.style.transform = 'scale(1.05)';
   window._bulkTierSelected = btn.dataset.tier;
-  const hint = document.getElementById('tier-hint');
+  const hint = document.getElementById('bulk-tier-hint');
   if (hint) hint.textContent = `✅ Tier seleccionado: ${btn.dataset.tier}`;
 }
 
@@ -1592,8 +1590,8 @@ async function checkStaplesStatus() {
 // ── Función loadStaples — filtra la vista del catálogo por tier ───────────────
 function loadStaples(tier) {
   // Actualizar estado visual de los botones del sidebar
-  document.querySelectorAll('#tier-btns .tier-btn').forEach(b => b.classList.remove('active'));
-  const clicked = [...document.querySelectorAll('#tier-btns .tier-btn')]
+  document.querySelectorAll('#bulk-tier-btns .tier-btn').forEach(b => b.classList.remove('active'));
+  const clicked = [...document.querySelectorAll('#bulk-tier-btns .tier-btn')]
     .find(b => b.getAttribute('onclick')?.includes(`'${tier}'`));
   if (clicked) clicked.classList.add('active');
 
