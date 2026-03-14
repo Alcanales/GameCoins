@@ -318,7 +318,6 @@
         </div>
         <div class="flex gap-1 flex-wrap">
           <button onclick="setCatalogTierFilter('all')"    id="cf-all"    class="cf-btn active">Todas</button>
-          <button onclick="setCatalogTierFilter('sin_tier')" id="cf-sin"  class="cf-btn">Sin tier</button>
           <button onclick="setCatalogTierFilter('normal')"  id="cf-normal" class="cf-btn" style="color:#2563eb;border-color:#bfdbfe">📦 Normal</button>
           <button onclick="setCatalogTierFilter('alta')"    id="cf-alta"   class="cf-btn" style="color:#d97706;border-color:#fde68a">⭐ Alta</button>
           <button onclick="setCatalogTierFilter('muy_alta')" id="cf-muy"  class="cf-btn" style="color:#dc2626;border-color:#fecaca">🔥 Muy Alta</button>
@@ -344,8 +343,8 @@
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200">
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Carta</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Tier</th>
-              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">Stock</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Stock Total</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">Versiones Totales</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:right">SKUs</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Scryfall</th>
               <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;text-align:center">Ver</th>
@@ -1110,8 +1109,8 @@ function toggleExpand(idx) {
 
 function tierBadgeHtml(tier, stapleId, canonical, name) {
   const t = tier || null;
-  const cls = !t ? 'tier-none' : t === 'muy_alta' ? 'tier-muy' : t === 'alta' ? 'tier-alta' : 'tier-norm';
-  const lbl = !t ? '— sin tier' : t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : '📦 Normal';
+  const cls = !t === 'muy_alta' ? 'tier-muy' : t === 'alta' ? 'tier-alta' : 'tier-norm';
+  const lbl = !t === 'muy_alta' ? '🔥 Muy Alta' : t === 'alta' ? '⭐ Alta' : '📦 Normal';
   return `<span class="tier-badge ${cls}" onclick="openTierMenuCatalog('${esc(canonical)}','${esc(name)}',${stapleId||'null'})">${lbl}</span>`;
 }
 
@@ -1256,7 +1255,7 @@ function setCatalogTierFilter(tier) {
   catalogTierF = tier;
   catalogPage_ = 1;
   document.querySelectorAll('.cf-btn').forEach(b => b.classList.remove('active'));
-  const map = { all:'cf-all', sin_tier:'cf-sin', normal:'cf-normal', alta:'cf-alta', muy_alta:'cf-muy' };
+  const map = { all:'cf-all', normal:'cf-normal', alta:'cf-alta', muy_alta:'cf-muy' };
   document.getElementById(map[tier] || 'cf-all')?.classList.add('active');
   loadCatalog();
 }

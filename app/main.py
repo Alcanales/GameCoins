@@ -892,7 +892,18 @@ def _compute_card_price(
         is_nicho = False
 
     # ── Precio efectivo ───────────────────────────────────────────────────────
-    eff_usd  = (nicho_threshold or price_usd) if is_nicho else price_usd
+    # CORRECCIÓN DE LÓGICA:
+    # Cuando is_nicho=True la carta ES especial y tiene un precio alto en el CSV.
+    # Se le debe pagar su precio REAL (price_usd del CSV), no limitarla al threshold.
+    # El threshold solo sirve para IDENTIFICAR que es De Nicho, no para limitar el pago.
+    #
+    # Ejemplo correcto:
+    #   Scroll Rack foil: price_usd=$159.99, threshold=$18.72
+    #   is_nicho=True → eff_usd=$159.99 (pagar el precio real) → CLP $79,995
+    #
+    # Si is_nicho=False → eff_usd=price_usd (precio normal del CSV)
+    # En ambos casos eff_usd = price_usd — la diferencia es solo el badge De Nicho
+    eff_usd  = price_usd   # siempre pagar el precio real del CSV
     adjusted = round(eff_usd * _cond_mult(cond_raw), 4)
     return eff_usd, adjusted, is_nicho, base_origin
 
@@ -1597,8 +1608,16 @@ async def _commit_buylist_impl(
     db.commit()
     db.refresh(order)   # MAIN-03 FIX: garantizar order.id disponible (defensive)
 
+    # Token de descarga CSV — SHA256(order_id + STORE_TOKEN)[:16]
+    # Sin guardar nada extra en BD. Permite al admin descargar vía endpoint público.
+    import hashlib as _hl
+    csv_token = _hl.sha256(
+        f"{order.id}{settings.STORE_TOKEN}".encode()
+    ).hexdigest()[:16]
+
     # ── Emails en background — wrapper sync que corre la coroutine ──────────────
-    # BackgroundTask async — FastAPI lo ejecuta correctamente dentro del event loop
+    # EMAIL 1 (vendedor): resumen HTML sin CSV
+    # EMAIL 2 (tienda):   resumen HTML + CSV Manabox adjunto
     background_tasks.add_task(
         email_service.send_public_buylist_both,
         vendor_email  = req.email,
@@ -1608,6 +1627,7 @@ async def _commit_buylist_impl(
         total_credito = req.total_credito,
         total_cash    = req.total_cash,
         order_id      = order.id,
+        csv_token     = csv_token,
     )
 
     return {
@@ -3049,6 +3069,77 @@ def update_order_status(
     order.status = new_status
     db.commit()
     return {"status": "ok", "order_id": order_id, "new_status": new_status}
+
+
+@app.get("/api/admin/buylist_orders/{order_id}/csv", dependencies=[Depends(verify_admin)])
+def download_order_csv(order_id: int, db: Session = Depends(get_db)):
+    """
+    Genera y descarga el CSV de una orden de buylist.
+    No almacena nada extra en BD — genera el CSV en el momento desde los datos
+    ya guardados en buylist_orders.items.
+    """
+    from fastapi.responses import StreamingResponse as _SR
+    import csv as _csv, io as _io
+
+    order = db.query(BuylistOrder).filter(BuylistOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Orden no encontrada")
+
+    from . import email_service as _em
+    csv_bytes = _em._build_csv_bytes(
+        order.id, order.rut, order.email,
+        order.payment_preference,
+        order.items or [],
+        float(order.total_credito or 0),
+        float(order.total_cash or 0),
+    )
+    filename = f"buylist_{order.id}_{order.email.split('@')[0]}.csv"
+    return _SR(
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/public/buylist_orders/{order_id}/csv")
+def download_order_csv_public(
+    order_id: int,
+    token:     str,
+    db:        Session = Depends(get_db),
+):
+    """
+    Descarga el CSV de una orden pública con token de acceso (el order_id + hash).
+    Permite al vendedor descargar su propia cotización sin login admin.
+    El token es: primeros 8 chars del SHA256(order_id + STORE_TOKEN).
+    """
+    import hashlib
+    from fastapi.responses import StreamingResponse as _SR
+    from . import email_service as _em
+
+    expected = hashlib.sha256(
+        f"{order_id}{settings.STORE_TOKEN}".encode()
+    ).hexdigest()[:16]
+
+    if not secrets.compare_digest(token, expected):
+        raise HTTPException(403, "Token inválido")
+
+    order = db.query(BuylistOrder).filter(BuylistOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Orden no encontrada")
+
+    csv_bytes = _em._build_csv_bytes(
+        order.id, order.rut, order.email,
+        order.payment_preference,
+        order.items or [],
+        float(order.total_credito or 0),
+        float(order.total_cash or 0),
+    )
+    filename = f"cotizacion_gamequest_{order.id}.csv"
+    return _SR(
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # =====================================================================

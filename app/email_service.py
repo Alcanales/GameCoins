@@ -3,11 +3,14 @@ email_service.py — GameQuest v4.0
 Todas las funciones son async. SMTP corre en thread pool para no bloquear FastAPI.
 """
 import asyncio
+import csv
+import io
 import smtplib
 import logging
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from typing import List
 
 from .config import settings
@@ -19,7 +22,7 @@ SMTP_PORT = 587
 
 # ── Core: envío asíncrono (SMTP en thread pool, no bloquea event loop) ────────
 
-def _send_sync(to: str, subject: str, html_body: str) -> bool:
+def _send_sync(to: str, subject: str, html_body: str, attachments: list | None = None) -> bool:
     """
     Blocking SMTP — se llama desde run_in_executor.
 
@@ -31,13 +34,21 @@ def _send_sync(to: str, subject: str, html_body: str) -> bool:
       - OSError / TimeoutError:  fallo de red o timeout → reintentar
       - Otros errores (auth, dest inválido): no reintentar (no mejoran con el tiempo)
     Backoff: 5s entre intentos (no exponencial — Gmail no requiere esperas largas).
+
+    attachments: lista de dicts {"data": bytes, "filename": str, "mimetype": str}
     """
     import time
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")   # "mixed" para soportar attachments
     msg["Subject"] = subject
     msg["From"]    = f"GameQuest <{settings.SMTP_EMAIL}>"
     msg["To"]      = to
     msg.attach(MIMEText(html_body, "html"))
+
+    # Adjuntar archivos si hay
+    for att in (attachments or []):
+        part = MIMEApplication(att["data"], Name=att["filename"])
+        part["Content-Disposition"] = f'attachment; filename="{att["filename"]}"'
+        msg.attach(part)
 
     _RETRYABLE = (smtplib.SMTPServerDisconnected, TimeoutError)
     # NOTA: OSError era demasiado amplio — SMTPAuthenticationError hereda de OSError
@@ -86,13 +97,17 @@ def _send_sync(to: str, subject: str, html_body: str) -> bool:
     return False
 
 
-async def _send(to: str, subject: str, html_body: str) -> bool:
+async def _send(to: str, subject: str, html_body: str, attachments: list | None = None) -> bool:
     """Wrapper async: mueve SMTP al thread pool."""
     if not settings.SMTP_EMAIL or not settings.SMTP_PASSWORD:
         logger.warning("[EMAIL] SMTP no configurado — email omitido")
         return False
+    import functools
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _send_sync, to, subject, html_body)
+    return await loop.run_in_executor(
+        None,
+        functools.partial(_send_sync, to, subject, html_body, attachments)
+    )
 
 
 async def _send_both(
@@ -116,6 +131,114 @@ async def _send_both(
 
 
 # ── Base template ──────────────────────────────────────────────────────────────
+
+
+# ── CSV de cotización — para adjuntar al email de la tienda ──────────────────
+
+def _build_csv_bytes(
+    order_id: int, rut: str, vendor_email: str,
+    payment_pref: str, items: list,
+    total_credito: float, total_cash: float,
+) -> bytes:
+    """
+    Genera un CSV en formato MANABOX compatible.
+
+    Columnas Manabox (orden exacto del export oficial):
+    Name | Set code | Set name | Collector number | Foil | Rarity | Quantity |
+    ManaBox ID | Scryfall ID | Purchase price | Misprint | Altered | Condition |
+    Language | Purchase price currency
+
+    Columnas adicionales GameQuest (al final):
+    Orden GQ | RUT Vendedor | Email Vendedor | Modalidad Pago |
+    Precio Credito CLP | Precio Cash CLP | De Nicho
+
+    Se adjunta solo al email interno de la tienda.
+    El endpoint /api/admin/buylist_orders/{id}/csv también usa esta función.
+    """
+    # Mapeos Manabox
+    foil_manabox = {"foil": "foil", "etched": "etched", "normal": "normal"}
+    cond_manabox = {
+        "near_mint":          "near_mint",
+        "lightly_played":     "lightly_played",
+        "moderately_played":  "moderately_played",
+        "heavily_played":     "heavily_played",
+        "damaged":            "damaged",
+    }
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\r\n")
+
+    # Encabezado — columnas Manabox primero, luego columnas GQ
+    writer.writerow([
+        # ── Manabox standard ──────────────────────────────
+        "Name",
+        "Set code",
+        "Set name",
+        "Collector number",
+        "Foil",
+        "Rarity",
+        "Quantity",
+        "ManaBox ID",
+        "Scryfall ID",
+        "Purchase price",
+        "Misprint",
+        "Altered",
+        "Condition",
+        "Language",
+        "Purchase price currency",
+        # ── GameQuest (referencia interna) ────────────────
+        "Orden GQ",
+        "RUT Vendedor",
+        "Email Vendedor",
+        "Modalidad Pago",
+        "Precio Credito CLP",
+        "Precio Cash CLP",
+        "De Nicho",
+    ])
+
+    for it in items:
+        foil    = foil_manabox.get(it.get("foil", "normal"), "normal")
+        cond    = cond_manabox.get(it.get("condition", "near_mint"), "near_mint")
+        is_n    = "★ De Nicho" if it.get("is_estaca") else ""
+        # precio en USD como número limpio (Manabox espera número, no string $)
+        price_usd = it.get("price_usd") or 0
+        scryfall  = it.get("scryfall_id") or ""
+        version   = (it.get("version") or "").strip()
+
+        writer.writerow([
+            # ── Manabox ──
+            it.get("name", ""),          # Name
+            "",                           # Set code  (no disponible en la cotización)
+            "",                           # Set name
+            "",                           # Collector number
+            foil,                         # Foil
+            "",                           # Rarity
+            it.get("qty", 1),            # Quantity
+            "",                           # ManaBox ID
+            scryfall,                     # Scryfall ID (si viene del CSV del vendedor)
+            round(price_usd, 2),         # Purchase price (USD)
+            False,                        # Misprint
+            False,                        # Altered
+            cond,                         # Condition
+            "es",                         # Language (default español)
+            "USD",                        # Purchase price currency
+            # ── GameQuest ──
+            f"#{order_id}",
+            rut,
+            vendor_email,
+            payment_pref.upper(),
+            it.get("price_credito", 0),
+            it.get("price_cash", 0),
+            is_n,
+        ])
+
+    # Fila de totales al final (fuera de las cartas para no romper importación Manabox)
+    writer.writerow([])
+    writer.writerow([""] * 15 + [f"#{order_id}", "", "", "TOTAL CRÉDITO CLP", int(total_credito), "", ""])
+    writer.writerow([""] * 15 + [f"#{order_id}", "", "", "TOTAL CASH CLP",    "", int(total_cash), ""])
+
+    return buf.getvalue().encode("utf-8-sig")  # BOM para Excel/Numbers en español
+
 
 def _base(title: str, subtitle: str, body: str) -> str:
     return f"""<!DOCTYPE html>
@@ -247,6 +370,11 @@ async def send_public_buylist_vendor(
     vendor_email: str, rut: str, payment_pref: str,
     items: list, total_credito: float, total_cash: float, order_id: int,
 ) -> bool:
+    """
+    Email de confirmación al vendedor.
+    SOLO incluye el resumen HTML — sin link ni adjunto CSV.
+    El CSV Manabox va únicamente al email interno de la tienda.
+    """
     body = f"""
     <p>Hola,</p>
     <p>Recibimos tu cotización Buylist Quest. Aquí está tu resumen:</p>
@@ -259,14 +387,17 @@ async def send_public_buylist_vendor(
     {_items_table(items)}
     {_totals_table(total_credito, total_cash)}
     <div class="alert-box alert-warn">
-      <strong>📋 Nota:</strong> Los precios son referenciales y no constituyen una obligación de compra. Las cartas se evalúan presencialmente en Near Mint — foil y condición pueden ajustarse en inspección. Nos contactaremos contigo para coordinar.
+      <strong>📋 Nota:</strong> Los precios son referenciales y no constituyen una obligación de compra.
+      Las cartas se evalúan presencialmente en Near Mint — foil y condición pueden ajustarse en inspección.
+      Nos contactaremos contigo para coordinar.
     </div>
     <p>Te contactaremos pronto. ¡Gracias por elegir GameQuest! 🎮</p>"""
 
     return await _send(
         vendor_email,
         f"✅ GameQuest — Cotización Buylist #{order_id} Recibida",
-        _base("Cotización Recibida — Sin Compromiso", f"Orden #{order_id} · {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
+        _base("Cotización Recibida — Sin Compromiso",
+              f"Orden #{order_id} · {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
     )
 
 
@@ -292,10 +423,20 @@ async def send_public_buylist_store(
       para coordinar la revisión de las cartas.
     </div>"""
 
+    # Generar CSV adjunto con el detalle completo
+    csv_bytes = _build_csv_bytes(order_id, rut, vendor_email, payment_pref,
+                                  items, total_credito, total_cash)
+    attachments = [{
+        "data":     csv_bytes,
+        "filename": f"buylist_{order_id}_{vendor_email.split('@')[0]}.csv",
+        "mimetype": "text/csv",
+    }]
+
     return await _send(
         settings.TARGET_EMAIL,
         f"📋 Buylist #{order_id} — {vendor_email} [{payment_pref.upper()}] ${total_cash:,.0f} CLP",
         _base("Nueva Cotización Buylist Pública", f"Recibida {datetime.now().strftime('%d/%m/%Y %H:%M')}", body),
+        attachments=attachments,
     )
 
 
@@ -305,6 +446,9 @@ async def send_public_buylist_both(
     vendor_email: str, rut: str, payment_pref: str,
     items: list, total_credito: float, total_cash: float, order_id: int,
 ) -> dict:
+    # Dos emails en paralelo:
+    # 1. Al vendedor → resumen HTML (sin CSV)
+    # 2. A la tienda → resumen HTML + CSV Manabox adjunto
     return await asyncio.gather(
         send_public_buylist_vendor(vendor_email, rut, payment_pref, items, total_credito, total_cash, order_id),
         send_public_buylist_store(vendor_email, rut, payment_pref, items, total_credito, total_cash, order_id),

@@ -97,7 +97,7 @@
       <div style="font-size:2.5rem;margin-bottom:12px">🔒</div>
       <h4 style="font-weight:900;color:#0f172a;font-size:1.1rem;margin-bottom:8px">Buylist Temporalmente Cerrada</h4>
       <p style="font-size:13px;color:#64748b;margin-bottom:16px">Estamos evaluando cotizaciones anteriores o reponiendo stock. ¡Vuelve pronto!</p>
-      <a href="mailto:contacto@gamequest.cl" class="btn-out no-underline" style="text-decoration:none;display:inline-flex"><i class="fas fa-envelope"></i>contacto@gamequest.cl</a>
+      <a href="/cdn-cgi/l/email-protection#6e0d01001a0f0d1a012e090f030b1f1b0b1d1a400d02" class="btn-out no-underline" style="text-decoration:none;display:inline-flex"><i class="fas fa-envelope"></i><span class="__cf_email__" data-cfemail="7a1915140e1b190e153a1d1b171f0b0f1f090e541916">[email&#160;protected]</span></a>
     </div>
   </div>
 </div>
@@ -116,7 +116,7 @@
     <div class="lbl" style="margin-bottom:12px"><i class="fas fa-scroll mr-2 text-slate-400"></i>Normas de compra</div>
     <div class="norma"><div class="norma-n">1</div><div>Compramos <strong>NM y LP</strong>. MP/HP/DMG con descuento automático según condición.</div></div>
     <div class="norma"><div class="norma-n">2</div><div>Cada carta tiene un <strong>límite de unidades</strong>. No compramos más allá del límite indicado.</div></div>
-    <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ★ De Nicho tienen multiplicador especial.</div></div>
+    <div class="norma"><div class="norma-n">3</div><div>Precios en <strong>CLP</strong>, calculados sobre referencia Card Kingdom USD. Las cartas ★ De Nicho tienen precio de referencia especial.</div></div>
     <div class="norma"><div class="norma-n">4</div><div>Al confirmar recibirás un email de respaldo. Cotización válida <strong>48 horas</strong>. Coordina entrega en tienda.</div></div>
   </div>
 
@@ -264,7 +264,7 @@
   </div>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
   ? 'http://localhost:8000' : 'https://gamecoins.onrender.com';
 
@@ -604,9 +604,4 @@ async function submitOrder(){
 function fmtCLP(n){return '$'+Math.round(n||0).toLocaleString('es-CL')}
 function fmtUSD(n){return '$'+(n||0).toFixed(2)}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function show(id,v){const el=document.getElementById(id);if(el)el.style.display=v?'':'none'}
-function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v}
-function swal(t,txt,icon){Swal.fire({title:t,text:txt,icon,confirmButtonColor:'#0f172a'})}
-</script>
-</body>
-</html>
+function show(id,v){const el=document.getElemen
