@@ -3224,7 +3224,7 @@ async def _bg_burn_coupons(payload_str: str):
 #
 # FAIL-SAFE: si el usuario no existe en Gampoint, se loggea warning y se omite.
 # Esto puede pasar si el cliente nunca entró a la bóveda y no fue sincronizado.
-_CASHBACK_RATE = Decimal("0.02")   # 2%
+_CASHBACK_RATE = Decimal("0.00")   # 2%
 
 # ── H-03: Núcleo síncrono — corre en thread pool vía run_in_executor ──────────
 def _sync_cashback(payload_str: str) -> None:
